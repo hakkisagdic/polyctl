@@ -263,10 +263,18 @@ offers four read-only OpenAI function tools over the unpacked candidate (`read`,
 `list`) and loops while the model's answer carries `tool_calls`: every path is relative to `DIR` and
 resolved inside it (an absolute path, a `..` that leaves `DIR`, a symbolic link leading out, or a
 harness configuration path is refused in the tool's answer and never followed), each tool answer is
-bounded in bytes, lines and matches, every tool call of a round is given an `id` in the assistant
+bounded (`read` returns at most a window of 2,000 lines or 128 KiB with the `first_line` and `line_count`
+the model can page with and how much of the file is left, while `grep`, `glob` and `list` return at most
+100 matches or entries and 32 KiB, with `grep` scanning up to 512 KiB of a file and charging only the
+matches it returns to the turn's read budget), the prompt note that tells
+the model about the tools states those bounds, every tool call of a round is given an `id` in the assistant
 message and its tool result alike (its own when unique within the turn, else `call_<round>_<index>`,
-API-REVIEWER-TOOLS-2), and the turn is bounded in tool rounds, total bytes read and
-wall time (past a bound the model is told so and asked for its verdict with no tools offered); a
+API-REVIEWER-TOOLS-2), and the turn is bounded to 24 tool rounds, 2 MiB total bytes read and
+900 s wall time (once tools were offered, every later request of the turn offers the same `tools`, and when a
+bound is reached the request carries `tool_choice: "none"` rather than an absent `tools` and says why in the
+last message; if a provider still answers with tool calls under `"none"`, the client does not run them,
+answers each with `"no more tools: give the verdict"` once, and a second time ends the review as UNAVAILABLE
+saying so, API-REVIEWER-TOOLS-3); a
 provider that refuses tools makes the review UNAVAILABLE and says so, never falling back to a silent
 review without them (API-REVIEWER-TOOLS). The providers are the machine's: `review.api_providers` names each by a word, with
 its base URL and the environment variable that holds its key, and a route names `<word>/<model>`.

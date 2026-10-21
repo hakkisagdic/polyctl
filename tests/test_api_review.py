@@ -386,7 +386,9 @@ def test_the_client_with_a_tree_runs_read_grep_glob_and_list_and_answers(monkeyp
     assert [m["content"] for m in round1_tools] == ["README.md\nsrc/", "src/mod.py"]
     round2_tools = [m for m in served.requests[2]["body"]["messages"] if m["role"] == "tool"][2:]
     assert round2_tools[0]["content"] == "src/mod.py:2: caller_target = 42"
-    assert round2_tools[1]["content"] == "2: caller_target = 42"
+    assert round2_tools[1]["content"] == (
+        "2: caller_target = 42\n... (1 lines / 10 bytes left; page with first_line=3, line_count=1)"
+    )
     stats = json.loads((tmp_path / "answer.md.tool.json").read_text(encoding="utf-8"))
     assert stats["rounds"] == 2 and stats["read_bytes"] > 0
 
@@ -492,6 +494,8 @@ def test_each_answer_bound_and_each_turn_bound_tells_the_model_and_asks_for_a_ve
         (tree / f"f{i}.py").write_text("\n".join(f"match_{i}_{line}" for line in range(10)) + "\n", encoding="utf-8")
 
     # 1. Per-answer bounds: lines, bytes, matches
+    monkeypatch.setattr(api_review, "READ_MAX_LINES", 3)
+    monkeypatch.setattr(api_review, "READ_MAX_BYTES", 80)
     monkeypatch.setattr(api_review, "TOOL_MAX_LINES", 3)
     monkeypatch.setattr(api_review, "TOOL_MAX_MATCHES", 2)
     monkeypatch.setattr(api_review, "TOOL_MAX_BYTES", 80)
@@ -515,7 +519,9 @@ def test_each_answer_bound_and_each_turn_bound_tells_the_model_and_asks_for_a_ve
     assert "truncated at 2 entries" in ans_tools[3]
 
     # 2. Turn bound: tool rounds
-    monkeypatch.setattr(api_review, "TOOL_MAX_LINES", 200)
+    monkeypatch.setattr(api_review, "READ_MAX_LINES", 2_000)
+    monkeypatch.setattr(api_review, "READ_MAX_BYTES", 131_072)
+    monkeypatch.setattr(api_review, "TOOL_MAX_LINES", 2_000)
     monkeypatch.setattr(api_review, "TOOL_MAX_MATCHES", 100)
     monkeypatch.setattr(api_review, "TOOL_MAX_BYTES", 32_768)
     monkeypatch.setattr(api_review, "TURN_MAX_ROUNDS", 2)
@@ -526,30 +532,35 @@ def test_each_answer_bound_and_each_turn_bound_tells_the_model_and_asks_for_a_ve
     _providers(monkeypatch, tmp_path, f"local {served_rounds.url} AO_TEST_API_KEY")
     code, answer = _run(tmp_path, "local/m", tree=tree)
     assert code == 0 and answer == APPROVED and len(served_rounds.requests) == 3
-    assert "tools" in served_rounds.requests[0]["body"] and "tools" in served_rounds.requests[1]["body"]
-    assert "tools" not in served_rounds.requests[2]["body"]
+    assert served_rounds.requests[0]["body"]["tools"] == api_review.TOOLS
+    assert served_rounds.requests[1]["body"]["tools"] == api_review.TOOLS
+    assert "tool_choice" not in served_rounds.requests[1]["body"]
+    assert served_rounds.requests[2]["body"]["tools"] == api_review.TOOLS
+    assert served_rounds.requests[2]["body"]["tool_choice"] == "none"
     assert "tool round limit (2 rounds) reached" in served_rounds.requests[2]["body"]["messages"][-1]["content"]
 
     # 3. Turn bound: total bytes read
-    monkeypatch.setattr(api_review, "TURN_MAX_ROUNDS", 16)
+    monkeypatch.setattr(api_review, "TURN_MAX_ROUNDS", 24)
     monkeypatch.setattr(api_review, "TURN_MAX_READ_BYTES", 25)
     served_bytes = endpoint(turns=[_tool_turn(("read", {"path": "f0.py"}))])
     _providers(monkeypatch, tmp_path, f"local {served_bytes.url} AO_TEST_API_KEY")
     code, answer = _run(tmp_path, "local/m", tree=tree)
     assert code == 0 and answer == APPROVED and len(served_bytes.requests) == 2
-    assert "tools" not in served_bytes.requests[1]["body"]
+    assert served_bytes.requests[1]["body"]["tools"] == api_review.TOOLS
+    assert served_bytes.requests[1]["body"]["tool_choice"] == "none"
     assert "total bytes read limit (25 bytes) reached" in served_bytes.requests[1]["body"]["messages"][-1]["content"]
     stats = json.loads((tmp_path / "answer.md.tool.json").read_text(encoding="utf-8"))
     assert stats["read_bytes"] == 25
 
     # 4. Turn bound: wall time
-    monkeypatch.setattr(api_review, "TURN_MAX_READ_BYTES", 262_144)
+    monkeypatch.setattr(api_review, "TURN_MAX_READ_BYTES", 2_097_152)
     monkeypatch.setattr(api_review, "TURN_MAX_SECONDS", 0.0)
     served_time = endpoint(turns=[_tool_turn(("read", {"path": "f0.py"}))])
     _providers(monkeypatch, tmp_path, f"local {served_time.url} AO_TEST_API_KEY")
     code, answer = _run(tmp_path, "local/m", tree=tree)
     assert code == 0 and answer == APPROVED and len(served_time.requests) == 2
-    assert "tools" not in served_time.requests[1]["body"]
+    assert served_time.requests[1]["body"]["tools"] == api_review.TOOLS
+    assert served_time.requests[1]["body"]["tool_choice"] == "none"
     assert "wall-time limit" in served_time.requests[1]["body"]["messages"][-1]["content"]
 
 
@@ -824,3 +835,286 @@ def test_tool_calls_without_ids_or_with_duplicate_ids_receive_unique_matching_id
     assert r2_call_ids == ["dup", "call_2_2", "call_2_3"]
     assert r2_result_ids == r2_call_ids
     assert len(set(r1_call_ids + r2_call_ids)) == 6
+
+
+def test_raised_bounds_and_tool_prompt_note_and_follow_up_requests_carry_tools_and_tool_choice_none(
+        monkeypatch, tmp_path, endpoint):
+    """API-REVIEWER-TOOLS-3: the turn bounds are 2 MiB, 900 s and at least 24 rounds; the prompt note states the
+    per-answer and per-turn bounds; once tools were offered, every follow-up request carries the same `tools`, and
+    after a bound it carries `tool_choice: "none"` with the reason in the last message."""
+    import secrets
+    assert api_review.TURN_MAX_READ_BYTES == 2 * 1024 * 1024
+    assert api_review.TURN_MAX_SECONDS == 900.0
+    assert api_review.TURN_MAX_ROUNDS >= 24
+    assert api_review.READ_MAX_LINES == 2_000 and api_review.TOOL_MAX_LINES == 2_000
+    assert api_review.READ_MAX_BYTES == 131_072
+    assert api_review.TOOL_MAX_BYTES == 32_768
+    assert api_review.TOOL_MAX_MATCHES == 100
+
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    # A 300 KiB module (> old 256 KiB bound) fits well inside the 2 MiB turn bound.
+    (tree / "large.py").write_text(("x = 1234567890\n" * 20_500), encoding="utf-8")
+
+    # 1. One tool call before any bound: next request carries the same `tools` and no `tool_choice`.
+    served = endpoint(turns=[_tool_turn(("read", {"path": "large.py", "first_line": 1, "line_count": 2_000}))])
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+
+    code, answer = _run(tmp_path, "local/m", "initial review prompt", tree=tree)
+
+    assert code == 0 and answer == APPROVED and len(served.requests) == 2
+    first_msg = served.requests[0]["body"]["messages"][0]["content"]
+    assert "2000 lines" in first_msg and "131072 bytes" in first_msg and "128 KiB" in first_msg
+    assert "100 matches" in first_msg and "32768 bytes" in first_msg
+    assert f"{api_review.TURN_MAX_ROUNDS} tool rounds" in first_msg
+    assert "2097152 bytes" in first_msg and "2 MiB" in first_msg and "900s" in first_msg
+    assert served.requests[0]["body"]["tools"] == api_review.TOOLS
+    assert "tool_choice" not in served.requests[0]["body"]
+    assert served.requests[1]["body"]["tools"] == api_review.TOOLS
+    assert "tool_choice" not in served.requests[1]["body"]
+
+    # 2. One tool call that reaches a bound: next request still carries `tools` AND `tool_choice: "none"`.
+    monkeypatch.setattr(api_review, "TURN_MAX_ROUNDS", 1)
+    served_bound = endpoint(turns=[_tool_turn(("list", {"path": "."}))])
+    _providers(monkeypatch, tmp_path, f"local {served_bound.url} AO_TEST_API_KEY")
+
+    code, answer = _run(tmp_path, "local/m", "initial review prompt", tree=tree)
+
+    assert code == 0 and answer == APPROVED and len(served_bound.requests) == 2
+    assert served_bound.requests[1]["body"]["tools"] == api_review.TOOLS
+    assert served_bound.requests[1]["body"]["tool_choice"] == "none"
+    assert "tool round limit (1 rounds) reached" in served_bound.requests[1]["body"]["messages"][-1]["content"]
+
+
+def test_read_window_bounds_lines_and_bytes_and_pages_with_first_line_and_line_count(
+        monkeypatch, tmp_path, endpoint):
+    """API-REVIEWER-TOOLS-3: `read` returns at most a window of 2,000 lines or 128 KiB, states how much of the file
+    is left, and gives the `first_line` and `line_count` the model can page with."""
+    import re
+    import secrets
+    tree = tmp_path / "tree"
+    tree.mkdir()
+
+    # 1. Line-window paging across a 2,500-line file (2,000 lines then 500 lines).
+    lines_2500 = [f"line_{i:04d} = {i}\n" for i in range(1, 2_501)]
+    (tree / "by_lines.py").write_text("".join(lines_2500), encoding="utf-8")
+    served_lines = endpoint(turns=[
+        _tool_turn(("read", {"path": "by_lines.py"})),
+        _tool_turn(("read", {"path": "by_lines.py", "first_line": 2_001, "line_count": 500})),
+    ])
+    _providers(monkeypatch, tmp_path, f"local {served_lines.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+
+    code, answer = _run(tmp_path, "local/m", tree=tree)
+
+    assert code == 0 and answer == APPROVED and len(served_lines.requests) == 3
+    page1 = [m["content"] for m in served_lines.requests[1]["body"]["messages"] if m["role"] == "tool"][0]
+    assert page1.startswith("1: line_0001 = 1\n")
+    assert "\n2000: line_2000 = 2000\n" in page1
+    assert "2001: line_2001" not in page1
+    expected_left_bytes = len("".join(lines_2500[2_000:]).encode("utf-8"))
+    assert f"truncated at 2000 lines; 500 lines / {expected_left_bytes} bytes left" in page1
+    assert "page with first_line=2001, line_count=500" in page1
+
+    page2 = [m["content"] for m in served_lines.requests[2]["body"]["messages"] if m["role"] == "tool"][1]
+    assert page2.startswith("2001: line_2001 = 2001\n")
+    assert page2.endswith("2500: line_2500 = 2500")
+    assert "left" not in page2 and "truncated" not in page2
+
+    # 2. Byte-window paging across a 1,500-line file (~180 KiB > 128 KiB, < 2,000 lines).
+    lines_bytes = [f"row_{i:04d} = '{'a' * 105}'\n" for i in range(1, 1_501)]
+    (tree / "by_bytes.py").write_text("".join(lines_bytes), encoding="utf-8")
+    state = {"tree": str(tree), "config_names": {}, "rounds": 0, "read_bytes": 0, "bound": None}
+    first_window = api_review._tool_read(state, {"path": "by_bytes.py"})
+    assert len(first_window.encode("utf-8")) <= api_review.READ_MAX_BYTES
+    assert f"truncated at {api_review.READ_MAX_BYTES} bytes;" in first_window
+    match = re.search(
+        r"(\d+) lines / (\d+) bytes left; page with first_line=(\d+), line_count=(\d+)",
+        first_window,
+    )
+    assert match is not None
+    lines_left, bytes_left, next_first, next_count = (int(g) for g in match.groups())
+    assert 1 < next_first <= 1_500
+    assert lines_left == 1_500 - (next_first - 1)
+    assert bytes_left == len("".join(lines_bytes[next_first - 1:]).encode("utf-8"))
+    assert next_count == lines_left
+
+    second_window = api_review._tool_read(state, {
+        "path": "by_bytes.py", "first_line": next_first, "line_count": next_count,
+    })
+    assert second_window.startswith(f"{next_first}: row_{next_first:04d} = ")
+    assert second_window.endswith(f"1500: row_1500 = '{'a' * 105}'")
+    assert "truncated" not in second_window and "left" not in second_window
+    assert state["read_bytes"] == len("".join(lines_bytes).encode("utf-8"))
+
+
+def test_still_calling_tools_under_none_answers_once_without_running_them_and_ends_unavailable_the_second_time(
+        project, monkeypatch, tmp_path, endpoint, capsys):
+    """API-REVIEWER-TOOLS-3: when a provider still answers with tool calls under `tool_choice: "none"`, the client
+    does not run them, answers each with `"no more tools: give the verdict"` once, and a second time ends the review
+    as UNAVAILABLE with that said."""
+    import secrets
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "ok.py").write_text("OK = 1\n", encoding="utf-8")
+    (tree / "canary.py").write_text("CANARY_NEVER_READ = 1\n", encoding="utf-8")
+    monkeypatch.setattr(api_review, "TURN_MAX_ROUNDS", 1)
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+
+    # 1. Provider calls a tool once under `tool_choice: "none"`, receives "no more tools: give the verdict", and then
+    # gives its verdict.
+    served_once = endpoint(turns=[
+        _tool_turn(("read", {"path": "ok.py"})),
+        _tool_turn(
+            ("read", {"path": "canary.py"}),
+            ("list", {"path": "."}),
+        ),
+    ])
+    _providers(monkeypatch, tmp_path, f"local {served_once.url} AO_TEST_API_KEY")
+
+    code, answer = _run(tmp_path, "local/m", tree=tree)
+
+    assert code == 0 and answer == APPROVED and len(served_once.requests) == 3
+    assert served_once.requests[1]["body"]["tools"] == api_review.TOOLS
+    assert served_once.requests[1]["body"]["tool_choice"] == "none"
+    assert served_once.requests[2]["body"]["tools"] == api_review.TOOLS
+    assert served_once.requests[2]["body"]["tool_choice"] == "none"
+    none_results = [m for m in served_once.requests[2]["body"]["messages"] if m["role"] == "tool"][1:]
+    assert [m["content"] for m in none_results] == [
+        "no more tools: give the verdict",
+        "no more tools: give the verdict",
+    ]
+    assert all("CANARY_NEVER_READ" not in json.dumps(req["body"]) for req in served_once.requests)
+    stats = json.loads((tmp_path / "answer.md.tool.json").read_text(encoding="utf-8"))
+    assert stats["rounds"] == 1 and stats["read_bytes"] == len(b"OK = 1\n")
+
+    # 2. Provider calls tools a second time under `tool_choice: "none"`: client exits 1 saying so, and `ao review`
+    # records UNAVAILABLE.
+    (tmp_path / "answer.md").unlink()
+    served_twice = endpoint(turns=[
+        _tool_turn(("read", {"path": "ok.py"})),
+        _tool_turn(("read", {"path": "canary.py"})),
+        _tool_turn(("read", {"path": "canary.py"})),
+    ])
+    _providers(monkeypatch, tmp_path, f"local {served_twice.url} AO_TEST_API_KEY")
+
+    code2, answer2 = _run(tmp_path, "local/m", tree=tree)
+
+    err = capsys.readouterr().err
+    assert code2 == 1 and answer2 is None and len(served_twice.requests) == 3
+    assert "no more tools: give the verdict" in err and 'tool_choice="none"' in err
+
+    root = project["root"]
+    _repo_with_change(root)
+    client = cli._tool_beside_interpreter("ao-api-review")
+    if client is None:
+        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+    monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root_, name: (
+        (client, "ao-api-review") if name in ("ao-api-review", client) else (None, None)))
+    served_review = endpoint(turns=[_tool_turn(("read", {"path": "src/a.py"})) for _ in range(26)])
+    home = tmp_path / "home"
+    (home / ".ao").mkdir(parents=True, exist_ok=True)
+    (home / ".ao" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {served_review.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("PYTHONPATH", os.path.join(A.REPO, "src"))
+    composed = A.compose_reviewer("openai-api", model="local/m", family="zhipu")
+    tree_route = dict(composed, id="rv-tree", argv=composed["argv"][:-1] + ["--tree", "{tree}", composed["argv"][-1]])
+
+    review_code = cli.cmd_review(dict(project, reviewer=tree_route), _args())
+
+    row = storage.read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)[-1]
+    assert review_code == 3 and row["verdict"] == "UNAVAILABLE"
+    assert "no more tools: give the verdict" in capsys.readouterr().err
+
+
+def test_grep_across_a_multi_mib_tree_keeps_tools_and_read_pages_past_two_mib(monkeypatch, tmp_path, endpoint):
+    """API-REVIEWER-TOOLS-3: a `grep` over a source directory larger than the 2 MiB turn read bound scans every file
+    (up to 512 KiB each) while charging only its returned matches to `read_bytes`, so the reviewer keeps its tools for
+    subsequent `read` calls, and `read` can page through a file past 2 MiB."""
+    import secrets
+    tree = tmp_path / "tree"
+    src_ao = tree / "src" / "ao"
+    src_ao.mkdir(parents=True)
+    # Ten ~350 KiB modules (~3.5 MiB total > 2 MiB turn bound), matching in the first and last modules.
+    filler = ("filler_line = '0123456789abcdef0123456789abcdef0123456789abcdef'\n" * 5_400)
+    for i in range(10):
+        tail = f"target_hook_{i} = {i}\n" if i in (0, 9) else "no_target_here = 0\n"
+        (src_ao / f"mod_{i:02d}.py").write_text(filler + tail, encoding="utf-8")
+    # A single ~2.34 MiB file (45,000 lines > 2 MiB) whose last 500 lines sit past byte 2,097,152.
+    huge_lines = [f"huge_row_{idx:05d} = '{'x' * 30}'\n" for idx in range(1, 45_001)]
+    (src_ao / "huge.py").write_text("".join(huge_lines), encoding="utf-8")
+
+    served = endpoint(turns=[
+        _tool_turn(("grep", {"pattern": r"target_hook_\d+", "path": "src/ao"})),
+        _tool_turn(
+            ("read", {"path": "src/ao/mod_09.py", "first_line": 5_400, "line_count": 2}),
+            ("read", {"path": "src/ao/huge.py", "first_line": 44_501, "line_count": 500}),
+        ),
+    ])
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+
+    code, answer = _run(tmp_path, "local/m", tree=tree)
+
+    assert code == 0 and answer == APPROVED and len(served.requests) == 3
+    # Round 1: grep searched all 3.5+ MiB of src/ao, returned matches from both mod_00 and mod_09, and did not hit
+    # the turn bound or set tool_choice="none".
+    assert "tool_choice" not in served.requests[1]["body"]
+    assert served.requests[1]["body"]["tools"] == api_review.TOOLS
+    grep_out = [m["content"] for m in served.requests[1]["body"]["messages"] if m["role"] == "tool"][0]
+    assert "src/ao/mod_00.py:5401: target_hook_0 = 0" in grep_out
+    assert "src/ao/mod_09.py:5401: target_hook_9 = 9" in grep_out
+    assert "turn bound reached" not in grep_out
+
+    # Round 2: read ran on mod_09 and paged the tail of huge.py past the 2 MiB mark.
+    assert "tool_choice" not in served.requests[2]["body"]
+    round2_tools = [m["content"] for m in served.requests[2]["body"]["messages"] if m["role"] == "tool"][1:]
+    assert round2_tools[0] == (
+        "5400: filler_line = '0123456789abcdef0123456789abcdef0123456789abcdef'\n"
+        "5401: target_hook_9 = 9"
+    )
+    assert round2_tools[1].startswith("44501: huge_row_44501 = ")
+    assert round2_tools[1].endswith(f"45000: huge_row_45000 = '{'x' * 30}'")
+    assert "truncated" not in round2_tools[1] and "left" not in round2_tools[1]
+
+    stats = json.loads((tmp_path / "answer.md.tool.json").read_text(encoding="utf-8"))
+    expected_grep_bytes = len(grep_out.encode("utf-8"))
+    expected_mod09_bytes = len(
+        ("filler_line = '0123456789abcdef0123456789abcdef0123456789abcdef'\ntarget_hook_9 = 9\n").encode("utf-8")
+    )
+    expected_huge_tail_bytes = len("".join(huge_lines[44_500:]).encode("utf-8"))
+    assert stats["rounds"] == 2
+    assert stats["read_bytes"] == expected_grep_bytes + expected_mod09_bytes + expected_huge_tail_bytes
+
+
+def test_read_window_limits_are_independent_of_other_tool_limits(monkeypatch, tmp_path):
+    """API-REVIEWER-TOOLS-3: `READ_MAX_LINES` and `READ_MAX_BYTES` govern `read` independently of `TOOL_MAX_LINES` and
+    `TOOL_MAX_BYTES`, even when `READ_MAX_LINES` is 2,000 or `READ_MAX_BYTES` is 131,072."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    sample_lines = [f"item_{i:02d} = '{'v' * 30}'\n" for i in range(1, 21)]
+    (tree / "sample.py").write_text("".join(sample_lines), encoding="utf-8")
+
+    # Shrink the grep/glob/list limits while leaving READ_MAX_LINES=2000 and READ_MAX_BYTES=131072.
+    monkeypatch.setattr(api_review, "READ_MAX_LINES", 2_000)
+    monkeypatch.setattr(api_review, "READ_MAX_BYTES", 131_072)
+    monkeypatch.setattr(api_review, "TOOL_MAX_LINES", 5)
+    monkeypatch.setattr(api_review, "TOOL_MAX_BYTES", 256)
+
+    note = api_review._tool_note()
+    assert "2000 lines or 131072 bytes (128 KiB)" in note
+    assert "256 bytes (0 KiB)" in note
+
+    state = {"tree": str(tree), "config_names": {}, "rounds": 0, "read_bytes": 0, "bound": None}
+    read_out = api_review._tool_read(state, {"path": "sample.py"})
+    assert read_out.startswith("1: item_01 = ")
+    assert read_out.endswith(f"20: item_20 = '{'v' * 30}'")
+    assert "truncated" not in read_out and "left" not in read_out
+    assert len(read_out.encode("utf-8")) > 256
+
+    grep_out = api_review._tool_grep(state, {"pattern": "item_"})
+    assert len(grep_out.encode("utf-8")) <= 256
+    assert "truncated at 256 bytes" in grep_out
