@@ -128,7 +128,8 @@ def status_facts(cfg, msg_count=8, window_hours=24.0, shown=False):
             "nothing_to_do_since": (idle_answer.get("since") or 0) if idle_answer else None,
             "spinning_minutes": spin,
             "nudge_error": {"at": nudge_err.get("at", 0), "code": nudge_err.get("code"),
-                            "tail": nudge_err.get("tail", ""), "log": A.project_file(root, "nudge-log")}
+                            "tail": nudge_err.get("tail", ""),
+                            "log": A.project_file(root, "nudge-log", key=A.next_project_key(root))}
             if nudge_err else None,
             "agent_errors": [{"time": hh, "text": text} for hh, text in errs]}
     else:
@@ -169,13 +170,13 @@ def status_facts(cfg, msg_count=8, window_hours=24.0, shown=False):
 PANEL_MIN_COLUMNS = 20
 
 
-def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, shown=True):
+def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, shown=True, facts=None):
     """Render the panel from status_facts. When max_lines is given the output never exceeds it:
     the fixed sections are laid out first and the message log — the only elastic
     part — takes whatever is left. A panel taller than the window scrolls, and a
     scrolled panel stacks its own headers on every refresh. With `shown` false the
     urgent messages it names are not recorded as seen, as in the document (status_facts)."""
-    facts = status_facts(cfg, msg_count, window_hours, shown=shown)
+    facts = status_facts(cfg, msg_count, window_hours, shown=shown) if facts is None else facts
     impl = cfg.get("implementer") or {}
     # A terminal a few columns wide gets the narrowest panel, which wraps there, and a short one no line: textwrap
     # raised on a width it was handed below one, and -1 lines kept all but the last (LEADS-ADAPTERS).
@@ -480,33 +481,69 @@ WEB_PORT = 8732           # `ao watch --web`, beside `ao a2a serve` on 8731
 WEB_COLUMNS = 120         # the width a panel is laid out to when it cannot read its terminal's
 
 
-def _web_pages(root, args):
-    """The pages `ao watch --web` serves (WEB-VIEW): {path: (label, compute)}, each computed when asked for.
+def _load_config_readonly(root):
+    """Read `root`'s config without registering it in ~/.ao/projects.json or .ao/project-key (WEB-API).
 
-    A page is what `ao watch`, `ao board` and `ao fleet` would print at that moment, by the
-    functions those commands print with. The project's config is read again for each request,
-    as each of those commands reads it when it starts, so a view left open for a day shows a
-    session or a role that changed after it started. One difference is deliberate: a page marks
-    no urgent message seen (#30), as `ao status --json` marks none: both read with `shown` false
-    (status_facts). Any process on this machine can fetch a loopback page, and a fetch is no proof
-    that a person read it; an urgent message stays unseen, and its alarm keeps climbing, until a
-    command shows it to its reader.
+    A test double for `A.load_config` that takes `root` alone (tests/test_json_output.py) has no `record`
+    keyword; a TypeError raised inside `load_config` itself is re-raised rather than retried with `record=True`.
     """
+    try:
+        return A.load_config(root, record=False)
+    except TypeError as exc:
+        if "unexpected keyword argument 'record'" not in str(exc):
+            raise
+        return A.load_config(root)
+
+
+def _web_pages(root, args):
+    """The pages `ao watch --web` serves (WEB-VIEW, WEB-API): {path: (label, compute)}, each computed when asked for.
+
+    A page is what `ao watch`, `ao board`, `ao next` (the pipeline) and `ao fleet` show at that
+    moment, by the functions those commands and `/api/*` use. The project's config is read again
+    for each request without recording the project in the registry, so a view left open for a day
+    shows a session or a role that changed after it started and writes nothing anywhere. One
+    difference from the terminal is deliberate: a page marks no urgent message seen (#30), as
+    `ao status --json` marks none: both read with `shown` false (status_facts). Any process on
+    this machine can fetch a loopback page, and a fetch is no proof that a person read it; an
+    urgent message stays unseen, and its alarm keeps climbing, until a command shows it to its
+    reader.
+    """
+    from . import web
+
     def panel():
-        return render(A.load_config(root), args.messages, WEB_COLUMNS, shown=False)
+        cfg = _load_config_readonly(root)
+        return render(cfg, args.messages, WEB_COLUMNS, shown=False,
+                      facts=status_facts(cfg, args.messages, shown=False))
 
     def board():
-        cfg = A.load_config(root)
-        return "\n".join(_mailbox_banner(cfg, shown=False) + _board_lines(cfg))
+        cfg = _load_config_readonly(root)
+        facts = board_facts(cfg, shown=False)
+        mail = facts["mail"]
+        banner = [] if mail["urgent"] is None else _banner_lines(mail["dir"], mail["urgent"], mail["waiting"])
+        return "\n".join(banner + _board_lines(cfg, facts=facts))
+
+    def pipeline():
+        return web.render_pipeline(A.pipeline_facts(_load_config_readonly(root)))
 
     def fleet():
         return "\n".join(render_fleet(WEB_COLUMNS))
 
-    return {"/": ("panel", panel), "/board": ("board", board), "/fleet": ("fleet", fleet)}
+    return {"/": ("panel", panel), "/board": ("board", board),
+            "/pipeline": ("pipeline", pipeline), "/fleet": ("fleet", fleet)}
+
+
+def _web_api(root, args):
+    """The JSON endpoints `ao watch --web` serves beside its pages (WEB-API): {path: compute}."""
+    return {
+        "/api/status": lambda: status_facts(_load_config_readonly(root), args.messages, shown=False),
+        "/api/board": lambda: board_facts(_load_config_readonly(root), shown=False),
+        "/api/pipeline": lambda: A.pipeline_facts(_load_config_readonly(root)),
+        "/api/fleet": lambda: fleet_facts(),
+    }
 
 
 def _watch_web(cfg, args):
-    """Serve the pages on 127.0.0.1 until Ctrl+C: a browser tab in place of a terminal (WEB-VIEW)."""
+    """Serve the pages on 127.0.0.1 until Ctrl+C: a browser tab in place of a terminal (WEB-VIEW, WEB-API)."""
     from . import web
     port = WEB_PORT if args.port is None else args.port
     if not 0 <= port <= 65535:
@@ -518,7 +555,8 @@ def _watch_web(cfg, args):
         return 2
     root = cfg["root"]
     try:
-        server = web.listen(_web_pages(root, args), cfg.get("project") or os.path.basename(root), args.interval, port)
+        server = web.listen(_web_pages(root, args), cfg.get("project") or os.path.basename(root), args.interval, port,
+                            api=_web_api(root, args))
     except OSError as exc:
         print(f"ao watch --web: cannot listen on 127.0.0.1:{port}: {exc.strerror or exc}", file=sys.stderr)
         return 1
@@ -544,7 +582,7 @@ def _fleet_rows():
     for ws in A.all_workspaces():
         root = ws["path"]
         try:
-            cfg = A.load_config(root)
+            cfg = _load_config_readonly(root)
         except Exception:
             continue
         impl = cfg.get("implementer") or {}
@@ -571,9 +609,9 @@ def fleet_facts():
     return {"at": int(time.time()), "projects": _fleet_rows()}
 
 
-def render_fleet(width=None):
+def render_fleet(width=None, facts=None):
     w = max(PANEL_MIN_COLUMNS, min(width or shutil.get_terminal_size((120, 40)).columns, 130))
-    facts = fleet_facts()
+    facts = fleet_facts() if facts is None else facts
     L = [f"{C['b']}{C['cyan']}{'═' * w}{C['reset']}",
          f"{C['b']}  ALL PROJECTS{C['reset']}{C['dim']}   agent-orchestrator   "
          f"{datetime.fromtimestamp(facts['at']):%d %b %H:%M:%S}{C['reset']}",

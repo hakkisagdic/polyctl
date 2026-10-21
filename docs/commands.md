@@ -6,7 +6,7 @@ Every `ao` command and what it does. The [README](../README.md) starts with the 
 |---|---|
 | `ao status` · `ao watch` | one project: state, telemetry, problems, board |
 | `ao watch --all` · `ao fleet` | every project, ordered by what needs a human first |
-| `ao watch --web [--port N]` | the panel, the board and the fleet as read-only pages on 127.0.0.1: a browser tab in place of a terminal ([surfaces.md](surfaces.md)) |
+| `ao watch --web [--port N]` | the panel, the board, the pipeline and the fleet as read-only pages (`/`, `/board`, `/pipeline`, `/fleet`) and JSON endpoints (`/api/status`, `/api/board`, `/api/pipeline`, `/api/fleet`) on 127.0.0.1: a browser tab in place of a terminal ([surfaces.md](surfaces.md)) |
 | `ao board` | where each item is; READY = queued items whose `needs:` are done |
 | `ao next [--json\|--short]` | what stands in the way now, and whose hand closes it: a person's items first (a harness change nobody has read, a stand-in review request awaiting its answer, urgent mail, an open proposal), then the staged candidate's landing chain at the first stage that does not hold, each with the command that closes it; `--short` prints the menu-bar line, `---`, and the dropdown lines in the plugin format SwiftBar and xbar read. Read-only: nothing is run or recorded, and a person's command is shown, never typed ([surfaces.md](surfaces.md)) |
 | `ao surfaces [install\|uninstall] swiftbar --dir <dir>` | write or remove ao's executable `ao.30s.sh` menu-bar plugin in the SwiftBar or xbar plugin folder you name (`--dir` is required; ao never guesses a folder), refusing to overwrite or remove a file that is not ao's own; the plugin runs `ao next --short` and nothing else ([surfaces.md](surfaces.md)) |

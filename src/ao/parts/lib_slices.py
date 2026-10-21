@@ -421,10 +421,10 @@ def secondary_projects(cfg):
         if not isinstance(other_root, str) or not os.path.isdir(os.path.join(other_root, ".ao")):
             continue
         try:
-            other = load_config(other_root)
+            other = load_config(other_root, record=False)
         except Exception:
             continue
-        name = (entry.get("name") if isinstance(entry, dict) else None) or project_key(other_root)
+        name = (entry.get("name") if isinstance(entry, dict) else None) or next_project_key(other_root)
         out.append({"name": name, "root": other_root, "cfg": other})
     return out
 

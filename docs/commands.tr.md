@@ -6,7 +6,7 @@ Her `ao` komutu ve ne yaptığı. [README](../README.tr.md) her değişiklikte k
 |---|---|
 | `ao status` · `ao watch` | tek proje: durum, telemetri, sorunlar, pano |
 | `ao watch --all` · `ao fleet` | tüm projeler, insana en çok ihtiyaç duyan üstte |
-| `ao watch --web [--port N]` | panel, pano ve tüm projeler 127.0.0.1'de salt okunur sayfalar olarak: terminal yerine bir tarayıcı sekmesi ([surfaces.md](surfaces.md)) |
+| `ao watch --web [--port N]` | panel, pano, iniş hattı ve tüm projeler 127.0.0.1'de salt okunur sayfalar (`/`, `/board`, `/pipeline`, `/fleet`) ve JSON uç noktaları (`/api/status`, `/api/board`, `/api/pipeline`, `/api/fleet`) olarak: terminal yerine bir tarayıcı sekmesi ([surfaces.md](surfaces.md)) |
 | `ao board` | her iş nerede; READY = `needs:` bağımlılıkları tamamlanmış kuyruk maddeleri |
 | `ao next [--json\|--short]` | şimdi neyin beklediği ve onu hangi elin kapattığı: önce insanın maddeleri (hiç kimsenin okumadığı bir harness değişikliği, yanıtını bekleyen vekil review istemi, acil posta, açık bir kural önerisi), sonra indekslenen adayın iniş zincirinin tutmadığı ilk aşama; her biri kapatan komutla; `--short` menü çubuğu satırını, `---` ayırıcısını ve açılır menü satırlarını SwiftBar ile xbar'ın okuduğu eklenti biçiminde basar. Salt okunur: hiçbir şey çalıştırılmaz ya da kaydedilmez, insanın komutu gösterilir, yazılmaz ([surfaces.md](surfaces.md)) |
 | `ao surfaces [install\|uninstall] swiftbar --dir <dizin>` | adlandırdığın SwiftBar ya da xbar eklenti klasörüne (`--dir` zorunludur; ao klasör tahmin etmez) ao'nun çalıştırılabilir `ao.30s.sh` menü çubuğu eklentisini yazar ya da kaldırır, ao'nun kendisinin olmayan bir dosyayı ezmeyi ya da silmeyi reddeder; eklenti yalnız `ao next --short` çalıştırır ([surfaces.md](surfaces.md)) |

@@ -1283,15 +1283,52 @@ def cmd_board(cfg, args):
     return 0
 
 
-def _board_lines(cfg):
+def board_facts(cfg, shown=False):
+    """What the board page shows, read once: `_board_lines` draws it and `/api/board` serves it (WEB-API).
+
+    With `shown` false nothing is recorded as seen, as `status_facts` records nothing.
+    """
+    root = cfg["root"]
+    path = os.path.join(root, ".ao", "board.md")
+    exists = os.path.exists(path)
+    b = A.board(root)
+    graph = A.board_graph(root) if exists else {"ready": [], "problems": []}
+    sections = {}
+    for st in A.BOARD_STATES:
+        rows = []
+        for it in b[st]:
+            advice = A.boundary_advice(root, cfg, it) if exists and st in ("running", "queued") else []
+            rows.append({"id": it["id"], "title": it["title"], "notes": dict(it["notes"]),
+                         "boundary_advice": advice})
+        sections[st] = rows
+    marked = _marked_mail(cfg, shown)
+    return {
+        "project": cfg.get("project") or os.path.basename(root),
+        "root": root,
+        "at": int(time.time()),
+        "exists": exists,
+        "problems": list(graph["problems"]),
+        "ready": [{"id": it["id"], "title": it["title"], "role": it.get("role") or "",
+                   "notes": dict(it["notes"])} for it in graph["ready"]],
+        "sections": sections,
+        "counts": {st: len(b[st]) for st in A.BOARD_STATES},
+        "mail": {
+            "dir": cfg.get("mailbox", "agent-mail"),
+            "waiting": None if marked is None else marked[1],
+            "urgent": None if marked is None else [{"id": m["id"], "to": m["to"], "title": m["title"]}
+                                                   for m in marked[0]],
+        },
+    }
+
+
+def _board_lines(cfg, facts=None):
     """The board as `ao board` prints it below the mailbox banner, one string a line.
 
     `ao watch --web` serves the same lines, so the page and the command cannot drift apart.
     """
-    root = cfg["root"]
-    b = A.board(root)
-    path = os.path.join(root, ".ao", "board.md")
-    if not os.path.exists(path):
+    if facts is None:
+        facts = board_facts(cfg, shown=False)
+    if not facts["exists"]:
         return [f"{C['yellow']}No board here.{C['reset']} Create {C['b']}.ao/board.md{C['reset']} with "
                 f"`## running` / `## blocked` / `## queued` / `## verified` / `## done` sections\n"
                 f"and one `- [ID] title · note: value` line per item."]
@@ -1302,11 +1339,11 @@ def _board_lines(cfg):
     # its own scope. A broken edge is named before anything else (#33).
     # The board is text an agent writes, and what is read from it is shown escaped (LEADS-MCP).
     shown = A.shown_text
-    graph = A.board_graph(root)
+    b = facts["sections"]
     lines = []
-    for problem in graph["problems"]:
+    for problem in facts["problems"]:
         lines.append(f"{C['red']}{C['b']}BOARD{C['reset']}  {C['red']}{shown(problem)}{C['reset']}")
-    rd = graph["ready"]
+    rd = facts["ready"]
     if rd:
         lines.append(f"\n{C['b']}{C['green']}READY{C['reset']} {C['dim']}({len(rd)}) — "
                      f"dependencies satisfied{C['reset']}")
@@ -1325,7 +1362,7 @@ def _board_lines(cfg):
                          + (f"   {notes}" if notes else ""))
             if st in ("running", "queued"):
                 # Named when the item is registered, while widening or splitting is cheap (#35).
-                for advice in A.boundary_advice(root, cfg, it):
+                for advice in it.get("boundary_advice") or ():
                     lines.append(f"      {C['yellow']}boundary: {shown(advice)}{C['reset']}")
     if not any(b[st] for st in colours):
         # A board holding only what waits for a boundary printed nothing at all (LEADS-ADAPTERS).

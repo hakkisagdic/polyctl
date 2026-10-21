@@ -666,6 +666,7 @@ def _git_text(cwd, *args, timeout=20, env=None):
     try:
         # In a process group of its own, as every Git query is: a timeout stops git with what it started (LEADS-GATE-RUNS).
         merged = dict(os.environ, **env) if env else os.environ.copy()
+        merged.setdefault("GIT_OPTIONAL_LOCKS", "0")
         result = run_as_group(argv, timeout, cwd=cwd, capture_output=True, text=True, encoding=UTF8,
                               errors="replace", env=bound_git_environment(merged))
     except Exception:

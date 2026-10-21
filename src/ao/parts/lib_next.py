@@ -458,3 +458,127 @@ def next_items(cfg):
     unnoticed precisely because everything else looks fine.
     """
     return person_items(cfg) + pipeline_items(cfg)
+
+
+PIPELINE_COLUMNS = ("waiting", "verified", "in review", "with a person", "landed")
+_WAITING_STAGES = frozenset({
+    "candidate-unreadable", "no-candidate", "verification-unreadable", "no-verification",
+    "gates-failed", "verification-stale", "verification-unisolated", "gates-unreadable", "gates-changed",
+})
+_VERIFIED_STAGES = frozenset({
+    "waiver-unreadable", "no-review", "authority-unreadable", "no-grant", "grant-stale", "mail-urgent", "granted",
+})
+
+
+def _submitted_review_slices(root):
+    """Slices with an uncollected submitted review in `.ao/reviews` (WEB-API)."""
+    directory = os.path.join(root, ".ao", "reviews")
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return set()
+    out = set()
+    for name in names:
+        if not (name.startswith("R-") and name.endswith(".json")):
+            continue
+        try:
+            with open(os.path.join(directory, name), encoding=UTF8) as fh:
+                state = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(state, dict) or state.get("collected_at") or state.get("collected"):
+            continue
+        slice_id = (state.get("slice") or "").strip()
+        if slice_id and state.get("state") in ("running", "finished", "unavailable", "failed", "stale"):
+            out.add(slice_id)
+    return out
+
+
+def pipeline_facts(cfg):
+    """The project's pipeline for `/pipeline` and `/api/pipeline`, read from `ao next`'s readers (WEB-API).
+
+    Each slice on the board is placed into one of the five pipeline columns (`waiting`, `verified`,
+    `in review`, `with a person`, `landed`), alongside the standing `person` and `implementer` items
+    from `person_items` and `pipeline_items`. A person's step is carried as command text only; nothing
+    here runs or records anything.
+    """
+    root = cfg["root"]
+    bd = board(root)
+    person = person_items(cfg)
+    implementer = pipeline_items(cfg)
+    in_review = _submitted_review_slices(root)
+    running_ids = [item["id"] for item in bd["running"]]
+    single_running = running_ids[0] if len(running_ids) == 1 else None
+
+    person_by_slice = {}
+    for item in person:
+        sid = item.get("slice")
+        if sid:
+            person_by_slice.setdefault(sid, []).append(item)
+
+    impl_by_slice = {}
+    for item in implementer:
+        sid = item.get("slice") or single_running
+        if sid:
+            impl_by_slice.setdefault(sid, []).append(item)
+
+    columns = {col: [] for col in PIPELINE_COLUMNS}
+    slices = []
+    for state in ("running", "blocked", "queued", "inbox", "verified", "done"):
+        for item in bd.get(state, ()):
+            sid = item["id"]
+            notes = item.get("notes") or {}
+            p_items = person_by_slice.get(sid, ())
+            i_items = impl_by_slice.get(sid, ()) if state == "running" else ()
+            waiting_note = str(notes.get("waiting") or "").strip().lower()
+            held_person = [it for it in i_items if it.get("who") == PERSON]
+            if state == "done":
+                column, stage = "landed", "done"
+            elif p_items or held_person or waiting_note in WAITING_PERSON:
+                column = "with a person"
+                stage = (p_items[0]["kind"] if p_items
+                         else held_person[0]["kind"] if held_person
+                         else "slice-waits-human")
+            elif sid in in_review:
+                column, stage = "in review", "review-submitted"
+            elif state == "verified" or any(it.get("kind") in _VERIFIED_STAGES for it in i_items):
+                column = "verified"
+                stage = i_items[0]["kind"] if i_items else "verified"
+            else:
+                column = "waiting"
+                stage = i_items[0]["kind"] if i_items and i_items[0].get("kind") in _WAITING_STAGES else state
+
+            active = p_items[0] if p_items else held_person[0] if held_person else (i_items[0] if i_items else None)
+            if active is not None:
+                why, command = active.get("why"), active.get("command")
+            elif state == "blocked":
+                raw_why = notes.get("needs") or notes.get("waiting") or None
+                why = shown_text(" ".join(str(raw_why).split())) if raw_why else None
+                command = f"ao slice start {shown_text(sid)}" if waiting_note in WAITING_PERSON else None
+            elif state in ("queued", "inbox") and notes.get("needs"):
+                why = shown_text(f"needs: {' '.join(str(notes['needs']).split())}")
+                command = None
+            else:
+                why, command = None, None
+
+            entry = {
+                "id": shown_text(sid),
+                "title": shown_text(" ".join(str(item.get("title") or "").split())),
+                "state": state,
+                "column": column,
+                "stage": stage,
+                "why": why,
+                "command": command,
+            }
+            columns[column].append(entry)
+            slices.append(entry)
+
+    return {
+        "project": cfg.get("project") or os.path.basename(root),
+        "root": root,
+        "at": int(time.time()),
+        "columns": columns,
+        "slices": slices,
+        "person": person,
+        "implementer": implementer,
+    }

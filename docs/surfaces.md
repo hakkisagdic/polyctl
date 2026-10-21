@@ -203,11 +203,13 @@ action on turn-end can start another turn, and now you have a loop.
 
 ## Surface 4 — a browser tab
 
-`ao watch --web` serves what `ao watch`, `ao board` and `ao fleet` print as three pages on
-127.0.0.1, for a person who would rather keep a browser tab open than a terminal:
+`ao watch --web` serves what `ao watch`, `ao board`, `ao next` (the pipeline) and `ao fleet` show
+as four read-only pages (`/`, `/board`, `/pipeline`, `/fleet`) and four JSON endpoints
+(`/api/status`, `/api/board`, `/api/pipeline`, `/api/fleet`) on 127.0.0.1, for a person who would
+rather keep a browser tab open than a terminal:
 
 ```bash
-ao watch --web                # http://127.0.0.1:8732/ is the panel; /board and /fleet sit beside it
+ao watch --web                # http://127.0.0.1:8732/ is the panel; /board, /pipeline and /fleet sit beside it
 ao watch --web --port 9000    # another port; 0 takes a free one, and the line it prints names it
 ao watch --web --all          # the same pages; the address it prints is the fleet's
 ```
@@ -227,6 +229,22 @@ terminal does, a page does not: it marks no urgent message seen. Any process on 
 fetch a page, and a fetch is no proof that a person read it, so the message's alarm keeps climbing
 until a command shows it to its reader. A page carries the panel's colours when ao's own output
 would: started from a terminal, and not while `NO_COLOR` is set.*
+
+*In ao since slice WEB-API: `/pipeline` renders each slice on the board into its pipeline column
+(`waiting`, `verified`, `in review`, `with a person`, `landed`) on the server, with no script,
+from the same readers `ao next` uses, and shows a person's step as the command text only; no page
+or endpoint takes an action or writes anything to the project or `~/.ao`. Beside the four pages,
+`GET /api/status`, `GET /api/board`, `GET /api/pipeline` and `GET /api/fleet` return the very data
+the pages show, from the same functions (`status_facts`, `board_facts`, `pipeline_facts`,
+`fleet_facts`), as JSON with a stable top-level shape and `"schema_version": 1`, under the same
+`GET`-only (405 with `Allow: GET`), loopback-only and `Content-Security-Policy` rules.*
+
+| endpoint | page | top-level keys |
+|---|---|---|
+| `GET /api/status` | `/` | `schema_version`, and the `status_facts` keys of `ao status --json` above |
+| `GET /api/board` | `/board` | `schema_version`, `project`, `root`, `at`, `exists`, `problems`, `ready`, `sections`, `counts`, `mail` |
+| `GET /api/pipeline` | `/pipeline` | `schema_version`, `project`, `root`, `at`, `columns` (`waiting`, `verified`, `in review`, `with a person`, `landed`), `slices`, `person`, `implementer` |
+| `GET /api/fleet` | `/fleet` | `schema_version`, `at`, `projects` |
 
 The menu-bar item (`ao surfaces install swiftbar --dir <dir>`, running `ao next --short`) is a reader
 of the same kind: neither it nor the tab is the only way to do something.

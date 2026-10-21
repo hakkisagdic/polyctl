@@ -277,7 +277,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao remove --yes` | two phases: commit `.ao-project` deletion under enforcement, then remove AO-owned state |
 | `ao update [--dry-run\|--yes]` / `ao uninstall [--yes] [--purge]` | a person's commands, never an agent's: update ao the way it was installed, the command shown first; take ao's jobs, hooks and MCP entries off the machine, a dry run unless `--yes` |
 | `ao completion zsh` | a person's shell setup: print the script that completes ao's commands in bash, zsh, fish or PowerShell |
-| `ao status` / `ao watch` / `ao watch --all` | the panel: who is working, quota, problems, mail |
+| `ao status` / `ao watch` / `ao watch --all` / `ao watch --web [--port N]` | the panel: who is working, quota, problems, mail; `--web` serves the panel, the board, the pipeline and the fleet as read-only pages and `/api/*` JSON on 127.0.0.1 |
 | `ao board` | READY / running / blocked (`needs:`) / verified / done |
 | `ao next [--json\|--short]` | what stands in the way now and whose hand closes it, each with the command: a person's items first, then the staged candidate's landing chain at its first open stage. Read-only — it names a person's command, never runs it |
 | `ao room search <words>` / `ao mail compact <days>` | stored messages across projects; collapse old bodies to stubs |

@@ -1030,7 +1030,7 @@ MAIL_STORE_CHAIN = "ao-mail-store-row-v1"
 def mail_store_mode(root):
     """`append-only` when the project has switched its mailbox to the store, else `deletion` (#80)."""
     try:
-        return settings.get(load_config(root), "mail.store")
+        return settings.get(load_config(root, record=False), "mail.store")
     except Exception:
         return "deletion"
 

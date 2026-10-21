@@ -89,7 +89,8 @@ def build_parser(root=None):
     w.add_argument("-m", "--messages", type=int, default=8)
     w.add_argument("--all", action="store_true", help="one row per project instead of one panel")
     w.add_argument("--web", action="store_true",
-                   help="serve the panel, the board and the fleet as read-only pages on 127.0.0.1 instead")
+                   help="serve the panel, the board, the pipeline and the fleet as read-only pages and /api/* JSON "
+                        "on 127.0.0.1 instead")
     w.add_argument("--port", type=int,
                    help=f"with --web: the port on 127.0.0.1 (default {WEB_PORT}; 0 takes a free one)")
     w.set_defaults(fn=cmd_watch)
@@ -781,7 +782,8 @@ def main(argv=None):
             return 0
         command = f"ao {args.cmd}"
         root = A.find_root(args.root)
-        return args.fn(A.load_config(root, record=args.cmd != "export"), args) or 0
+        record = args.cmd != "export" and not (args.cmd == "watch" and getattr(args, "web", False))
+        return args.fn(A.load_config(root, record=record), args) or 0
     except KeyboardInterrupt:
         return 130
     except LedgerLockTimeout as exc:

@@ -1,16 +1,17 @@
-"""`ao watch --web`: what `ao watch`, `ao board` and `ao fleet` print, as read-only pages on 127.0.0.1 (WEB-VIEW).
+"""`ao watch --web`: what `ao watch`, `ao board`, `ao next` and `ao fleet` show, as read-only pages and JSON endpoints on 127.0.0.1 (WEB-VIEW, WEB-API).
 
 A view of ao, not a new app. A person who would rather keep a browser tab open than a terminal
-gets the text those commands print, computed when a page is asked for by the functions the
-commands print with, and nothing more: no state of its own, no form, no method but GET, no
-script, and nothing loaded from anywhere else. The command line hands this module its pages,
-each a function returning a command's text; this module knows HTTP and HTML and nothing about a
-project.
+gets the text those commands print and the pipeline `ao next` reads, computed when a page or JSON
+endpoint is asked for by the functions the commands use, and nothing more: no state of its own, no
+form, no method but GET, no script, and nothing loaded from anywhere else. The command line hands
+this module its pages and `/api/*` endpoints; this module knows HTTP, HTML and JSON and nothing
+about a project.
 
 Standard library only.
 """
 import html
 import ipaddress
+import json
 import os
 import re
 import socketserver
@@ -20,6 +21,14 @@ import time
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+SCHEMA_VERSION = 1
+PIPELINE_COLUMNS = ("waiting", "verified", "in review", "with a person", "landed")
+
+
+class _Html(str):
+    """Server-rendered HTML fragment for `<main><pre>...</pre></main>`, already escaped."""
+
 
 # The class each code the command line's palette (lib.C) writes puts on the page's text.
 SGR_CLASSES = {"1": "b", "2": "dim", "31": "red", "32": "green", "33": "yellow", "34": "blue",
@@ -53,6 +62,14 @@ pre { margin: 0; padding: 12px 16px 32px; overflow-x: auto; font: inherit; }
 .dim { color: var(--muted); }
 .red { color: var(--red); } .green { color: var(--green); } .yellow { color: var(--yellow); }
 .blue { color: var(--blue); } .mag { color: var(--mag); } .cyan { color: var(--cyan); }
+.pipeline { white-space: normal; display: flex; flex-direction: column; gap: 16px; }
+.pipeline-columns { display: grid; grid-template-columns: repeat(5, minmax(180px, 1fr)); gap: 12px; align-items: start; }
+.column { border: 1px solid var(--rule); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.column h2 { margin: 0; font-size: 13px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+.card { border: 1px solid var(--rule); padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.card-why { color: var(--muted); }
+.card-cmd { margin-top: 2px; word-break: break-all; }
+.steps { border-top: 1px solid var(--rule); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 """
 
 
@@ -102,6 +119,70 @@ def ansi_html(text):
     return "".join(out)
 
 
+def _plain_escape(value):
+    return html.escape(_TERMINAL_ONLY.sub("", str(value or "")), quote=False)
+
+
+def json_document(facts):
+    """One JSON response from `ao watch --web`, with `schema_version` first (WEB-API)."""
+    return json.dumps({"schema_version": SCHEMA_VERSION, **facts}, ensure_ascii=False) + "\n"
+
+
+def render_pipeline(facts):
+    """The pipeline page (`/pipeline`), rendered on the server with each slice in its column (WEB-API).
+
+    Each of the five columns (`waiting`, `verified`, `in review`, `with a person`, `landed`) is a
+    `<section class="column" data-column="...">` holding its slices. Standing items for a person or
+    the implementer follow below, with a person's step shown as command text only (`<code>...</code>`)
+    and no form, button or script.
+    """
+    cols = facts.get("columns") or {}
+    sections = []
+    for col in PIPELINE_COLUMNS:
+        items = cols.get(col) or []
+        cards = []
+        for item in items:
+            sid = _plain_escape(item.get("id"))
+            title = _plain_escape(item.get("title"))
+            state = _plain_escape(item.get("state"))
+            stage = _plain_escape(item.get("stage"))
+            why = _plain_escape(item.get("why")) if item.get("why") else ""
+            cmd = _plain_escape(item.get("command")) if item.get("command") else ""
+            parts = [f'<div class="card" data-slice="{html.escape(str(item.get("id") or ""))}">'
+                     f'<div><span class="b">{sid}</span> <span class="dim">({state} · {stage})</span> {title}</div>']
+            if why:
+                parts.append(f'<div class="card-why">{why}</div>')
+            if cmd:
+                parts.append(f'<div class="card-cmd"><code>{cmd}</code></div>')
+            parts.append("</div>")
+            cards.append("\n".join(parts))
+        body = "\n".join(cards) if cards else '<div class="dim">none</div>'
+        sections.append(
+            f'<section class="column" data-column="{html.escape(col)}">\n'
+            f'<h2>{_plain_escape(col)} <span class="dim">({len(items)})</span></h2>\n'
+            f'{body}\n</section>'
+        )
+    blocks = ['<div class="pipeline">', '<div class="pipeline-columns">', "\n".join(sections), "</div>"]
+    for key, label in (("person", "FOR YOU (a person)"), ("implementer", "FOR THE IMPLEMENTER")):
+        rows = facts.get(key) or []
+        if not rows:
+            continue
+        lines = [f'<div class="b">{html.escape(label)} <span class="dim">({len(rows)})</span></div>']
+        for row in rows:
+            kind = _plain_escape(row.get("kind"))
+            why = _plain_escape(row.get("why"))
+            cmd = _plain_escape(row.get("command")) if row.get("command") else ""
+            line = f'<div><span class="b">{kind}</span>  {why}'
+            if cmd:
+                line += f' — <code>{cmd}</code>'
+            line += "</div>"
+            lines.append(line)
+        blocks.append('<section class="steps">\n' + "\n".join(lines) + "\n</section>")
+    blocks.append("<div class=\"dim\">read-only: a person's step is command text only; nothing here runs a command.</div>")
+    blocks.append("</div>")
+    return _Html("\n".join(blocks))
+
+
 def document(name, pages, current, body, interval, at):
     """One whole page: `body`, already HTML, under a bar naming the project and linking every page.
 
@@ -122,7 +203,7 @@ def document(name, pages, current, body, interval, at):
 
 
 class _Handler(BaseHTTPRequestHandler):
-    """GET a page; nothing else."""
+    """GET a page or JSON endpoint; nothing else."""
 
     timeout = 30                     # a connection that sends nothing is closed rather than kept
 
@@ -150,14 +231,28 @@ class _Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self):
-        pages, path = self.server.pages, self.path.split("?", 1)[0]
+        pages, api, path = self.server.pages, self.server.api, self.path.split("?", 1)[0]
+        if path in api:
+            status = HTTPStatus.OK
+            try:
+                with self.server.computing:
+                    payload = api[path]()
+            except Exception as exc:
+                what = f"{type(exc).__name__}: {' '.join(str(exc).split())}"
+                print(f"ao watch --web: {path}: {what}", file=sys.stderr, flush=True)
+                if os.environ.get("AO_DEBUG", "") not in ("", "0"):
+                    traceback.print_exc()
+                status = HTTPStatus.INTERNAL_SERVER_ERROR
+                payload = {"error": what}
+            return self._reply(status, "application/json", json_document(payload))
         if path not in pages:
             return self._reply(HTTPStatus.NOT_FOUND, "text/plain",
-                               f"no page {path}; this view serves {', '.join(pages)}\n")
+                               f"no page {path}; this view serves {', '.join([*pages, *api])}\n")
         status = HTTPStatus.OK
         try:
             with self.server.computing:
-                body = ansi_html(pages[path][1]())
+                raw = pages[path][1]()
+                body = str(raw) if isinstance(raw, _Html) else ansi_html(raw)
         except Exception as exc:
             # Said on the page and on the terminal that started the view; the next refresh asks again.
             what = f"{type(exc).__name__}: {' '.join(str(exc).split())}"
@@ -187,10 +282,11 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class _Server(ThreadingHTTPServer):
-    """One loopback listener and the pages it serves.
+    """One loopback listener and the pages and JSON endpoints it serves.
 
     Each connection has a thread, so a browser's idle speculative connection holds up no other;
-    the pages themselves are computed one at a time, as the terminal panel computes its frames.
+    the pages and JSON responses themselves are computed one at a time, as the terminal panel
+    computes its frames.
     """
 
     daemon_threads = True
@@ -198,8 +294,8 @@ class _Server(ThreadingHTTPServer):
     # the bind succeed on a port another program already listens on, where it must fail instead.
     allow_reuse_address = os.name != "nt"
 
-    def __init__(self, address, pages, name, interval):
-        self.pages, self.name, self.interval = pages, name, interval
+    def __init__(self, address, pages, name, interval, api=None):
+        self.pages, self.api, self.name, self.interval = pages, dict(api or {}), name, interval
         self.computing = threading.Lock()
         super().__init__(address, _Handler)
 
@@ -226,15 +322,16 @@ class _Server(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
-def listen(pages, name, interval, port, host="127.0.0.1"):
+def listen(pages, name, interval, port, host="127.0.0.1", api=None):
     """A server bound to `host`:`port` and listening, not yet serving; its serve_forever() serves.
 
     `pages` maps a path to (label, compute), in the order the bar links them: compute() returns
-    the text a command prints, and it is called for every request of its page. `interval` is
-    the seconds between a page's refreshes. Port 0 takes a free one, which `server_port` names.
-    A host that is not an IPv4 loopback address is refused with ValueError before a socket is
-    made; a port that cannot be bound raises OSError.
+    the text a command prints (or an `_Html` fragment), and it is called for every request of its
+    page. `api` maps `/api/*` paths to functions returning a JSON dict, served with
+    `schema_version`. `interval` is the seconds between a page's refreshes. Port 0 takes a free
+    one, which `server_port` names. A host that is not an IPv4 loopback address is refused with
+    ValueError before a socket is made; a port that cannot be bound raises OSError.
     """
     if not loopback(host):
         raise ValueError(f"ao watch --web binds a loopback address only, such as 127.0.0.1; refused {host!r}")
-    return _Server((host, port), pages, name, interval)
+    return _Server((host, port), pages, name, interval, api=api)

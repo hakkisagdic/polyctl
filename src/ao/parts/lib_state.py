@@ -2055,7 +2055,7 @@ def last_nudge_error(root, parked=True):
     architect woken to judge it spends a window on a condition that waits on a clock (QUOTA-PARK).
     """
     try:
-        st = json.load(open(project_file(root, "watchdog-state"), encoding=UTF8))
+        st = json.load(open(project_file(root, "watchdog-state", key=next_project_key(root)), encoding=UTF8))
     except Exception:
         return None
     err = st.get("last_error")

@@ -495,8 +495,8 @@ def storm(root, limit=12):
     return len(sent) >= limit
 
 
-def state_path(root):
-    key = A.project_key(root)
+def state_path(root, record=True):
+    key = A.project_key(root) if record else A.next_project_key(root)
     return os.path.join(STATE_DIR, A.project_file_name("watchdog-state", key))
 
 
@@ -508,7 +508,7 @@ def load_state(root):
     the first `.get` (STATE-SHAPE).
     """
     try:
-        with open(state_path(root), encoding=UTF8) as fh:
+        with open(state_path(root, record=False), encoding=UTF8) as fh:
             state = json.load(fh)
     except Exception:
         state = None
