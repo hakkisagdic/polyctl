@@ -29,9 +29,10 @@ def _stub_beside_xcrun(tmp_path, monkeypatch, answer=None, exit_code=0):
                      f"echo {shlex.quote(str(answer or real))}\nexit {exit_code}\n", encoding="utf-8")
     xcrun.chmod(0o755)
     monkeypatch.delenv("AO_GIT", raising=False)
+    monkeypatch.delenv("DEVELOPER_DIR", raising=False)
     monkeypatch.setenv("PATH", str(stub.parent) + os.pathsep + os.environ.get("PATH", ""))
-    monkeypatch.setattr(A, "_GIT_BINARIES", {})
     monkeypatch.setattr(A, "_XCRUN_STUB", os.path.realpath(str(stub)))          # where macOS keeps its stub
+    monkeypatch.setattr(A, "_GIT_BINARIES", {})
     return stub, real, calls
 
 

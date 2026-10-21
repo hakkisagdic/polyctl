@@ -47,11 +47,19 @@ def _xcrun_git(candidate):
     xcrun = os.path.join(os.path.dirname(stub), "xcrun")
     if not (_native_executable(stub) and os.path.isfile(xcrun) and os.access(xcrun, os.X_OK)):
         return None
-    try:
-        result = subprocess.run([xcrun, "--find", "git"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, timeout=10)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+    import errno
+    result = None
+    for attempt in range(5):
+        try:
+            result = subprocess.run([xcrun, "--find", "git"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, timeout=60)
+            break
+        except subprocess.TimeoutExpired:
+            return None
+        except OSError as exc:
+            if attempt == 4 or exc.errno not in (errno.EAGAIN, errno.ENOMEM, getattr(errno, "ETXTBSY", None)):
+                return None
+            time.sleep(0.02)
     found = result.stdout.decode(UTF8, "replace").strip()
     if result.returncode == 0 and os.path.isabs(found) and os.path.basename(found) == "git" \
             and os.path.isfile(found) and os.access(found, os.X_OK) \
@@ -99,7 +107,7 @@ def git_binary():
     When that git is macOS's xcrun stub, the git xcrun names instead, asked once
     per process.
     """
-    key = (os.environ.get("AO_GIT"), os.environ.get("PATH", ""), os.name, os.environ.get("DEVELOPER_DIR"))
+    key = (os.environ.get("AO_GIT"), os.environ.get("PATH", ""), os.name, os.environ.get("DEVELOPER_DIR"), _XCRUN_STUB)
     found = _GIT_BINARIES.get(key)
     if found is None or (found != "git" and not os.path.isfile(found)):
         found = _GIT_BINARIES[key] = _find_git_binary()

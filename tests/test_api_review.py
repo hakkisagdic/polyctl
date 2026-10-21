@@ -12,6 +12,7 @@ import threading
 import pytest
 
 from ao import api_review, cli, lib as A, storage
+from tests.test_language_prompts import _newest_review
 from tests.test_review_chain import _args, _repo_with_change
 
 APPROVED = "VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0\n\n## Findings\nNone."
@@ -632,8 +633,7 @@ def test_a_route_opting_into_tree_gets_the_tree_and_evidence_while_a_route_witho
     assert "refused:" in tool_outputs[2] and "withheld" in tool_outputs[2]
     row = storage.read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)[-1]
     assert row["verdict"] == "APPROVED"
-    names = sorted(os.listdir(os.path.join(root, "semantic-review")))
-    evidence = A.review_evidence(open(os.path.join(root, "semantic-review", names[-1]), encoding="utf-8").read())
+    evidence = A.review_evidence(_newest_review(root))
     assert evidence["tool"]["handed"] == expected_digest
     assert evidence["tool"]["bytes"] == len(staged_diff)
     assert evidence["tool"]["rounds"] == 1 and evidence["tool"]["read_bytes"] > 0
@@ -652,8 +652,7 @@ def test_a_route_opting_into_tree_gets_the_tree_and_evidence_while_a_route_witho
     (only_req,) = plain_served.requests
     assert "tools" not in only_req["body"]
     assert cli._tree_note(project, True) not in only_req["body"]["messages"][0]["content"]
-    names = sorted(os.listdir(os.path.join(root, "semantic-review")))
-    plain_evidence = A.review_evidence(open(os.path.join(root, "semantic-review", names[-1]), encoding="utf-8").read())
+    plain_evidence = A.review_evidence(_newest_review(root))
     assert plain_evidence["tool"]["rounds"] == 0 and plain_evidence["tool"]["read_bytes"] == 0
 
 

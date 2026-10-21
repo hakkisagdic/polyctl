@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 from ao import cli, language, lib as A
+from tests.test_language_prompts import _newest_review
 from tests.test_review_chain import _args, _repo_with_change
 from tests.test_reviewer_identity import _commit_ok
 
@@ -90,11 +91,7 @@ def _seen(record):
     return [json.loads(line) for line in record.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def _only_review(root):
-    names = sorted(os.listdir(os.path.join(root, "semantic-review")))
-    assert len(names) == 1, names
-    with open(os.path.join(root, "semantic-review", names[0]), encoding="utf-8") as fh:
-        return fh.read()
+_only_review = _newest_review
 
 
 def test_ao_hands_the_tool_the_exact_staged_candidate_and_the_evidence_names_it(project, tmp_path, monkeypatch):
@@ -107,7 +104,7 @@ def test_ao_hands_the_tool_the_exact_staged_candidate_and_the_evidence_names_it(
     assert cli.cmd_review(dict(project, reviewer=route), _args()) == 0
 
     (seen,) = _seen(record)
-    body = _only_review(root)
+    body = _newest_review(root)
     evidence = A.review_evidence(body)
     digest = "sha256:" + hashlib.sha256(staged_diff).hexdigest()
     assert (tmp_path / "tool-record.jsonl.diff").read_bytes() == staged_diff
@@ -159,7 +156,7 @@ def test_a_tool_of_another_release_is_unavailable_not_taken_for_the_measured_one
 
     assert cli.cmd_review(dict(project, reviewer=route), _args()) == 3
 
-    body = _only_review(root)
+    body = _newest_review(root)
     assert "VERDICT: UNAVAILABLE" in body and "0.45" in body
     assert not record.exists() and A.rounds(root, "semantic-review") == 0
 
@@ -219,7 +216,7 @@ def test_an_absent_tool_is_unavailable_and_says_what_would_install_it(project, t
 
     assert cli.cmd_review(dict(project, reviewer=route), _args()) == 3
 
-    body = _only_review(root)
+    body = _newest_review(root)
     assert "VERDICT: UNAVAILABLE" in body and f"tool-reviewer: not installed; {install}" in body
     assert A.rounds(root, "semantic-review") == 0
     assert os.listdir(A.review_requests_dir(root))
@@ -289,7 +286,7 @@ def test_a_tool_that_leaves_no_answer_where_its_adapter_says_is_unavailable_not_
 
     assert cli.cmd_review(dict(project, reviewer=route), _args()) == 3
 
-    body = _only_review(root)
+    body = _newest_review(root)
     assert "VERDICT: UNAVAILABLE" in body and reason in body
     assert len(_seen(record)) == 1 and A.rounds(root, "semantic-review") == 0
 
@@ -305,7 +302,7 @@ def test_every_section_hands_the_same_candidate_and_the_review_records_it_once(p
     assert cli.cmd_review(dict(project, reviewer=route, review={"lenses": "auto"}), _args()) == 0
 
     seen = _seen(record)
-    evidence = A.review_evidence(_only_review(root))
+    evidence = A.review_evidence(_newest_review(root))
     assert [section["section"] for section in evidence["sections"]] == ["lens:correctness", "lens:subprocess"]
     assert len(seen) == 2 and {entry["seen"] for entry in seen} == {evidence["diff_digest"]}
     assert evidence["tool"]["handed"] == evidence["diff_digest"]

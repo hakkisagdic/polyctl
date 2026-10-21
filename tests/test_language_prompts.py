@@ -121,8 +121,14 @@ def _staged_diff(root):
 
 
 def _newest_review(root):
-    directory = Path(root, "semantic-review")
-    return sorted(directory.glob("*.md"))[-1].read_text(encoding="utf-8")
+    """The artefact the review ledger's newest row names (TESTS-UNDER-LOAD).
+
+    review_artefact_name names a second review of the same head in the same second `<stem>-2.md`,
+    which sorts before `<stem>.md`; the product itself never orders reviews by name, and reads
+    them in the order the review ledger records them.
+    """
+    row = storage.read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)[-1]
+    return Path(root, "semantic-review", row["artefact"]).read_text(encoding="utf-8")
 
 
 def _handed_to_turns(monkeypatch):
