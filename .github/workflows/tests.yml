@@ -1,10 +1,14 @@
 name: tests
 # The suite runs on GitHub's hosted runners, which cost nothing for a public repository:
-#   - every push to main and every pull request: Ubuntu, on the Python 3.9 support floor and on 3.12;
+#   - every push to main and every pull request: Ubuntu, on the Python 3.9 support floor (ubuntu-24.04) and on 3.12
+#     (ubuntu-latest);
 #   - every Monday: macOS and Windows on 3.12, and Windows once more without Python's UTF-8 mode;
 #   - on demand, one environment or all, with UTF-8 mode or without it:
 #       gh workflow run tests -f os=windows-latest -f python=3.12
 #       gh workflow run tests -f os=windows-latest -f python=3.12 -f utf8=off
+# Python 3.9 is the support floor (what macOS ships), and on 2026-10-21 GitHub moved ubuntu-latest to Ubuntu 26.04,
+# which has no Python 3.9 build at actions/setup-python: the 3.9 Ubuntu legs run on ubuntu-24.04, the newest Ubuntu
+# image with a 3.9 build, and the pin moves when that image is retired (CI-UBUNTU-39).
 # Every lane's log ends with each test it skipped and the reason (-rs): a test that cannot pass on a
 # platform is skipped there with its reason, never silently absent (#71).
 on:
@@ -43,12 +47,16 @@ concurrency:
 jobs:
   ubuntu:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
-    name: ubuntu-latest / Python ${{ matrix.python }}
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.9", "3.12"]
-    runs-on: ubuntu-latest
+        include:
+          - os: ubuntu-24.04
+            python: "3.9"
+          - os: ubuntu-latest
+            python: "3.12"
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     env:
       PYTHONDONTWRITEBYTECODE: "1"
@@ -126,7 +134,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.os == 'all' && '["ubuntu-latest","macos-latest","windows-latest"]' || format('["{0}"]', inputs.os)) }}
+        os: ${{ fromJSON(inputs.os == 'all' && (inputs.python == '3.9' && '["ubuntu-24.04","macos-latest","windows-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') || format('["{0}"]', inputs.os == 'ubuntu-latest' && inputs.python == '3.9' && 'ubuntu-24.04' || inputs.os)) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90                     # as the weekly job's: Windows is the slowest runner (CI-WINDOWS-TIME-2)
     env:

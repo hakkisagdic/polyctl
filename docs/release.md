@@ -64,9 +64,10 @@ git push origin main
 
 ## 4. Tests green on Linux, macOS and Windows (person starts the runs; anyone reads them)
 
-The push runs Ubuntu on Python 3.9 and 3.12 by itself. Run all three operating systems on the
-support floor and on a current interpreter, on the release commit that main now points at, and
-read every run green.
+The push runs Ubuntu on Python 3.9 (`ubuntu-24.04`, the newest Ubuntu image with a 3.9 build) and
+3.12 (`ubuntu-latest`) by itself. Run all three operating systems on the support floor and on a
+current interpreter, on the release commit that main now points at, and read every run green
+(`-f os=all -f python=3.9` runs its Ubuntu leg on `ubuntu-24.04` too).
 
 ```bash
 gh workflow run tests --ref main -f os=all -f python=3.9
