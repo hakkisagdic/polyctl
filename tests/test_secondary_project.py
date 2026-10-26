@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 from tests.scenarios import World
 
 
@@ -15,17 +15,17 @@ def world(project, monkeypatch, tmp_path):
 
 
 def _secondary(world, tmp_path, *queued, written_ago=0):
-    other = tmp_path / "ao-secondary"
-    (other / ".ao").mkdir(parents=True)
-    config = {"project": "ao-secondary", "mailbox": "agent-mail", "reviews": "semantic-review",
+    other = tmp_path / "polyctl-secondary"
+    (other / ".polyctl").mkdir(parents=True)
+    config = {"project": "polyctl-secondary", "mailbox": "agent-mail", "reviews": "semantic-review",
               "implementer": {"adapter": "kiro", "session": "s2", "name": "kiro"}}
-    (other / ".ao" / "config.json").write_text(json.dumps(config), encoding="utf-8")
-    (other / ".ao" / "board.md").write_text("# Board\n\n## running\n\n## blocked\n\n## queued\n"
+    (other / ".polyctl" / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    (other / ".polyctl" / "board.md").write_text("# Board\n\n## running\n\n## blocked\n\n## queued\n"
                                             + "".join(f"{line}\n" for line in queued) + "\n## verified\n\n## done\n",
                                             encoding="utf-8")
     stored = {key: value for key, value in world.cfg.items() if key != "root"}
-    stored["secondary"] = [{"root": str(other), "name": "ao"}]
-    with open(os.path.join(world.root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    stored["secondary"] = [{"root": str(other), "name": "polyctl"}]
+    with open(os.path.join(world.root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(stored, fh)
     transcript = tmp_path / "secondary-transcript.jsonl"
     transcript.write_text("{}\n", encoding="utf-8")
@@ -48,7 +48,7 @@ def test_an_implementer_writing_in_the_secondary_project_is_working_not_idle(wor
 
     world.cycle(dry_run=False)
 
-    assert world.verdict.startswith("working in ao") and "not nudging here" in world.verdict
+    assert world.verdict.startswith("working in polyctl") and "not nudging here" in world.verdict
     assert _implementer_turns(world) == []
 
 
@@ -59,11 +59,11 @@ def test_with_nothing_ready_here_the_nudge_names_the_secondary_projects_ready_it
 
     trace = world.cycle()
 
-    assert any("READY S9 in ao" in line for line in trace)
+    assert any("READY S9 in polyctl" in line for line in trace)
     assert "DRY RUN" in world.verdict or "nudging" in world.verdict
     cfg = A.load_config(world.root)
     found = A.secondary_ready(cfg)
-    assert found["item"] == "S9" and "secondary project ao" in W.secondary_note(cfg, found)
+    assert found["item"] == "S9" and "secondary project polyctl" in W.secondary_note(cfg, found)
 
 
 def test_a_blocker_declared_for_a_person_reaches_a_person_and_is_never_held(world):
@@ -96,10 +96,10 @@ def test_working_elsewhere_picks_the_newest_active_transcript(project, monkeypat
 
 def test_status_names_secondary_activity_while_slowing(project, monkeypatch):
     monkeypatch.setattr(A, "busy", lambda cfg, adapter: ("slowing", 100, "waiting"))
-    monkeypatch.setattr(A, "working_elsewhere", lambda cfg, idle: {"name": "ao", "root": "other", "age": 1})
+    monkeypatch.setattr(A, "working_elsewhere", lambda cfg, idle: {"name": "polyctl", "root": "other", "age": 1})
     monkeypatch.setattr(A, "quota", lambda adapter: None)
 
     facts = cli.status_facts(project)
 
     assert facts["implementer"]["state"] == "slowing"
-    assert facts["implementer"]["working_elsewhere"]["name"] == "ao"
+    assert facts["implementer"]["working_elsewhere"]["name"] == "polyctl"

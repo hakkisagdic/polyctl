@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 from tests.test_commit_authority import _allow_commit_prerequisites
 from tests.test_review_chain import _args, _fake, _repo_with_change
 

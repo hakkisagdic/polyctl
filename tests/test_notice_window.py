@@ -1,6 +1,6 @@
 """A window is read whole, whatever the notices ledger still holds (NOTICE-WINDOW).
 
-Whether a notice may ring again was read from the last 100 KB of `.ao/ledger/notices.jsonl`.
+Whether a notice may ring again was read from the last 100 KB of `.polyctl/ledger/notices.jsonl`.
 Rebuilt after two weeks off, a day of notices was more than that: a review parked through the
 day rang the desktop and the phone again each time its last ring had left those 100 KB, and
 the ledger's own bound (`retention.observation_kb`) can keep less than a window. When each
@@ -15,8 +15,8 @@ import sys
 import time
 from types import SimpleNamespace
 
-from ao import cli, email, lib as A, telegram
-from ao import watchdog as W
+from polyctl import cli, email, lib as A, telegram
+from polyctl import watchdog as W
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 HOUR = 3600
@@ -30,7 +30,7 @@ def _clock(monkeypatch, start=None):
 
 
 def _ledger(root):
-    return os.path.join(root, ".ao", "ledger", "notices.jsonl")
+    return os.path.join(root, ".polyctl", "ledger", "notices.jsonl")
 
 
 def _folded(root):
@@ -39,7 +39,7 @@ def _folded(root):
 
 
 def _bound(project, kb):
-    with open(os.path.join(project["root"], ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(project["root"], ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(dict({k: v for k, v in project.items() if k != "root"}, retention={"observation_kb": kb}), fh)
 
 
@@ -146,9 +146,9 @@ def test_what_no_fold_counted_is_folded_before_the_watchdog_or_a_prune_trims_it(
     assert A.notice_recently_sent(root, "decision-open:D-1", 2 * HOUR)
 
 
-RING = ("import sys; from ao import lib as A; "
+RING = ("import sys; from polyctl import lib as A; "
         "A.record_notice(sys.argv[1], 'proj: hold standing 5h', 'set by owner', True, key='hold-standing')")
-BUSY = ("import sys; from ao import lib as A; "
+BUSY = ("import sys; from polyctl import lib as A; "
         "[A.record_notice(sys.argv[1], 'proj: condition', 'x' * 200, False, key='other-%d' % (n % 7)) "
         "for n in range(500)]")
 
@@ -246,7 +246,7 @@ def test_a_key_past_the_fold_bound_is_kept_while_a_window_can_ask_for_it(project
 def test_a_fold_that_cannot_be_written_trims_nothing(project, monkeypatch):
     """NOTICE-WINDOW-2: a fold that could not be written was ignored, and the ledger was trimmed of what no fold
     had counted."""
-    from ao import storage
+    from polyctl import storage
     root = project["root"]
     _bound(project, 64)
     clock = _clock(monkeypatch)

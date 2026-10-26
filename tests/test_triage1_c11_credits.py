@@ -2,7 +2,7 @@
 import time
 from types import SimpleNamespace
 import pytest
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from datetime import date
 
 

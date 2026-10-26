@@ -6,7 +6,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from ao import cli, language, lib as A
+from polyctl import cli, language, lib as A
 
 SOURCE = '''def add(a, b):
     \"\"\"Add two numbers.
@@ -97,7 +97,7 @@ def test_a_one_path_test_only_candidate_is_judged_with_the_source_it_runs(projec
     assert context.index("def helper():") < context.index("def add(a, b):")
     assert "def unused():" not in context
     review = _review_file(project)
-    evidence = json.loads(re.search(r"<!-- ao-evidence: (.*) -->", review).group(1))
+    evidence = json.loads(re.search(r"<!-- polyctl-evidence: (.*) -->", review).group(1))
     assert evidence["candidate"]["changed_paths"] == ["tests/test_core.py"]
     assert "- context: read-only at" in review and "src/pkg/core.py; 2 definitions" in review
 

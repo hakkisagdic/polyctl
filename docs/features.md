@@ -1,18 +1,18 @@
 # Features and what each costs
 
-ao's cost is a menu. Everything that spends a model's quota is a switch in
-`.ao/config.json` (`"features": {…}`). All off, ao is a deterministic monitor — board,
+polyctl's cost is a menu. Everything that spends a model's quota is a switch in
+`.polyctl/config.json` (`"features": {…}`). All off, polyctl is a deterministic monitor — board,
 mailbox, gates under the lock, commit authority bound to an immutable index candidate,
 alarms, pings, hooks — and spends nothing.
 
 What each switch costs is **measured, not estimated**: an earlier version of this page
-carried percentages from one pilot, and nothing kept them true. `ao cost --features` reads
+carried percentages from one pilot, and nothing kept them true. `polyctl cost --features` reads
 the implementer's transcript and the watchdog's own logs and prints, for the window it
 covers, what each switch spent:
 
 | switch | on by default | measured as | what it spends |
 |---|---|---|---|
-| `review` | yes | implementer turns that ran `ao review` | the reviewer model reads the slice diff, once or twice per slice |
+| `review` | yes | implementer turns that ran `polyctl review` | the reviewer model reads the slice diff, once or twice per slice |
 | `inventory_review` | yes | counted with `review`; a transcript cannot tell them apart | one or two more reviews on slices that open a new surface |
 | `nudge` | yes | turns a nudge started, within five minutes, that wrote no product | implementer turns; only the empty ones are overhead |
 | `architect_wake` | yes | wakes started, from the watchdog's log; the architect's pool, not priced here | one architect turn per batch of anomalies or decisions |
@@ -20,20 +20,20 @@ covers, what each switch spent:
 | `reports` | yes | turns that only coordinated: inbox, report, board, writers | a few implementer tool calls per slice |
 
 The reviewer's own spend is the reviewer's pool and is not in the implementer's
-transcript either. `ao features` shows the last seven days beside each switch; if one
-is well above what you expect, something is looping — `ao cost --since 24h` names the
-turn class, `ao watchdog explain` the guard.
+transcript either. `polyctl features` shows the last seven days beside each switch; if one
+is well above what you expect, something is looping — `polyctl cost --since 24h` names the
+turn class, `polyctl watchdog explain` the guard.
 
 ```bash
-ao features                      # the switches, and what each spent in the last 7 days
-ao cost --features --since 30d   # the same, over a window you choose
-ao features off review --by Ada  # a person's act, on the record; gates still decide, review is skipped
-ao features off architect_wake   # anomalies are written and alarmed, nobody is woken
+polyctl features                      # the switches, and what each spent in the last 7 days
+polyctl cost --features --since 30d   # the same, over a window you choose
+polyctl features off review --by Ada  # a person's act, on the record; gates still decide, review is skipped
+polyctl features off architect_wake   # anomalies are written and alarmed, nobody is woken
 ```
 
-*In ao since slice LEADS-OPS: `ao cost` prints a window whose turns spent nothing - each one
+*In polyctl since slice LEADS-OPS: `polyctl cost` prints a window whose turns spent nothing - each one
 unanswered, or a harness that counts no usage - with a total of 0 and no share beside each class,
-where the total read 1 and every class 0% of it. A review file a prune removes while `ao cost`
+where the total read 1 and every class 0% of it. A review file a prune removes while `polyctl cost`
 counts them is left out, where the command ended on it.*
 
 A switch write observes the same byte and nesting limits as every project config write
@@ -43,29 +43,29 @@ recorded, so retry after fixing storage to record a switch that requires one (TR
 
 What each switch changes when off:
 
-- `review` off — `ao commit-ok` no longer requires an APPROVED review; the
+- `review` off — `polyctl commit-ok` no longer requires an APPROVED review; the
   staged candidate must still be isolated and exactly match its verification,
-  and `ao review` still works when asked.
+  and `polyctl review` still works when asked.
 - `inventory_review` off — the playbook and backlog rule stop asking for an
   inventory review; the surface inventory itself is still good practice.
 - `windows_job` off — on Windows, a reviewer or version probe is not held in a
   kernel Job Object with `KILL_ON_JOB_CLOSE` ([windows.md](windows.md)).
 
-*In ao since slice FEATURE-RECORDED: `review`, `inventory_review` and `windows_job` weaken a
-guarantee, so they are switched off by a person, on the record, as a waiver is: `ao features off
+*In polyctl since slice FEATURE-RECORDED: `review`, `inventory_review` and `windows_job` weaken a
+guarantee, so they are switched off by a person, on the record, as a waiver is: `polyctl features off
 review --by <name>` writes the switch and appends the name, the login and whether a terminal was
-attached to `.ao/ledger/opt-ins.jsonl`, and switching one on is recorded too. The switch was read
-from `.ao/config.json` alone - a file the implementer can write - so an implementer that wrote
+attached to `.polyctl/ledger/opt-ins.jsonl`, and switching one on is recorded too. The switch was read
+from `.polyctl/config.json` alone - a file the implementer can write - so an implementer that wrote
 `"features": {"review": false}` was granted on verification alone, and the grant bound its
-tree, so neither `ao doctor` nor the watchdog flagged the commit. A switch the config turns off
-with no person's record behind it now stays on: `ao features`, `ao commit-ok` and `ao doctor`
+tree, so neither `polyctl doctor` nor the watchdog flagged the commit. A switch the config turns off
+with no person's record behind it now stays on: `polyctl features`, `polyctl commit-ok` and `polyctl doctor`
 say so.*
 
-*In ao since slice OPTIN-ATTESTED: a record counts only where this machine's checkpoint store records
-ao appending it. The first row of a chain needs no digest, so an implementer that wrote
-`"features": {"review": false}` and one row into `.ao/ledger/opt-ins.jsonl` by hand had review off;
-so did a row written after ao's own. Such a row - or one recorded on another machine - turns nothing
-off here, ao appends nothing after it, and `ao doctor` names it.*
+*In polyctl since slice OPTIN-ATTESTED: a record counts only where this machine's checkpoint store records
+polyctl appending it. The first row of a chain needs no digest, so an implementer that wrote
+`"features": {"review": false}` and one row into `.polyctl/ledger/opt-ins.jsonl` by hand had review off;
+so did a row written after polyctl's own. Such a row - or one recorded on another machine - turns nothing
+off here, polyctl appends nothing after it, and `polyctl doctor` names it.*
 - `nudge` off — the watchdog measures, alarms and records, but never starts an
   implementer turn; a person starts the implementer.
 - `architect_wake` off — anomaly files and alarms only; a person reads them.
@@ -75,26 +75,26 @@ off here, ao appends nothing after it, and `ao doctor` names it.*
   PowerShell; it spends nothing, and is off until someone on Windows turns it on (#9).
 
 Watching pull requests is a setting, not a switch, because it spends no model's quota: with
-`pr.watch` on, `ao pr watch --once` reads the pull requests of this checkout's branches through gh,
+`pr.watch` on, `polyctl pr watch --once` reads the pull requests of this checkout's branches through gh,
 never writes to GitHub, and mails the implementer a failed check, a merge conflict or requested
 changes, once each ([pr.md](pr.md)).
 
 ## Bypass, on the record
 
 Sometimes the switch is not the answer: the reviewer is out of quota for two
-hours and the slice is ready. `ao waive review --slice B7 --why "…"` records a
-waiver; `ao commit-ok` honours it only for a matching running slice, and the
-pre-commit `ao commit-check` requires that waiver to remain open when the grant
-names no review. `ao catchup` later reviews the landed range with `ao review
+hours and the slice is ready. `polyctl waive review --slice B7 --why "…"` records a
+waiver; `polyctl commit-ok` honours it only for a matching running slice, and the
+pre-commit `polyctl commit-check` requires that waiver to remain open when the grant
+names no review. `polyctl catchup` later reviews the landed range with `polyctl review
 --commits` and closes the waiver, or writes the architect a decision request when
 the retrospective review finds problems. That review is held to the model
 family that wrote the range, not to whoever implements by then: the grant under
-a waiver records who landed it - the role of a turn ao started, the actor holding
+a waiver records who landed it - the role of a turn polyctl started, the actor holding
 that role, its adapter and the family declared for it - and a reviewer that
 declares that family, or none, is refused. Where no family was recorded, which
-is every waiver from before this and any grant from a caller ao did not start,
+is every waiver from before this and any grant from a caller polyctl did not start,
 the review is refused until a person names one with
-`ao catchup --author-family <family> --by <name>`; the family, the person, the
+`polyctl catchup --author-family <family> --by <name>`; the family, the person, the
 login and whether a terminal was attached are recorded with each review it
 decides, and no actor's grant admits the flag.
 
@@ -115,12 +115,12 @@ it to one argument's worth ([configuration.md](configuration.md)). A person's
 an agent or role, and records the name, login and terminal status as `boundary_by`
 in the review evidence. No actor's grant admits this act. The review is recorded
 as the waived slice's, not as whichever slice runs during the sitting, so a
-defect it finds counts against the slice that landed it in `ao stats`.
+defect it finds counts against the slice that landed it in `polyctl stats`.
 
 A split closes by proof instead: the grant for a slice the board marks
-`move-only` records its `ao split-check` proof only when the authorising waiver or
+`move-only` records its `polyctl split-check` proof only when the authorising waiver or
 review names that slice and no second move-only slice is running. Otherwise the
-grant explains why it records no proof. `ao catchup` accepts a recorded proof only
+grant explains why it records no proof. `polyctl catchup` accepts a recorded proof only
 for the waiver's own slice, runs that proof again on the commit that landed and
 closes the waiver on it, with the proof as the closing record's evidence and no
 reviewer started. When what landed is not a
@@ -128,31 +128,31 @@ pure move, or also changes a file the proof does not read, the waiver stays open
 and the reason is printed. A grant that recorded no proof, which is every grant
 from before this, is reviewed like any other, however much its diff looks like a
 move - unless a person states that its slice only moved code, with
-`ao catchup --move-only <slices> --by <name>`. The same proof then runs on each
+`polyctl catchup --move-only <slices> --by <name>`. The same proof then runs on each
 named slice's landed range, and the waiver closes on it, its closing record
 holding the statement - the slices, the person, the login and whether a terminal
 was attached - beside the proof. The statement closes nothing by itself: where the
 proof fails the waiver stays open with the reason, a named slice with no open
 waiver is reported, and no actor's grant admits the flag.
 
-`ao catchup --plan` lists each open waiver with its range, commits and changed
+`polyctl catchup --plan` lists each open waiver with its range, commits and changed
 lines, and which close by proof, `--move-only` included, and the totals, and
 changes nothing;
-`ao catchup --limit 10` starts at most ten reviews, still closes what needs no review and
+`polyctl catchup --limit 10` starts at most ten reviews, still closes what needs no review and
 says how many waivers wait for a later run to review them, and
-`ao catchup --slice B7` takes one slice's waivers, and
-`ao catchup --slice B7 --reviewer <actor>` reviews them with another reviewer actor of the project's
+`polyctl catchup --slice B7` takes one slice's waivers, and
+`polyctl catchup --slice B7 --reviewer <actor>` reviews them with another reviewer actor of the project's
 table in place of the reviewer role, so runs over different slices go side by side, each on its own
 platform, as the machine's load allows. A range whose last review decided
 nothing, UNAVAILABLE or INVALID, waits behind the ranges no review has failed on, so
 repeated runs reach every range; once a review finds the reviewer unavailable, the run
 starts no other review; and an INVALID review is reported as one. The reviews stay synchronous
-rather than going through `ao review submit`, which pins a staged candidate for
+rather than going through `polyctl review submit`, which pins a staged candidate for
 the running slice and hands back an id: a waived range is already landed, and a
 waiver closes only on the review recorded for exactly its range, or on its proof,
 in the run that asked for it. Whatever a run does not reach waits for the next one.
 
-*In ao since slice CATCHUP-ROW: catch-up uses the ledger row its own review call recorded.
+*In polyctl since slice CATCHUP-ROW: catch-up uses the ledger row its own review call recorded.
 Another review of the same range and author that finishes meanwhile cannot supply its verdict;
 if the call records nothing for a range that changed, the waiver stays open. The review ledger
 is checked before the call starts, including for a range with no net change. An unreadable ledger
@@ -165,10 +165,10 @@ closed; `1` when a waiver's close, a ledger or a decision request could not be w
 read; `2` when it is refused before it starts; and otherwise `0`, whether it made progress or
 had nothing to do: an idle catch-up is no failure. Rehearsing the catch-up planned for
 2026-10-01, a run whose every review found the reviewer unavailable exited 0, as a run that
-closed ten waivers did. `ao catchup --plan` exits `0`, or `1` when the waivers cannot be read,
-and a sitting repeats `ao catchup --limit 10` until `ao catchup --plan` counts 0 review(s).
+closed ten waivers did. `polyctl catchup --plan` exits `0`, or `1` when the waivers cannot be read,
+and a sitting repeats `polyctl catchup --limit 10` until `polyctl catchup --plan` counts 0 review(s).
 
-*In ao since slice LEADS-OPS: the architect's decision request after a NEEDS_CHANGES review, a
+*In polyctl since slice LEADS-OPS: the architect's decision request after a NEEDS_CHANGES review, a
 model's or a person's, is written before its waiver closes. Closed first, a request that could not
 be written left no open waiver, and no later run wrote it, so the review's findings reached nobody;
 now the waiver stays open, the run exits `1`, and the next run writes the request and closes it. A
@@ -176,7 +176,7 @@ review that exits 3 with nothing recorded - another review of the same range was
 sections - asked no reviewer: it is told as no review recorded, not as an unavailable reviewer, and
 holds no other review.*
 
-*In ao since slice CATCHUP-REVIEWER: `--reviewer` names an actor `ao role set reviewer` composed,
+*In polyctl since slice CATCHUP-REVIEWER: `--reviewer` names an actor `polyctl role set reviewer` composed,
 read from the table and never written to it; the implementer's actor, or one no reviewer composition
 made, is refused before the run starts. The run is the reviewer role's in every other way: the author's
 family, the implementer's session and engine and the flags that keep a reviewer from writing are held
@@ -186,39 +186,39 @@ slice race for its waiver, as two runs without `--reviewer` would.*
 Retrospective evidence reconciles the record; it never authorizes a candidate.
 Nothing is skipped silently, and nothing is lost when the run degrades:
 
-- deferred nudges and wakes (quota) are queued in `.ao/ledger/deferred.jsonl`
-  and replayed by `ao catchup`'s watchdog cycle; a row closes only once the
+- deferred nudges and wakes (quota) are queued in `.polyctl/ledger/deferred.jsonl`
+  and replayed by `polyctl catchup`'s watchdog cycle; a row closes only once the
   wake or nudge it waited for has started, never because a cycle ran, so one
   still out of quota stays open;
 - the credit burn rate is sampled every half hour; when it says the plan runs
   out before it resets, the alarm is red, days ahead;
-- `ao pings setup` gives an external service (healthchecks.io) a
+- `polyctl pings setup` gives an external service (healthchecks.io) a
   heartbeat from the watchdog and the doctor job — when both die, that service
   e-mails you, which nothing on the dead machine can;
-- `.ao-project` is the tracked enrollment boundary: only exact
-  `ao-project-v1\n` bytes in HEAD or the active index activate enforcement. An
-  incidental `.ao/` directory stays inert. A staged marker supports first
+- `.polyctl-project` is the tracked enrollment boundary: only exact
+  `polyctl-project-v1\n` bytes in HEAD or the active index activate enforcement. An
+  incidental `.polyctl/` directory stays inert. A staged marker supports first
   adoption; a staged deletion remains enrolled through HEAD. Once enrolled,
-  `.ao/config.json` must be a valid, non-empty top-level JSON object or every
-  commit is refused with an `ao init --profile agy-codex` repair. Its shared
+  `.polyctl/config.json` must be a valid, non-empty top-level JSON object or every
+  commit is refused with a `polyctl init --profile agy-codex` repair. Its shared
   pre-dispatch/enforcement reader consumes at most 1,048,576 bytes and rejects
   container nesting deeper than 64 before recursive JSON decoding.
-- `ao hooks status` asks Git for the effective hook path and reports its class,
+- `polyctl hooks status` asks Git for the effective hook path and reports its class,
   winning `core.hooksPath` scope/origin/value, each role's static and track
-  state, and misplaced AO forms. Exact current bytes remain labelled `behavior
+  state, and misplaced polyctl forms. Exact current bytes remain labelled `behavior
   unverified`; a separate `installed (execution proved)` result exists only when
-  `git hook run pre-commit` carries AO's isolated synthetic index to
+  `git hook run pre-commit` carries polyctl's isolated synthetic index to
   `commit-check` and receives the nonce-bound fail-closed response. Status,
   doctor, `doctor --check`, and init all use that same runtime result.
-- `ao hooks install` treats pre-commit and pre-push independently. Pre-commit
-  intends to revalidate the persisted grant against Git's active index; `ao
+- `polyctl hooks install` treats pre-commit and pre-push independently. Pre-commit
+  intends to revalidate the persisted grant against Git's active index; `polyctl
   push allow` opens the human push window for thirty minutes. Foreign,
   ambiguous, symlinked, tracked, and indeterminate targets are never
   overwritten. One eligible role may be installed while a custom other role is
   preserved, reported unavailable, and makes install return 1.
-- Install and uninstall preflight their complete mutation sets. `ao remove --yes`
+- Install and uninstall preflight their complete mutation sets. `polyctl remove --yes`
   is additionally two-phase: while the canonical marker remains in HEAD or the
-  active index it removes only the working-tree `.ao-project` and keeps state and
+  active index it removes only the working-tree `.polyctl-project` and keeps state and
   enforcement; after the authorized marker-deletion commit, a second invocation
   may remove state. If any eligible hook target is shared, external, or selected
   by global/system config, the command refuses every hook mutation unless

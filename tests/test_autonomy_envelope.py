@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from ao import cli, lib as A, watchdog as W
-from ao.storage import append_chained_jsonl
+from polyctl import cli, lib as A, watchdog as W
+from polyctl.storage import append_chained_jsonl
 from tests.scenarios import World
 
 

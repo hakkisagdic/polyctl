@@ -5,7 +5,7 @@
   turn has ended at the response, and the summary is bookkeeping.
 - A user record holding only tool results is not a person speaking, and a tool call is not
   the agent speaking: a message's words are the blocks `transcript.messages` declares.
-- The account `ao cost` sets beside ao's share is the implementer's own, or it says there
+- The account `polyctl cost` sets beside polyctl's share is the implementer's own, or it says there
   is none, never the first shipped adapter's.
 - A file the implementer only read is not its write: foreign edits ask the declared tools.
 - A refusal ends its turn; max_tokens does not, since the harness asks again in that turn.
@@ -22,7 +22,7 @@ import time
 from collections import Counter
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_harness_guard import _docstrings
 from tests.test_processes import _architect_process_table
 from tests.test_second_harness_cost import (HARNESS, R1, R2, R3, R4, _append, _bookkeeping, _call, _prompt,
@@ -98,10 +98,10 @@ def test_the_account_beside_the_share_is_the_implementers_own_or_it_says_there_i
     assert cli.cmd_cost(cfg, SimpleNamespace(since=None)) == 0
 
     out = capsys.readouterr().out
-    assert f"the account: {HARNESS} declares none ao can read" in out and "5,000" not in out and asked == []
+    assert f"the account: {HARNESS} declares none polyctl can read" in out and "5,000" not in out and asked == []
 
     monkeypatch.setattr(A, "turn_costs", lambda cfg, since=None: {
-        "turns": 10, "total": 1250.0, "unit": "credits", "ao_commands": Counter(),
+        "turns": 10, "total": 1250.0, "unit": "credits", "polyctl_commands": Counter(),
         "by_class": {"product": {"turns": 10, "usage": 1250.0, "wasted": 0, "wasted_usage": 0}}})
     assert cli.cmd_cost(project, SimpleNamespace(since=None)) == 0
     out = capsys.readouterr().out
@@ -248,7 +248,7 @@ def test_every_shipped_adapter_declares_its_unattended_arguments_and_every_comma
 
 
 def test_is_headless_reads_a_process_by_its_pid_alone(monkeypatch):
-    from ao import procs
+    from polyctl import procs
     vectors = {11: ["/usr/local/bin/claude", "-p", "x"], 12: ["/usr/local/bin/claude"],
                13: ["/opt/bin/kiro-cli", "chat", "--no-interactive", "x"], 14: None}
     monkeypatch.setattr(procs, "argv", lambda pid: vectors.get(pid))
@@ -257,7 +257,7 @@ def test_is_headless_reads_a_process_by_its_pid_alone(monkeypatch):
 
 
 def test_a_hold_stops_only_the_turns_their_own_harness_calls_unattended(monkeypatch):
-    from ao import procs
+    from polyctl import procs
     vectors = {21: ["/usr/local/bin/claude", "-p", "x"], 22: ["/usr/local/bin/claude", "--no-interactive"],
                23: ["/opt/bin/kiro-cli", "chat", "--no-interactive", "x"], 24: ["/opt/bin/kiro-cli", "chat"]}
     monkeypatch.setattr(procs, "all_pids", lambda: list(vectors))
@@ -280,8 +280,8 @@ def test_an_architect_session_holding_another_harness_argument_is_a_person_at_th
 
 def test_the_declaration_decides_and_a_layer_an_agent_can_write_does_not(project, monkeypatch):
     root = project["root"]
-    os.makedirs(os.path.join(root, ".ao", "adapters"), exist_ok=True)
-    with open(os.path.join(root, ".ao", "adapters", f"{HARNESS}.json"), "w", encoding="utf-8") as fh:
+    os.makedirs(os.path.join(root, ".polyctl", "adapters"), exist_ok=True)
+    with open(os.path.join(root, ".polyctl", "adapters", f"{HARNESS}.json"), "w", encoding="utf-8") as fh:
         json.dump(dict(A.load_adapter(HARNESS), detect={"headless": ["--resume"]}), fh)
 
     assert A.load_adapter(HARNESS, root)["detect"]["headless"] == ["--resume"]
@@ -298,18 +298,18 @@ def test_the_declaration_decides_and_a_layer_an_agent_can_write_does_not(project
 # ── the core names nothing these readings declare ──
 
 def _own_vocabulary(tree, protocol=False):
-    """Node ids of strings that spell ao's own protocol rather than decide anything about a harness.
+    """Node ids of strings that spell polyctl's own protocol rather than decide anything about a harness.
 
-    `stop` is the key of the heading ao writes into an urgent message (language.MARKERS) and, by
+    `stop` is the key of the heading polyctl writes into an urgent message (language.MARKERS) and, by
     coincidence of English, the value opencode's finish column holds when a model stopped cleanly.
     This pin guards the second: the core must not hardcode a harness's reason where it reads one.
-    A MARKERS key and the keys handed to language.forms are ao naming its own heading, so they are
-    not that. A harness that ever spells a stop reason as one of ao's headings is the case this
+    A MARKERS key and the keys handed to language.forms are polyctl naming its own heading, so they are
+    not that. A harness that ever spells a stop reason as one of polyctl's headings is the case this
     lets through, and it is the narrower risk of the two. The verb handed to `_systemctl` - `stop`
-    among `show`, `is-active` and `disable` - is systemd's own command for a unit ao scheduled on
+    among `show`, `is-active` and `disable` - is systemd's own command for a unit polyctl scheduled on
     Linux (LINUX-SCHEDULER), and reads nothing a harness said. `STOP_REASONS` in the ACP client is the
     protocol's own enumeration of why a prompt turn stops, which two harnesses happen to write in their
-    transcripts too; ao reads it from an agent speaking ACP, never from a harness's store (ACP-REVIEWER).
+    transcripts too; polyctl reads it from an agent speaking ACP, never from a harness's store (ACP-REVIEWER).
     """
     ids = set()
     for node in ast.walk(tree):
@@ -337,7 +337,7 @@ def test_the_core_holds_no_declared_stop_reason_and_no_unattended_argument_where
     assert {"end_turn", "stop_sequence", "refusal"} <= reasons and {"-p", "--print", "--no-interactive"} <= arguments
 
     found = []
-    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
+    for path in sorted((ROOT / "src" / "polyctl").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         docs = _docstrings(tree) | _own_vocabulary(tree, protocol=path.name == "acp.py")
         found += [f"{path.name}:{node.lineno} {node.value!r}" for node in ast.walk(tree)

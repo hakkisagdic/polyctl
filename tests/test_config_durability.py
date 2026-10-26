@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 from tests.test_capability_matrix import _strict_config
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
@@ -19,7 +19,7 @@ import os, sys, time
 root, marker, step, home = sys.argv[1:5]
 os.environ["HOME"] = home
 from types import SimpleNamespace
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 A.HOME = home
 original = storage.replace_file_durably
 def checkpoint(name):
@@ -30,7 +30,7 @@ def checkpoint(name):
 def replace(path, data, **kwargs):
     return original(path, data, _checkpoint=checkpoint)
 storage.replace_file_durably = replace
-# ao init writes the config in its folder held open from the project's root down, through no link (LEADS-ADAPTERS).
+# polyctl init writes the config in its folder held open from the project's root down, through no link (LEADS-ADAPTERS).
 original_in_tree = storage.replace_in_tree
 def replace_in_tree(root, rel, data, **kwargs):
     return original_in_tree(root, rel, data, _checkpoint=checkpoint)
@@ -38,7 +38,7 @@ storage.replace_in_tree = replace_in_tree
 '''
 
 WRITERS = {
-    "features": "from ao import features as F\nF.set_switch(root, 'review', False)\n",
+    "features": "from polyctl import features as F\nF.set_switch(root, 'review', False)\n",
     "profile": "cli._apply_profile(root, SimpleNamespace(" + ", ".join(f"{k}={v!r}" for k, v in PROFILE.items()) + "))\n",
     "init": (
         "cli._reviewer_probe = lambda cfg, timeout=None: {'configured': True, 'ok': True, "
@@ -51,7 +51,7 @@ WRITERS = {
 
 
 def _config(root):
-    return os.path.join(root, ".ao", "config.json")
+    return os.path.join(root, ".polyctl", "config.json")
 
 
 def _opt_in(project):
@@ -117,7 +117,7 @@ def test_a_failed_replacement_leaves_the_old_bytes_and_no_temporary_file(tmp_pat
     assert os.listdir(tmp_path) == ["config.json"]
 
 
-def test_a_config_ao_cannot_read_is_refused_not_rebuilt(project, capsys):
+def test_a_config_polyctl_cannot_read_is_refused_not_rebuilt(project, capsys):
     root = project["root"]
     open(_config(root), "w", encoding="utf-8").write("")
 

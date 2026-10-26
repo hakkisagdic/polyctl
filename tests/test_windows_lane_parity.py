@@ -1,7 +1,7 @@
 """The Windows lane runs the reviewer and authority tests the other lanes run (WINDOWS-LANE-PARITY).
 
 Each of those tests started a stand-in harness - a reviewer, a kiro-cli, an agy, an opencode, the conformance
-harness - through its shebang line, which Windows does not run, and ao knows a harness by the name of the program
+harness - through its shebang line, which Windows does not run, and polyctl knows a harness by the name of the program
 it starts: eighteen tests were skipped on the Windows lane, and what they hold was held on Windows by nothing.
 Every lane also ran Python in UTF-8 mode, which a Python a person installs on Windows does not run in.
 
@@ -27,7 +27,7 @@ from tests import standin
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = "import sys\nprint('ran', sys.argv[1:])\n"
-# The tests still skipped on Windows for a script its shebang runs, and why each is: the fake gh of `ao pr watch`
+# The tests still skipped on Windows for a script its shebang runs, and why each is: the fake gh of `polyctl pr watch`
 # is no reviewer's or authority's harness and is not yet a program, and the suite's own test of the python it
 # puts on PATH for such scripts, which it puts there on POSIX alone.
 STILL_BY_SHEBANG = {"test_pr_watch.py", "test_suite_isolation.py"}

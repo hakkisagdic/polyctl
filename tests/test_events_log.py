@@ -1,8 +1,8 @@
-"""ao tells the machine's event log what it did, and `ao events` reads and follows it (EVENTS-LOG).
+"""polyctl tells the machine's event log what it did, and `polyctl events` reads and follows it (EVENTS-LOG).
 
-A surface that wanted to know what ao was doing had to poll a project's files, and a person waiting
-on a submitted review ran `ao reviews` until it came back. Each place that does the work now appends
-one line to ~/.ao/events.jsonl: a verification recorded, a review submitted and ended, commit
+A surface that wanted to know what polyctl was doing had to poll a project's files, and a person waiting
+on a submitted review ran `polyctl reviews` until it came back. Each place that does the work now appends
+one line to ~/.polyctl/events.jsonl: a verification recorded, a review submitted and ended, commit
 authority granted, mail sent, a nudge and a wake. These tests hold each of them to one line, the
 reader to its filters and to following across the bound's trims, the log to its bound, and the work
 to standing when its event cannot be written.
@@ -12,13 +12,13 @@ import os
 import subprocess
 from types import SimpleNamespace
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 from tests import conftest
 from tests.scenarios import World
 
 
 def _write(*rows):
-    """Lines appended as another ao process would have written them, at the times the test chooses."""
+    """Lines appended as another polyctl process would have written them, at the times the test chooses."""
     with open(A.events_path(), "ab") as fh:
         for row in rows:
             fh.write(A.event_line(row))
@@ -29,12 +29,12 @@ def _of(kind):
 
 
 def _args(**given):
-    """`ao events` with its defaults, and what the test gives."""
+    """`polyctl events` with its defaults, and what the test gives."""
     return SimpleNamespace(**dict({"follow": False, "project": None, "since": None, "n": 20, "json": False}, **given))
 
 
 def _store(root, cfg):
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in cfg.items() if key != "root"}, fh)
 
 
@@ -45,7 +45,7 @@ def _stage(root):
 
 
 def _submit(project, monkeypatch, capsys, spawn=lambda root, rid: None):
-    """`ao review submit` on the staged candidate, its run started by `spawn`; the review's id."""
+    """`polyctl review submit` on the staged candidate, its run started by `spawn`; the review's id."""
     monkeypatch.setattr(cli, "_spawn_review_run", spawn)
     cli.cmd_review_submit(project, SimpleNamespace(boundary=None, paths=None))
     return capsys.readouterr().out.split()[0]
@@ -62,12 +62,12 @@ class _Exited:
 
 # ---- where the log is ---------------------------------------------------------------------------
 
-def test_the_log_is_under_ao_home_unless_ao_events_names_another_file(project, monkeypatch):
-    monkeypatch.delenv("AO_EVENTS")
+def test_the_log_is_under_polyctl_home_unless_polyctl_events_names_another_file(project, monkeypatch):
+    monkeypatch.delenv("POLYCTL_EVENTS")
 
     A.emit_event(project["root"], "verification", {"id": "V-1", "profile": None})
 
-    assert A.events_path() == os.path.join(A.HOME, ".ao", "events.jsonl")
+    assert A.events_path() == os.path.join(A.HOME, ".polyctl", "events.jsonl")
     (row,) = A.read_events()
     assert (row["project"], row["kind"]) == (A.project_key(project["root"]), "verification")
     assert row["data"] == {"id": "V-1"}
@@ -98,7 +98,7 @@ def test_a_grant_is_one_line_and_a_refusal_writes_none(project):
     assert event["data"] == {"token": "C-9", "verification": "V-1", "review": "r.md", "index_tree": "abc123"}
 
 
-def test_mail_ao_sends_is_one_line_naming_the_message_and_never_quoting_it(project, capsys):
+def test_mail_polyctl_sends_is_one_line_naming_the_message_and_never_quoting_it(project, capsys):
     args = SimpleNamespace(action="send", type="DECISION", topic="events", body="the body stays in the mailbox",
                            mail_class=None)
 
@@ -205,7 +205,7 @@ def test_a_wake_to_refill_the_queue_is_one_line_naming_its_depth(project, monkey
 
 # ---- the reader -------------------------------------------------------------------------------
 
-def test_ao_events_shows_one_projects_events_since_a_time_and_the_newest_n(project, capsys):
+def test_polyctl_events_shows_one_projects_events_since_a_time_and_the_newest_n(project, capsys):
     _write({"at": 1000.0, "project": "alpha", "kind": "verification", "data": {"id": "V-1", "passed": True}},
            {"at": 3000.0, "project": "beta", "kind": "mail-sent", "data": {"message": "m.md"}},
            {"at": 3500.0, "project": "Alpha", "kind": "wake", "data": {"why": "refill", "pid": 7}},
@@ -315,7 +315,7 @@ def test_a_line_left_unfinished_spoils_only_itself_and_is_counted_not_shown(proj
 # ---- the bound, and the work standing without its event ------------------------------------------
 
 def test_the_log_is_held_to_its_bound_as_it_is_written(project):
-    with open(os.environ["AO_SETTINGS"], "w", encoding="utf-8") as fh:
+    with open(os.environ["POLYCTL_SETTINGS"], "w", encoding="utf-8") as fh:
         json.dump({"retention": {"events_kb": 64}}, fh)
 
     largest = 0
@@ -334,7 +334,7 @@ def test_an_event_that_cannot_be_written_is_said_on_stderr_and_the_work_stands(p
                                                                                 tmp_path):
     blocked = tmp_path / "a-file-not-a-directory"
     blocked.write_text("", encoding="utf-8")
-    monkeypatch.setenv("AO_EVENTS", str(blocked / "events.jsonl"))
+    monkeypatch.setenv("POLYCTL_EVENTS", str(blocked / "events.jsonl"))
 
     row = A.record_verification(project["root"], {"id": "V-3", "at": 1, "passed": True})
 
@@ -352,7 +352,7 @@ def test_a_bound_that_cannot_be_held_is_said_and_the_event_still_stands(project,
     row = A.emit_event(project["root"], "nudge", {"pid": 1})
 
     assert row is not None and A.read_events() == [row]
-    assert f"ao: {A.events_path()} was not held to its bound: OSError: the disk is full" in capsys.readouterr().err
+    assert f"polyctl: {A.events_path()} was not held to its bound: OSError: the disk is full" in capsys.readouterr().err
 
 
 def test_a_credential_in_a_payload_is_masked_before_it_is_written(project):
@@ -365,7 +365,7 @@ def test_a_credential_in_a_payload_is_masked_before_it_is_written(project):
     assert token not in held and "note-[redacted:anthropic-key].md" in held
 
 
-def test_ao_events_takes_follow_project_since_n_and_json():
+def test_polyctl_events_takes_follow_project_since_n_and_json():
     words = ["events", "-f", "--project", "acme-api", "--since", "2h", "-n", "5", "--json"]
 
     args = cli.build_parser().parse_args(words)

@@ -1,13 +1,13 @@
 """The command a turn starts with is the package's, not the tree's (TURN-ARGV).
 
 The review of HARNESS-CONFIG noted that the watchdog composed the implementer's nudge from its adapter as every layer
-loads it - the project's own .ao/adapters/ among them - and started the architect's wake and refill with the argv its
-block in .ao/config.json names (backlog #116). Both are files an agent can write, so a change to either could start a
+loads it - the project's own .polyctl/adapters/ among them - and started the architect's wake and refill with the argv its
+block in .polyctl/config.json names (backlog #116). Both are files an agent can write, so a change to either could start a
 command the agent chose: another program in the harness's place, a grant that admits `git commit --no-verify` or a
 person's act, a model or a session that reads as a flag. Now each turn is composed from the adapter the package ships
 and checked against it before it starts - its program found as that harness's, its grant audited - and a role's command
 that differs from the one last accepted holds every turn, as unseen harness configuration does, until a person has
-seen it with `ao harness seen`.
+seen it with `polyctl harness seen`.
 """
 import json
 import os
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 from tests.scenarios import World
 
 BLOCKED = "# queue empty\n\n## KARAR GEREKLİ\n"
@@ -25,8 +25,8 @@ ARCHITECT = {"name": "fable", "argv": ["claude", "-p", "{prompt}"]}
 
 
 def _store(root, **blocks):
-    """Write role blocks into .ao/config.json, as an agent can; a block of None is taken out."""
-    path = os.path.join(root, ".ao", "config.json")
+    """Write role blocks into .polyctl/config.json, as an agent can; a block of None is taken out."""
+    path = os.path.join(root, ".polyctl", "config.json")
     with open(path, encoding="utf-8") as fh:
         cfg = json.load(fh)
     for role, block in blocks.items():
@@ -41,7 +41,7 @@ def _store(root, **blocks):
 
 def _declare(root, ident, resume):
     """An adapter in the project's own layer, which an agent can write."""
-    path = os.path.join(root, ".ao", "adapters", f"{ident}.json")
+    path = os.path.join(root, ".polyctl", "adapters", f"{ident}.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         json.dump({"id": ident, "name": ident, "verified": "untested", "contract": 1,
@@ -106,7 +106,7 @@ def test_a_nudge_whose_adapter_no_package_ships_is_refused_and_a_person_told(wor
     world.cycle(dry_run=False)
 
     assert _turns(world) == [] and world.verdict.endswith("not nudging")
-    assert "its adapter home-made is no adapter ao ships" in world.verdict
+    assert "its adapter home-made is no adapter polyctl ships" in world.verdict
     assert _refusals(world) == [(f"{A.project_key(world.root)}: nudge refused", "human")]
 
 
@@ -141,15 +141,15 @@ def test_a_wake_and_a_refill_that_run_another_program_are_refused(world):
 
 def test_an_architect_command_no_shipped_adapter_runs_is_refused():
     assert A.turn_refusal("architect", None, ["sh", "-c", "x"]) == \
-        "the watchdog refuses the architect's command: no adapter ao ships runs `sh`"
-    assert "its adapter home-made is no adapter ao ships" in A.turn_refusal("architect", "home-made", ["claude"])
+        "the watchdog refuses the architect's command: no adapter polyctl ships runs `sh`"
+    assert "its adapter home-made is no adapter polyctl ships" in A.turn_refusal("architect", "home-made", ["claude"])
 
 
 @pytest.mark.parametrize("grant, admitted", [
     ("Bash(git commit:*)", "skips the commit hook"),
-    ("Bash(ao waive:*)", "waives a gate"),
-    ("Bash(ao push allow:*)", "opens a push window"),
-    ("Bash(ao harness seen:*)", "records harness configuration as seen"),
+    ("Bash(polyctl waive:*)", "waives a gate"),
+    ("Bash(polyctl push allow:*)", "opens a push window"),
+    ("Bash(polyctl harness seen:*)", "records harness configuration as seen"),
     ("Bash(sh -c:*)", "runs arbitrary code"),
 ])
 def test_a_grant_that_admits_a_bypass_or_a_persons_act_is_refused_at_spawn(grant, admitted):
@@ -179,8 +179,8 @@ def test_a_wake_whose_grant_admits_a_hook_bypass_does_not_start(world):
                and line.endswith("not waking the architect") for line in trace)
 
 
-def test_every_command_ao_composes_from_a_shipped_adapter_starts():
-    """No false refusal: the nudge ao composes for each shipped adapter, and the architect argv `ao init` writes."""
+def test_every_command_polyctl_composes_from_a_shipped_adapter_starts():
+    """No false refusal: the nudge polyctl composes for each shipped adapter, and the architect argv `polyctl init` writes."""
     for ident, adapter in sorted(A.package_adapters().items()):
         if not (adapter.get("resume") or {}).get("argv"):
             continue
@@ -191,7 +191,7 @@ def test_every_command_ao_composes_from_a_shipped_adapter_starts():
         assert A.turn_refusal("architect", *A.turn_command(architect, "architect")) is None, ident
 
 
-def test_a_program_named_by_its_path_runs_only_where_ao_finds_that_harness(project, tmp_path):
+def test_a_program_named_by_its_path_runs_only_where_polyctl_finds_that_harness(project, tmp_path):
     root = project["root"]
     found = _program(tmp_path / "bin" / "claude")
     planted = _program(tmp_path / "elsewhere" / "claude")
@@ -203,7 +203,7 @@ def test_a_program_named_by_its_path_runs_only_where_ao_finds_that_harness(proje
                               resolved=resolved or program, search=search)
 
     assert refusal(found) is None
-    assert "which is not where ao finds claude-code's program (claude) on the path it searches" in refusal(planted)
+    assert "which is not where polyctl finds claude-code's program (claude) on the path it searches" in refusal(planted)
     assert "inside this repository, which an agent writes" in refusal(inside)
     assert "inside this repository" in refusal("claude", resolved=inside)           # found by name, on a path into it
     relative = os.path.join("tools", "claude")                                   # as this platform writes it
@@ -274,7 +274,7 @@ def test_a_turn_composed_from_a_command_nobody_has_seen_waits_though_the_file_is
                for line in trace)
 
 
-def test_ao_init_accepts_the_commands_it_composes_and_an_edit_after_it_is_unseen(tmp_path, monkeypatch, capsys):
+def test_polyctl_init_accepts_the_commands_it_composes_and_an_edit_after_it_is_unseen(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(A, "HOME", str(tmp_path / "home"))
     root = tmp_path / "repo"
     root.mkdir()
@@ -289,9 +289,9 @@ def test_ao_init_accepts_the_commands_it_composes_and_an_edit_after_it_is_unseen
 
     assert "the implementer's command, the architect's command" in capsys.readouterr().out
     assert {role: entry["by"] for role, entry in A.turn_record(str(root)).items()} == {
-        "implementer": "ao init", "architect": "ao init", "reviewer": "ao init", "hunter": "ao init"}
+        "implementer": "polyctl init", "architect": "polyctl init", "reviewer": "polyctl init", "hunter": "polyctl init"}
     assert [path for path, _, _ in A.unseen_harness_config(str(root)) if path.endswith("command")] == []
-    with open(os.path.join(str(root), ".ao", "config.json"), encoding="utf-8") as fh:
+    with open(os.path.join(str(root), ".polyctl", "config.json"), encoding="utf-8") as fh:
         architect = json.load(fh)["architect"]
     _store(str(root), architect=dict(architect, argv=architect["argv"] + ["--add-dir", "/"]))
     assert "the architect's command" in [path for path, _, _ in A.unseen_harness_config(str(root))]

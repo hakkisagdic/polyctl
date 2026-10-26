@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, settings as S, watchdog as W
+from polyctl import cli, lib as A, settings as S, watchdog as W
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -16,7 +16,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 @pytest.fixture
 def machine(tmp_path, monkeypatch):
     path = tmp_path / "machine-settings.json"
-    monkeypatch.setenv("AO_SETTINGS", str(path))
+    monkeypatch.setenv("POLYCTL_SETTINGS", str(path))
     return path
 
 
@@ -25,7 +25,7 @@ def _args(action, key=None, value=None, machine=False):
 
 
 def _project_file(root):
-    return json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))
+    return json.load(open(os.path.join(root, ".polyctl", "config.json"), encoding="utf-8"))
 
 
 def test_a_project_setting_comes_from_the_project_then_the_machine_then_its_default(project, machine):
@@ -50,7 +50,7 @@ def test_a_machine_setting_is_never_read_from_a_project(project, machine):
     assert any(key == "quota.block_percent" and "--machine" in text for key, text in S.problems(cfg))
 
 
-def test_ao_config_sets_gets_lists_and_unsets(project, machine, capsys):
+def test_polyctl_config_sets_gets_lists_and_unsets(project, machine, capsys):
     root = project["root"]
     assert cli.cmd_config(project, _args("set", "round_budget", "3")) == 0
     assert _project_file(root)["round_budget"] == 3
@@ -78,7 +78,7 @@ def test_ao_config_sets_gets_lists_and_unsets(project, machine, capsys):
     assert all(name in out for name in S.SETTINGS)
 
 
-def test_what_is_set_is_what_ao_uses(project, machine, monkeypatch):
+def test_what_is_set_is_what_polyctl_uses(project, machine, monkeypatch):
     cfg = dict(project, review_timeout=42, fanout={"max_agents": 2},
                implementer=dict(project["implementer"], name="dev"))
     assert cli._review_timeout(cfg) == 42
@@ -119,7 +119,7 @@ def test_the_documentation_lists_every_setting_with_its_default():
         assert shown == ("none" if default in ([], None) else str(default)), key
 
 
-def test_every_setting_the_docs_name_is_one_ao_reads():
+def test_every_setting_the_docs_name_is_one_polyctl_reads():
     groups = sorted({key.split(".")[0] for key in S.SETTINGS if "." in key} - {"implementer", "architect"})
     pattern = re.compile(r"`((?:%s)\.[a-z_]+|round_budget|review_timeout)`" % "|".join(groups))
     named = set()
@@ -143,7 +143,7 @@ def _number(node):
 def test_no_module_reads_a_threshold_with_a_default_of_its_own():
     numeric = {key.rsplit(".", 1)[-1] for key, spec in S.SETTINGS.items() if spec.kind in (int, float)}
     found = []
-    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
+    for path in sorted((ROOT / "src" / "polyctl").rglob("*.py")):
         if path.name == "settings.py":
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

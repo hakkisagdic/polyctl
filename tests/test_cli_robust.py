@@ -1,10 +1,10 @@
-"""Ordinary input ends in a message, and what ao prints suits where it goes (CLI-ROBUST).
+"""Ordinary input ends in a message, and what polyctl prints suits where it goes (CLI-ROBUST).
 
-A product review ran ao in a sandbox. `ao cost --since yesterday`, `ao stats --since 17/09/2026` and
-`ao mail compact soon` ended in tracebacks, among nine time syntaxes no two commands shared, and so
-did a ledger lock another process held and Ctrl+C. `ao answer` recorded a key the question never
-offered and overwrote the answer before it; there was no `ao --version`; colour went into pipes and
-past NO_COLOR; `ao watch` looped screen codes into a pipe; and `-C` a directory that does not exist
+A product review ran polyctl in a sandbox. `polyctl cost --since yesterday`, `polyctl stats --since 17/09/2026` and
+`polyctl mail compact soon` ended in tracebacks, among nine time syntaxes no two commands shared, and so
+did a ledger lock another process held and Ctrl+C. `polyctl answer` recorded a key the question never
+offered and overwrote the answer before it; there was no `polyctl --version`; colour went into pipes and
+past NO_COLOR; `polyctl watch` looped screen codes into a pipe; and `-C` a directory that does not exist
 showed an empty panel and exited 0.
 """
 import io
@@ -20,8 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import ao
-from ao import cli, lib as A, storage
+import polyctl
+from polyctl import cli, lib as A, storage
 
 ROOT = Path(__file__).resolve().parent.parent
 NOW = datetime(2026, 9, 17, 14, 30).timestamp()
@@ -153,7 +153,7 @@ def test_a_snooze_until_a_span_counts_forward_from_now(project):
     ["status", "--window", "yesterday-ish"], ["prune", "--days", "2099-01-01"],
     ["alarms", "snooze", "doctor:commit-hook", "--until", "next week"],
 ])
-def test_a_time_ao_cannot_read_exits_2_with_a_message_and_no_traceback(project, capsys, words):
+def test_a_time_polyctl_cannot_read_exits_2_with_a_message_and_no_traceback(project, capsys, words):
     with pytest.raises(SystemExit) as stopped:
         cli.main(["-C", project["root"], *words])
 
@@ -188,7 +188,7 @@ def test_a_ledger_lock_held_past_the_wait_is_one_line_naming_it(project, monkeyp
 
     err = capsys.readouterr().err
     assert code == 1 and "Traceback" not in err and len(err.strip().splitlines()) == 1
-    assert os.path.join(".ao", "ledger", "decisions.jsonl.lock") in err and "run this again" in err
+    assert os.path.join(".polyctl", "ledger", "decisions.jsonl.lock") in err and "run this again" in err
 
 
 def test_ctrl_c_exits_130_without_a_traceback_and_lets_the_machine_lock_go(project, monkeypatch, tmp_path, capsys):
@@ -222,18 +222,18 @@ def test_ctrl_c_while_a_message_body_is_read_exits_130_and_writes_nothing(projec
     assert "Traceback" not in capsys.readouterr().err
 
 
-def test_an_unexpected_error_is_one_line_and_ao_debug_keeps_its_traceback(project, monkeypatch, capsys):
+def test_an_unexpected_error_is_one_line_and_polyctl_debug_keeps_its_traceback(project, monkeypatch, capsys):
     def broken(cfg, args):
         raise RuntimeError("the store\nis gone")
 
     monkeypatch.setattr(cli, "cmd_board", broken)
-    monkeypatch.delenv("AO_DEBUG", raising=False)
+    monkeypatch.delenv("POLYCTL_DEBUG", raising=False)
 
     assert cli.main(["-C", project["root"], "board"]) == 1
     [line] = capsys.readouterr().err.splitlines()
-    assert line.startswith("ao board: RuntimeError: the store is gone") and "AO_DEBUG=1" in line
+    assert line.startswith("polyctl board: RuntimeError: the store is gone") and "POLYCTL_DEBUG=1" in line
 
-    monkeypatch.setenv("AO_DEBUG", "1")
+    monkeypatch.setenv("POLYCTL_DEBUG", "1")
     with pytest.raises(RuntimeError):
         cli.main(["-C", project["root"], "board"])
 
@@ -291,7 +291,7 @@ def test_two_channels_answering_at_once_keep_one_answer_and_refuse_the_other(pro
     """CLI-ROBUST-2: the terminal and the phone answering one question at once each read it unanswered, and the
     later write dropped the earlier answer. The second now waits for the first, finds it answered and is refused."""
     import threading
-    from ao import storage
+    from polyctl import storage
     root = project["root"]
     asked = A.ask(root, "Which database for the cache?", ["Postgres", "SQLite"])
     write, outcomes, phone = storage.replace_file_durably, [], []
@@ -339,7 +339,7 @@ def test_a_change_to_an_answer_recorded_before_rows_keeps_that_answer_first(proj
 
 # ---- the version -------------------------------------------------------------------------------
 
-def test_the_version_is_written_once_and_ao_the_package_and_pyproject_agree(capsys):
+def test_the_version_is_written_once_and_polyctl_the_package_and_pyproject_agree(capsys):
     with pytest.raises(SystemExit) as stopped:
         cli.main(["--version"])
     shown = capsys.readouterr().out.strip()
@@ -349,8 +349,8 @@ def test_the_version_is_written_once_and_ao_the_package_and_pyproject_agree(caps
     source = re.search(r'^\[tool\.hatch\.version\]\n(?:#.*\n)*path = "([^"]+)"', pyproject, re.M).group(1)
     written = re.findall(r'^__version__ = "([^"]+)"', (ROOT / source).read_text(encoding="utf-8"), re.M)
 
-    assert stopped.value.code == 0 and shown == f"ao {ao.__version__}"
-    assert source == "src/ao/__init__.py" and written == [ao.__version__]
+    assert stopped.value.code == 0 and shown == f"polyctl {polyctl.__version__}"
+    assert source == "src/polyctl/__init__.py" and written == [polyctl.__version__]
     assert re.search(r'^dynamic = \["version"\]$', project, re.M) and not re.search(r"^version\s*=", project, re.M)
 
 

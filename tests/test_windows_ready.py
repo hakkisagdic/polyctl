@@ -1,4 +1,4 @@
-"""What a Windows machine does to ao's files and processes, simulated where it can be (#9, #71).
+"""What a Windows machine does to polyctl's files and processes, simulated where it can be (#9, #71).
 
 The Windows lane runs weekly and on demand. These hold on every platform what a Windows
 machine exposed: text written with CRLF, Git converting line endings on checkout,
@@ -10,7 +10,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 
 def _git(cwd, *args):
@@ -67,7 +67,7 @@ def test_vendored_skills_are_the_pinned_bytes_whatever_the_machine_converts(proj
 
 
 def test_a_process_a_fresh_windows_snapshot_lacks_is_not_queried_for_again(monkeypatch):
-    from ao import procs
+    from polyctl import procs
     queries = []
     monkeypatch.setattr(procs, "refresh", lambda: queries.append("snapshot"))
     monkeypatch.setattr(procs, "info", lambda pid: None)

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import allowlist as AL, cli, language, lib as A
+from polyctl import allowlist as AL, cli, language, lib as A
 from tests.standin import program
 from tests.test_catchup_evidence import (
     APPROVED, B_PART, PERSON, WITHOUT_B, _base, _catchup, _git, _land, _running, _write,
@@ -100,7 +100,7 @@ def test_case_aliases_in_one_import_are_refused_on_every_filesystem(project, tmp
 
 
 @pytest.mark.parametrize("target, kept", [
-    (".kiro/steering/AO-PLAYBOOK.md", {".kiro/steering/ao-playbook.md"}),
+    (".kiro/steering/POLYCTL-PLAYBOOK.md", {".kiro/steering/polyctl-playbook.md"}),
     (".kiro/steering/Private/guide.md", {".kiro/steering/private/"}),
 ])
 def test_kept_content_paths_are_case_folded(project, target, kept):
@@ -110,7 +110,7 @@ def test_kept_content_paths_are_case_folded(project, target, kept):
 
 def test_another_manifest_entry_owns_case_aliases_even_if_the_file_is_missing(project):
     root = Path(project["root"])
-    (root / ".ao/content.json").write_text(json.dumps({"skills": [{"skill": "Guide", "files": {
+    (root / ".polyctl/content.json").write_text(json.dumps({"skills": [{"skill": "Guide", "files": {
         ".kiro/steering/Guide.md": "sha256:old"}}]}), encoding="utf-8")
     item = A._content_item("steering", "guide")
     item["files"] = {".kiro/steering/guide.md": ("kiro", b"new")}
@@ -130,7 +130,7 @@ def test_reimport_preserves_a_hand_edited_agent(project, tmp_path, capsys, same_
     _write(source, ".kiro/agents/reader.json", replacement)
     _git(source, "commit", "-q", "-m", "another pin")
     new_pin = _git(source, "rev-parse", "HEAD")
-    manifest = Path(project["root"]) / ".ao/content.json"
+    manifest = Path(project["root"]) / ".polyctl/content.json"
     before = manifest.read_bytes()
     capsys.readouterr()
 
@@ -161,8 +161,8 @@ def test_boundary_replacement_requires_a_person(project, capsys, by):
     assert "--by" in out and ("required" in out if by is None else "person's statement" in out)
 
 
-@pytest.mark.parametrize("rule", ["Bash(ao catchup --boundary:*)",
-                                   "Bash(ao catchup --boundary text --by Alice)"])
+@pytest.mark.parametrize("rule", ["Bash(polyctl catchup --boundary:*)",
+                                   "Bash(polyctl catchup --boundary text --by Alice)"])
 def test_boundary_replacement_is_named_as_a_person_act(rule):
     reason = "replaces a waived range's commit claims"
     found = AL.problems(["claude", "--allowedTools", rule])

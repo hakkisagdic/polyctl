@@ -7,7 +7,7 @@ not the Slack tokens the rule named.
 """
 import pytest
 
-from ao import lib as A
+from polyctl import lib as A
 
 VALUE = "Q7" + "zX9" * 5                       # fourteen characters of nothing in particular
 

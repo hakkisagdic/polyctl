@@ -1,5 +1,5 @@
 #!/bin/sh
-# agent-orchestrator: nothing leaves this machine untested. Twice a push carried
+# polyctl: nothing leaves this machine untested. Twice a push carried
 # a test without its implementation; this is the mechanical answer.
 #
 # Git exports GIT_DIR (and friends) to hooks. Left in the environment, every git
@@ -20,9 +20,9 @@ fi
 # The refs being pushed come on standard input, once.
 refs=$(cat)
 # The suite took half an hour in one process. Where pytest-xdist is installed (the dev
-# extra) it runs in AO_PREPUSH_WORKERS processes, 4 unless set, and 0 keeps one; each
+# extra) it runs in POLYCTL_PREPUSH_WORKERS processes, 4 unless set, and 0 keeps one; each
 # process gets a home and a PATH of its own from tests/conftest.py, as one process does.
-workers=${AO_PREPUSH_WORKERS:-4}
+workers=${POLYCTL_PREPUSH_WORKERS:-4}
 parallel=""
 if [ "$workers" -gt 0 ] 2>/dev/null && "$PY" -c "import xdist" >/dev/null 2>&1; then
   parallel="-n $workers --dist loadfile"

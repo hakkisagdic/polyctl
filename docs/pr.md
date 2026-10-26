@@ -1,25 +1,25 @@
 # Pull requests
 
-ao governs what lands in a checkout. What becomes of a branch once a person pushes it is GitHub's
+polyctl governs what lands in a checkout. What becomes of a branch once a person pushes it is GitHub's
 to say: a check that failed there, a conflict with the base branch, a reviewer who asked for
-changes. Each of them waited until somebody opened the page. `ao pr watch --once` reads the open
+changes. Each of them waited until somebody opened the page. `polyctl pr watch --once` reads the open
 pull requests of this checkout's branches and mails the implementer each such fact, once.
 
-*In ao since slice PR-WATCH: `ao pr watch --once`, the `pr.watch` setting and `.ao/pr-watch.json`.
+*In polyctl since slice PR-WATCH: `polyctl pr watch --once`, the `pr.watch` setting and `.polyctl/pr-watch.json`.
 It is one pass that a person starts, and it is not wired into the watchdog: running it on the
 watchdog's cycle, so that nobody has to start it, is the next slice.*
 
 ```bash
-ao config set pr.watch on     # this project; off by default
-ao pr watch --once            # one pass: read, mail what is new, exit
+polyctl config set pr.watch on     # this project; off by default
+polyctl pr watch --once            # one pass: read, mail what is new, exit
 ```
 
 ## It reads, and never writes
 
-ao asks gh two things, in the checkout and without a shell: `gh pr list` for the open pull
+polyctl asks gh two things, in the checkout and without a shell: `gh pr list` for the open pull
 requests, and `gh pr view <n>` for each one that is this project's. It asks gh nothing that
-writes - no comment, label, review, merge or push - so GitHub holds nothing ao put there. gh finds
-the repository from the checkout's remotes, and ao finds gh as it finds any program: on PATH, in
+writes - no comment, label, review, merge or push - so GitHub holds nothing polyctl put there. gh finds
+the repository from the checkout's remotes, and polyctl finds gh as it finds any program: on PATH, in
 `binaries.extra_dirs`, then in the usual install directories. gh gets no terminal to prompt on and
 no colour, even from a shell that forces it with `CLICOLOR_FORCE` or `GH_FORCE_TTY`, so what it
 answers is JSON. It is opt-in because it reaches GitHub on the project's behalf.
@@ -29,11 +29,11 @@ lists it) in this repository, not in a fork. Every one is read before anything i
 pass that cannot read them all mails nothing and records nothing: a pull request left unread would
 look as if its facts had cleared.
 
-| when | exit | what ao prints |
+| when | exit | what polyctl prints |
 |---|---|---|
-| `pr.watch` is off | 2 | that it is off, and `ao config set pr.watch on` |
+| `pr.watch` is off | 2 | that it is off, and `polyctl config set pr.watch on` |
 | `--once` is missing | 2 | that it runs one pass |
-| gh is on no path ao searches | 1 | that gh is missing, and where ao looked |
+| gh is on no path polyctl searches | 1 | that gh is missing, and where polyctl looked |
 | gh is not authenticated (its exit status 4) | 1 | `gh auth login` |
 | gh fails, times out or answers with something that is not JSON | 1 | which read failed, and what gh said |
 | another pass is running | 0 | that it stood down; it read and mailed nothing |
@@ -68,11 +68,11 @@ decision because a repository that requires no review has no decision to read.
 
 ## Once per fact
 
-`.ao/pr-watch.json` records, for each pull request and fact, the head commit it was mailed at. A
+`.polyctl/pr-watch.json` records, for each pull request and fact, the head commit it was mailed at. A
 fact is mailed when it stands on a head it was not mailed at, or when it was not standing at the
 last pass: a push that leaves a check failing is mailed again, and so is a check that passes on a
 re-run and then fails again; a fact that still stands on the same head is not. A fact that clears
-is forgotten, and so is a pull request that is no longer open. A record ao cannot read is named,
+is forgotten, and so is a pull request that is no longer open. A record polyctl cannot read is named,
 and what stands is mailed once more.
 
 A fact is recorded as soon as its mail is written, so a pass stopped part way - killed, or its
@@ -83,8 +83,8 @@ new fact twice.
 ## The mail
 
 One mail per new fact, to whoever holds the implementer role, class `needs-read`, through the
-writer every message ao writes takes: `agent-mail/<stamp>-pr-watch-to-<implementer>-PR-<n>-<fact>-<head>.md`,
-with `pr`, `condition` and `head` in its envelope and a row in `.ao/ledger/mail.jsonl`. A name is a
+writer every message polyctl writes takes: `agent-mail/<stamp>-pr-watch-to-<implementer>-PR-<n>-<fact>-<head>.md`,
+with `pr`, `condition` and `head` in its envelope and a row in `.polyctl/ledger/mail.jsonl`. A name is a
 message's id, so a fact that returns within the minute its first mail was written in gets a
 numbered one. The mail names the pull request, its branches, the fact and what to look at. What
 GitHub supplies - a title, a check's name, the link an integration gave a check - reaches it on one

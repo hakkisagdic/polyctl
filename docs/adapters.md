@@ -29,25 +29,25 @@ No flag removes `codex exec`'s shell tool, so its `trust_none` runs it in its ow
 sandbox, which on codex-cli 0.160.0 read a file and refused a write and the network. It also
 leaves out the person's `config.toml`, which offered the model computer use, a browser and web
 search, and their execpolicy rules; it runs outside a repository and keeps the review out of the
-person's sessions. A codex reviewer is pinned to `--sandbox read-only`, and `ao doctor` names one
+person's sessions. A codex reviewer is pinned to `--sandbox read-only`, and `polyctl doctor` names one
 that loads the person's configuration.
 
 `--trust-tools=` does not hold kiro on its own. On kiro-cli 2.27.1, with `--no-interactive`, a tool
 it leaves untrusted runs all the same, since nobody is there to ask: a `touch` made its file, and
 reviewers ran tests, built virtual environments under /tmp and installed packages. So kiro declares
 `options.reviewer_agent`, a Kiro agent whose tools are `read`, `grep` and `glob` alone, with no MCP
-server. For each run ao writes it into the reviewer's own directory, after the candidate's tree and
+server. For each run polyctl writes it into the reviewer's own directory, after the candidate's tree and
 under a name the tree cannot know, and names it with `--agent`, whether it spawns the reviewer or
 reaches it over ACP; run so, kiro read the file it was asked to and had no tool to write with. A tree
-that holds `.kiro` or `.kiro/agents` as a file is refused rather than written through - ao unpacks
+that holds `.kiro` or `.kiro/agents` as a file is refused rather than written through - polyctl unpacks
 none of a tree's links - and a reviewer's or the hunter's command that names `--agent` itself is
 refused (KIRO-READONLY, KIRO-READONLY-2). A kiro whose sign-in has expired prints `Opening browser...`
-and waits ten minutes for a person; ao reads that line at the reviewer's next heartbeat, stops it,
+and waits ten minutes for a person; polyctl reads that line at the reviewer's next heartbeat, stops it,
 and says a person runs `kiro-cli login`, where the review waited the ten minutes and said nothing
 of why. Only lines that are no JSON are read, since the answer comes in stream-json lines that may
 quote the words (KIRO-SIGNED-OUT).
 
-No flag leaves agy reading either, so it reviews the same way: as an agent of ao's whose tools are
+No flag leaves agy reading either, so it reviews the same way: as an agent of polyctl's whose tools are
 `view_file`, `grep_search`, `find_by_name` and `list_dir`, written as `.agents/agents/<name>.md` and
 named with `--agent=<name>`. Measured on agy 1.3.0: a print run denies a write or a command it cannot
 ask about and ends on an empty response; run as that agent, agy read the file it was asked to and
@@ -57,7 +57,7 @@ word it had read, said both other actions were not permitted, and left no file b
 record still carries `conversation_id`, `status`, `response`, `duration_seconds`, `num_turns` and
 `usage` (the audit note `docs/audit/2026-10-18-agy-1-4-reviewer.md`). The person's MCP servers stay attached to every agent,
 Linear's writing tools among them, and a call to one was denied only because no rule in the
-person's settings allowed it - so ao refuses an agy reviewer while
+person's settings allowed it - so polyctl refuses an agy reviewer while
 `~/.gemini/antigravity-cli/settings.json` allows anything beyond `read_file(...)`, or cannot be read.
 It reviews only on the release the agent was measured on, 1.4 and its patches: agy 1.1.19 wrote
 files in a print run, and a release nobody measured may hold the agent to nothing (AGY-REVIEWER-2).
@@ -65,7 +65,7 @@ A run agy ends on a network failure - its record's `error`, or its stderr, says 
 once, as a Kiro review whose provider failed to answer is (AGY-TRANSIENT).
 
 opencode has no flag that denies a tool either - `--auto` only approves, and a reviewer's command
-that carries it is refused - so it reviews as an agent of ao's too, `.opencode/agents/<name>.md`,
+that carries it is refused - so it reviews as an agent of polyctl's too, `.opencode/agents/<name>.md`,
 whose permission denies `*` and allows `read`, `grep`, `glob` and `list`, run with `--pure` and
 `--agent <name>`. Measured on opencode 1.18.27 with EVREN's DeepSeek V4 Flash: it offered the model
 read, grep and glob alone, and asked to write a file, run a command or fetch a page it had no tool
@@ -81,28 +81,28 @@ The review-tree note distinguishes a missing `candidate/` (unpacking failed; onl
 is available) from an empty one (everything in the tree was withheld), in both languages.
 
 ```bash
-ao role set reviewer claude-code --model claude-opus-5
-ao role set reviewer kiro --model <model> --effort high
-ao role set reviewer antigravity --model gemini-3.1-pro-high --family google
-ao role set reviewer opencode --model <provider>/<model> --family <family>
-ao role set reviewer codex --model <model> --effort high --family openai
+polyctl role set reviewer claude-code --model claude-opus-5
+polyctl role set reviewer kiro --model <model> --effort high
+polyctl role set reviewer antigravity --model gemini-3.1-pro-high --family google
+polyctl role set reviewer opencode --model <provider>/<model> --family <family>
+polyctl role set reviewer codex --model <model> --effort high --family openai
 ```
 
-`ao role set reviewer <adapter>` composes the invocation from the adapter - `send.argv`, then
+`polyctl role set reviewer <adapter>` composes the invocation from the adapter - `send.argv`, then
 `options.model`, `options.effort` (refused when the adapter does not take that value), then
 `trust_none` - so a pair of harnesses is chosen by naming two adapters and a model each, not by
 writing argv by hand, and from the adapter the package ships alone: one only a user's or a project's
 layer declares is refused. A hand-written reviewer argv still works and stays the exception: it starts
-once a person has accepted it with `ao harness seen`, and a route that names an adapter ao ships, or runs
+once a person has accepted it with `polyctl harness seen`, and a route that names an adapter polyctl ships, or runs
 a shipped harness's program, runs that adapter's own program under its name
 ([safety.md](safety.md#a-reviews-and-a-hunts-command-is-held-as-a-turns-is)).
-`ao adapters` shows which adapters may review, and `ao doctor` reports a configured reviewer
+`polyctl adapters` shows which adapters may review, and `polyctl doctor` reports a configured reviewer
 whose adapter cannot deny tools. Whatever composed a route, it runs with the flags its adapter pins
 for a reviewer (below): `claude-code`'s `trust_none` carries `--tools Read,Grep,Glob` and
 `--permission-mode dontAsk`, so no setting of the person's widens it. A route whose own command
 could still write - a wider mode than its adapter pins, every tool granted, a flag that approves
 for it, or MCP servers its adapter isolates - is refused where a review starts it, as the bug
-hunter and an ACP command are, not only named by `ao doctor`. So is one that runs a harness ao
+hunter and an ACP command are, not only named by `polyctl doctor`. So is one that runs a harness polyctl
 ships without every flag of its adapter's `trust_none`, as the bug hunter's command is: only
 `claude-code` and `codex` pin their mode, and `pi -p`, `omp -p` or `hermes -z` with none of those
 flags edits and runs commands.
@@ -117,7 +117,7 @@ runs a turn's messages together where a tool call came between them, so a verdic
 remark went on from the remark's last word, was not read, and the review was asked again and paid
 for twice. An adapter whose harness can write its messages as ACP session updates names the flags
 in `options.answer_stream` and pins them for a reviewer (`--output-format stream-json` for kiro);
-ao reads the answer from those updates with a line break where a tool call fell. A review over ACP
+polyctl reads the answer from those updates with a line break where a tool call fell. A review over ACP
 is read the same way. A run that ends on an error the adapter names passing in
 `options.answer_stream.transient` - Kiro's `failed to generate a response` - is a temporary
 failure, retried once as a reviewer that exits 75 is, not a reviewer that cannot run. So is a run
@@ -129,23 +129,23 @@ its answer (REVIEW-EMPTY-TURN-2).
 
 ## A turn's grant is declared, and so is every flag that turns approvals off
 
-A turn nobody attends cannot answer a permission prompt, so what it may do is settled when ao starts
+A turn nobody attends cannot answer a permission prompt, so what it may do is settled when polyctl starts
 it, and an adapter declares it in `options`:
 
 | Field | What it declares | Used by |
 |---|---|---|
-| `pin` | `{implementer, architect, reviewer: [flags]}`: what every turn ao starts in that role carries, the bug hunter's as a reviewer's, whatever a person's settings default to; appended when a configured command names none of it | the watchdog's nudges, wakes and refills, `ao review`, `ao hunt`, `ao doctor` |
-| `implementer_tools`, `architect_tools` | each role's allowlist in the harness's own rule syntax, spelled through `allowed_tools`; `ao init` composes the architect's wake from `resume` with its grant in place of the implementer's | `ao init`, `ao doctor` |
-| `unattended` | the narrower grant a harness documents for a turn nobody can approve, appended to an implementer's nudge whose `resume` carries no allowlist, in place of `trust_all` | the watchdog, `ao doctor` |
-| `bypass` | `{argument: {roles, why, sandbox}}`: each flag in a command ao starts that approves everything, sandboxes nothing or checks no permission, the roles whose command carries it, why it stays, and whether it also turns off a sandbox the harness runs in by default | `ao adapters validate`, the watchdog, `ao doctor` |
+| `pin` | `{implementer, architect, reviewer: [flags]}`: what every turn polyctl starts in that role carries, the bug hunter's as a reviewer's, whatever a person's settings default to; appended when a configured command names none of it | the watchdog's nudges, wakes and refills, `polyctl review`, `polyctl hunt`, `polyctl doctor` |
+| `implementer_tools`, `architect_tools` | each role's allowlist in the harness's own rule syntax, spelled through `allowed_tools`; `polyctl init` composes the architect's wake from `resume` with its grant in place of the implementer's | `polyctl init`, `polyctl doctor` |
+| `unattended` | the narrower grant a harness documents for a turn nobody can approve, appended to an implementer's nudge whose `resume` carries no allowlist, in place of `trust_all` | the watchdog, `polyctl doctor` |
+| `bypass` | `{argument: {roles, why, sandbox}}`: each flag in a command polyctl starts that approves everything, sandboxes nothing or checks no permission, the roles whose command carries it, why it stays, and whether it also turns off a sandbox the harness runs in by default | `polyctl adapters validate`, the watchdog, `polyctl doctor` |
 
-`ao adapters validate` refuses an adapter whose implementer nudge, architect wake or reviewer route
+`polyctl adapters validate` refuses an adapter whose implementer nudge, architect wake or reviewer route
 carries such a flag - a yolo or `--dangerously-` flag, a trust or allow of every tool, a standing yes,
 a forced or automatic run, a mode of full access - with no reason for that role, or keeps a reason no
 command needs. A flag declared `sandbox` starts a turn only for an adapter a person names in
 `watchdog.bypass_adapters` on the machine ([safety.md](safety.md#5-trust-flags-are-a-decision-not-a-default)).
-`tests/test_grants_pinned.py` holds every shipped adapter to this, and holds each grant to the `ao`
-commands and ao MCP tools its role's playbook sections and prompts name.
+`tests/test_grants_pinned.py` holds every shipped adapter to this, and holds each grant to the `polyctl`
+commands and polyctl MCP tools its role's playbook sections and prompts name.
 
 `claude-code` pins `--permission-mode dontAsk` for every role and `--tools Read,Grep,Glob` for a
 reviewer. The flags the other shipped adapters' commands carry, from each harness's documentation read
@@ -154,12 +154,12 @@ on 2026-09-17, and the reason in full in each adapter:
 | Adapter | Role | Flag | Decision |
 |---|---|---|---|
 | `aider` | implementer, architect | `--yes-always` | kept: narrower than none, since it answers no to a shell command the model suggests and a closed stdin answers yes |
-| `amazon-q` | implementer | `--trust-all-tools` | kept: a command allowlist lives only in an agent file ao does not write |
+| `amazon-q` | implementer | `--trust-all-tools` | kept: a command allowlist lives only in an agent file polyctl does not write |
 | `amp` | implementer | `--dangerously-allow-all` | kept: Amp asks nothing by default, so leaving it out narrows nothing |
 | `antigravity` | implementer | `--dangerously-skip-permissions` | kept: allowing a command takes the person's own settings file |
 | `codex` | implementer | `--dangerously-bypass-approvals-and-sandbox` | refused until a person allows it: the sandbox that replaces it keeps `.git` read-only and the network off |
 | `command-code` | implementer | `--yolo` | kept: allow rules live only in settings files |
-| `copilot` | implementer | `--allow-all-tools` | kept: the narrowest grant documented for ao admits `ao lock -- <command>` |
+| `copilot` | implementer | `--allow-all-tools` | kept: the narrowest grant documented for polyctl admits `polyctl lock -- <command>` |
 | `cursor-agent` | implementer, architect | `-f` | kept: print mode applies no change without it, and its allow rules live in files |
 | `droid` | implementer | `--auto medium` | in place of `--skip-permissions-unsafe`: edits, builds, tests and local commits, and a stop at anything riskier |
 | `gemini` | implementer | `--yolo` | kept: a shell allowlist takes a policy file or a deprecated flag |
@@ -173,12 +173,12 @@ on 2026-09-17, and the reason in full in each adapter:
 
 ### A grant admits what a command rewriter makes of the commands it names
 
-*In ao since slice GRANTS-RTK: every nudge and wake ao starts admits rtk's form of each command its
+*In polyctl since slice GRANTS-RTK: every nudge and wake polyctl starts admits rtk's form of each command its
 grant names that rtk rewrites. Some machines run every shell command an agent issues through rtk, a
 proxy that shortens a command's output before a model reads it: a hook the harness runs before each
 shell call hands the command to `rtk rewrite` and runs the answer in its place - `git diff --stat` as
 `rtk git diff --stat`, `cat -n x` as `rtk read -n x` - and leaves the permission decision to the
-harness unless the person's own settings allow the original. The grant ao gives a turn is on its
+harness unless the person's own settings allow the original. The grant polyctl gives a turn is on its
 command line, where the hook never looks, and `Bash(git diff:*)` does not admit `rtk git diff`, so an
 unattended turn was denied the very commands its grant named (measured on qodercli).*
 
@@ -187,16 +187,16 @@ for rtk's form of that command: `Bash(git diff:*)` gains `Bash(rtk git diff:*)`,
 `Bash(git diff *)` gains `Bash(rtk git diff *)`, and `Bash(cat:*)`, `Bash(head:*)` and `Bash(tail:*)`
 gain one `Bash(rtk read:*)` between them, since rtk reads a file for all three. That holds for the
 implementer's nudge, whether its grant is the one `resume` carries or the one `unattended` appends, and
-for the architect's wake and refill, whenever `ao init` wrote their block. Nothing else is added, and
+for the architect's wake and refill, whenever `polyctl init` wrote their block. Nothing else is added, and
 no form reaches further than its command. A rule naming arguments of its own gains nothing, since rtk
 need not keep them in place (`head -n 5 x` becomes `rtk read x --head-lines 5`), and neither does an
-exact rule, a command rtk leaves as it is (`ao`, `lsof`) or any other tool. `rtk git` hands the words
+exact rule, a command rtk leaves as it is (`polyctl`, `lsof`) or any other tool. `rtk git` hands the words
 after a subcommand to that git subcommand, `rtk read` prints a file's lines as `cat` does, and
 `rtk grep` runs grep, not ripgrep, whose `--pre` runs a program. A machine whose harness runs no such
 hook gains nothing it could not do before: each form admits the commands its rule already named, run
 through rtk.
 
-What a rewriter rewrites, and into what, is data: `src/ao/adapters/rewriters/rtk.json`, measured on
+What a rewriter rewrites, and into what, is data: `src/polyctl/adapters/rewriters/rtk.json`, measured on
 rtk 0.50.0, holds `forms` for the commands the shipped grants name, `unchanged` for the programs rtk
 leaves alone and `runs_any_command` for its subcommands that run whatever follows them. It is not part
 of any adapter, because which harness runs the hook is the machine's business, and it is read from the
@@ -204,61 +204,61 @@ package alone, because a layer an agent can write must not choose what its own g
 that is not rtk's own command followed by plain words is never admitted. `tests/test_grants_rtk.py`
 fails when a shipped grant names a command in neither list, so a new one is measured before it ships.
 
-`ao doctor` asks each grant about every forbidden command in the form rtk would be handed it, and about
+`polyctl doctor` asks each grant about every forbidden command in the form rtk would be handed it, and about
 each rtk subcommand that runs any command, so a rule a person writes to get past the hook -
 `Bash(rtk:*)`, `Bash(rtk git:*)`, `Bash(rtk proxy:*)` - is named as the command's own rule would be:
 rtk runs a program it has no filter for as it is. The rules a turn gains are not flags. The block in
-`.ao/config.json` keeps the grant `ao init` wrote, and `.ao/ledger/actor-flags.jsonl` holds the forms
-only inside a grant ao appends, `unattended`, as that grant ran.
+`.polyctl/config.json` keeps the grant `polyctl init` wrote, and `.polyctl/ledger/actor-flags.jsonl` holds the forms
+only inside a grant polyctl appends, `unattended`, as that grant ran.
 
-## A reviewer can be a tool ao runs
+## A reviewer can be a tool polyctl runs
 
 A reviewer that runs the architect's binary on the architect's quota window stops when that window
-closes, and a stand-in session's answer is not evidence ao produced (#86). A **tool reviewer** is a
-program ao runs itself over the staged candidate, on a provider account of its own. Its adapter
-declares `"kind": "tool-reviewer"`, `options.trust_none: []` - nothing is left to deny where ao runs
-it - and a `review` contract, which ao reads from the package's adapters only:
+closes, and a stand-in session's answer is not evidence polyctl produced (#86). A **tool reviewer** is a
+program polyctl runs itself over the staged candidate, on a provider account of its own. Its adapter
+declares `"kind": "tool-reviewer"`, `options.trust_none: []` - nothing is left to deny where polyctl runs
+it - and a `review` contract, which polyctl reads from the package's adapters only:
 
 | Field | What it declares |
 |---|---|
-| `review` → `candidate` | `diff-file`: ao writes the exact candidate diff, the bytes `diff_digest` names, into the reviewer's own directory outside any repository and fills `{diff_file}` with its path |
-| `review` → `answer` | `{from: output, after_prompt}`: the answer is read from the file ao names in `{output}`; with `after_prompt`, only what follows the tool's echo of this exact prompt and that marker line |
+| `review` → `candidate` | `diff-file`: polyctl writes the exact candidate diff, the bytes `diff_digest` names, into the reviewer's own directory outside any repository and fills `{diff_file}` with its path |
+| `review` → `answer` | `{from: output, after_prompt}`: the answer is read from the file polyctl names in `{output}`; with `after_prompt`, only what follows the tool's echo of this exact prompt and that marker line |
 | `review` → `environment` | `remove` and `keep`: patterns, matched without regard to case, for inherited variables the tool would read as settings and the ones it keeps; `set`: the variables that pin it, with `{model}` and `{timeout}` |
 | `review` → `encoding` | the encoding the tool reads the diff in; a candidate in another is refused before the tool starts |
-| `review` → `install`, `limits` | what would install it, named when it is absent; what ao cannot know about its answer, written into the evidence |
+| `review` → `install`, `limits` | what would install it, named when it is absent; what polyctl cannot know about its answer, written into the evidence |
 | `review` → `release` | the release the contract was measured against, in dotted digits: a tool whose `--version` names another release, or none, is unavailable rather than taken for it |
 | `review` → `tree` | the flag (`["--tree", "{tree}"]`) with which a route opts in to having the candidate's tree unpacked into `candidate/`, harness configuration withheld, and the tree note carried in the prompt (API-REVIEWER-TOOLS) |
 
 ```bash
-ao role set reviewer pr-agent --model <provider/model> --family <family>
+polyctl role set reviewer pr-agent --model <provider/model> --family <family>
 ```
 
 A tool reaches many models and families, so its route names both: the model, which the contract
-pins, and the family, which a person names because ao never infers one from a model name. A tool
-route with no family may not review. The question is ao's own review prompt, candidate included,
+pins, and the family, which a person names because polyctl never infers one from a model name. A tool
+route with no family may not review. The question is polyctl's own review prompt, candidate included,
 so the verdict rule and the count schema are every other reviewer's; a tool is given neither the
-candidate's tree, which ao unpacks where every other reviewer runs, nor the note about it
+candidate's tree, which polyctl unpacks where every other reviewer runs, nor the note about it
 ([pipeline.md](pipeline.md), REVIEW-TREE-2), unless its adapter declares `review` → `tree` and the
-route's `argv` names `--tree {tree}`, in which case ao unpacks the candidate's tree into
+route's `argv` names `--tree {tree}`, in which case polyctl unpacks the candidate's tree into
 `candidate/` (every harness's configuration hidden at every depth, REVIEW-TREE-3), fills `{tree}`,
 and includes the tree note in the prompt (API-REVIEWER-TOOLS); where a command is built with no
-candidate tree to hand it (`ao doctor`'s reviewer probe, or a candidate whose tree could not be
+candidate tree to hand it (`polyctl doctor`'s reviewer probe, or a candidate whose tree could not be
 unpacked), `review` → `tree` (`--tree {tree}`) leaves together with `{tree}` (API-REVIEWER-TOOLS-2). The evidence adds `adapter`
 and `model` to `reviewer`, and a `tool` block with the tool's version, the digest and size of the
 bytes handed, the tool rounds (`rounds`) and bytes read from the tree (`read_bytes`), and the
 adapter's limits; a review whose handed bytes are not the candidate diff is
 INVALID. A tool that is not installed makes the review UNAVAILABLE, naming what would install it,
-and `ao doctor` lists it among the optional capabilities. A tool route spends no actor's window:
-ao asks keyflip about no provider for it, and never runs the architect's route.
+and `polyctl doctor` lists it among the optional capabilities. A tool route spends no actor's window:
+polyctl asks keyflip about no provider for it, and never runs the architect's route.
 
 `pr-agent` is the first, and untested until the owner proves it on a local candidate: plain-diff
 mode (`--diff-file`) reads the candidate with no pull request and no platform token and publishes
-nowhere, and `ask` carries ao's prompt. A capability-matrix project cannot bind a tool reviewer yet.
+nowhere, and `ask` carries polyctl's prompt. A capability-matrix project cannot bind a tool reviewer yet.
 
-`openai-api` is ao's own client, `ao-api-review`, installed with ao and using nothing but the standard
-library. Without `--tree {tree}`, it asks an OpenAI-compatible `/chat/completions` once, with ao's
+`openai-api` is polyctl's own client, `polyctl-api-review`, installed with polyctl and using nothing but the standard
+library. Without `--tree {tree}`, it asks an OpenAI-compatible `/chat/completions` once, with polyctl's
 review prompt as the only message and no tools, and writes the answer it gets; the model reads what
-the prompt carries and nothing else. When a route's `argv` names `--tree {tree}`, `ao-api-review --tree DIR`
+the prompt carries and nothing else. When a route's `argv` names `--tree {tree}`, `polyctl-api-review --tree DIR`
 offers four read-only OpenAI function tools over the unpacked candidate (`read`, `grep`, `glob` and
 `list`) and loops while the model's answer carries `tool_calls`: every path is relative to `DIR` and
 resolved inside it (an absolute path, a `..` that leaves `DIR`, a symbolic link leading out, or a
@@ -285,10 +285,10 @@ key's value never, and nothing is sent. A base URL holding a query or a fragment
 `/chat/completions` landed in it and the key went to the base URL's own path, and so is one naming a
 user or a password, a credential written in a setting that urllib printed in the error refusing it;
 neither refusal repeats the URL. A redirect is said with its status and where to write the URL the
-endpoint moved to (HUNT-LEADS-SEC). A tool that ships with ao (`ao-api-review`) runs from the
-installation of the ao that runs it - the scripts beside `sys.executable`, in a Windows
-interpreter's Scripts directory too - and falls back to `PATH` only when it is not there; `ao doctor`
-finds it the same way and names any `PATH` copy whose version differs from ao's own
+endpoint moved to (HUNT-LEADS-SEC). A tool that ships with polyctl (`polyctl-api-review`) runs from the
+installation of the polyctl that runs it - the scripts beside `sys.executable`, in a Windows
+interpreter's Scripts directory too - and falls back to `PATH` only when it is not there; `polyctl doctor`
+finds it the same way and names any `PATH` copy whose version differs from polyctl's own
 (API-REVIEWER-2, API-REVIEWER-TOOLS-2). A prompt past one argument
 reaches it on its standard input. A reasoning model can spend the whole answer its provider allows
 on reasoning and write no verdict: EVREN allows 16,384 tokens, and on 2026-10-06 its reasoning
@@ -298,8 +298,8 @@ UNAVAILABLE rather than answered (API-REVIEWER-5). A gateway that serves several
 reviews with whichever the route names, so the family is named as for any tool:
 
 ```bash
-ao config set review.api_providers "example https://api.example.com/v1 EXAMPLE_API_KEY" --machine
-ao role set reviewer openai-api --model example/<model> --family <family>
+polyctl config set review.api_providers "example https://api.example.com/v1 EXAMPLE_API_KEY" --machine
+polyctl role set reviewer openai-api --model example/<model> --family <family>
 ```
 
 ## A prompt past one argument reaches its command another way
@@ -323,11 +323,11 @@ how else its CLI takes a prompt, under `send` and under `resume`:
 
 While a command fits with room to spare - the prompt's argument, the other arguments, the environment and a
 margin for a launcher that starts the real program - the prompt stays in its argument and nothing changes.
-Past that ao uses what the adapter declares for the command: `resume`'s channels for one that carries
+Past that polyctl uses what the adapter declares for the command: `resume`'s channels for one that carries
 `{session}`, `send`'s for any other, standard input before a file. The prompt's bytes are written to a file
 of mode 0600 (on Windows, which keeps no file mode, as private as the directory's permissions make it)
 in a directory of its own, never inside the repository, handed over as standard input or by
-its path, and removed when the process ends. Every prompt ao hands an agent's CLI goes this way: a
+its path, and removed when the process ends. Every prompt polyctl hands an agent's CLI goes this way: a
 reviewer's, the bug hunter's, and those of the watchdog's nudges and architect wakes. A watchdog turn runs
 detached and nothing waits to remove a file after it, so it takes standard input or nothing. A review
 prompt grows with it: while every reviewer route that may run declares a channel or fits here, a waived
@@ -335,8 +335,8 @@ range's commit messages and a candidate's context take `review.context_bytes` be
 what one argument leaves ([configuration.md](configuration.md)).
 
 With nothing declared nothing starts, and the refusal names the prompt's size, what the platform carries
-and that the adapter declares no other channel. `ao review` exits 2 with it, as a configuration error: it
-writes no review file and is neither UNAVAILABLE nor a verdict, so `ao catchup` keeps the waiver open. In
+and that the adapter declares no other channel. `polyctl review` exits 2 with it, as a configuration error: it
+writes no review file and is neither UNAVAILABLE nor a verdict, so `polyctl catchup` keeps the waiver open. In
 a chain, a route that cannot take the prompt is passed over as a configuration error and the next route is
 tried; the review is refused only when none can take it. Like a review contract, channels are read from the
 package's adapters only: a layer an agent can write must not choose the arguments a reviewer runs with.
@@ -346,64 +346,64 @@ where. `claude-code`, `codex`, `command-code`, `gemini` and `omp` take a prompt 
 capabilities, and `amp`, `copilot` and `qwen` for `send`. `hermes` takes one for `resume`, through
 `hermes chat --query-file`. `aider` takes a file for both, and `droid` standard input or a file for `send`
 and a file for `resume`. Every other shipped adapter takes its prompt in its argument alone, and
-`ao adapters validate` checks that each channel replaces arguments its capability's `argv` carries once.
+`polyctl adapters validate` checks that each channel replaces arguments its capability's `argv` carries once.
 
-## Setting ao up for a harness is declared, not coded
+## Setting polyctl up for a harness is declared, not coded
 
-`ao init`, `ao skill` and `ao remove` name no harness (#76). What a harness leaves in a
-repository and where ao's files for it go are fields of its adapter, and core reads them:
+`polyctl init`, `polyctl skill` and `polyctl remove` name no harness (#76). What a harness leaves in a
+repository and where polyctl's files for it go are fields of its adapter, and core reads them:
 
 | Field | What it declares | Used by |
 |---|---|---|
-| `detect.dirs`, `detect.files`, `detect.binaries` | the signs that a repository uses this harness | `ao init`, `ao skill`, `ao content add` |
-| `directives.playbook` | `{path, header}`: where the playbook is rendered; `header` is text or `frontmatter` | `ao init`, `ao skill` |
-| `directives.coordination` | a steering file ao writes the coordination rules into | `ao init` |
-| `directives.rule_files` | the owner's rule files this harness reads (AGENTS.md is shared and needs no entry) | `--rules`, `ao doctor` |
-| `directives.steering_dir`, `directives.skills_dir` | directories the harness reads by itself | `ao doctor`, `ao content add` |
-| `directives.agents_dir`, `directives.agent_format` | where the harness reads agent definitions, and their format: `extension`, the fields that run a command (`commands`, taken out), those that grant trust (`grants`, named), the one that loads context (`context`, named when empty) and those whose `file://` value it loads as text (`loads`, taken out when it lies outside the project) | `ao content add` |
-| `directives.steering_inclusion`, `directives.hook_files` | which steering inclusion the harness honours (`field`, `default`, `honoured`, and `unhonoured`, the reason it gives), and the header a skill becomes a steering file under (`skill_header`); what a hook file's suffix says of its format | `ao content add` |
-| `directives.ao_files` | every path ao may have written for this harness; `ao remove` deletes the ones the package's adapter names, and names and leaves those only another layer does | `ao remove` |
-| `mcp` | `{file, key, extra, register, remove_when_empty}` or `{manual, snippet}`; a snippet's `{exe}` and `{root}` are written escaped for a double-quoted TOML string, and its `{args}` as a list of such strings: the server's arguments, with the role the registration names ([mcp.md](mcp.md#roles)) | `ao init`, `ao remove`, `ao uninstall` (the `ao` entry under `key`, the file itself only when nothing else is left in it) |
+| `detect.dirs`, `detect.files`, `detect.binaries` | the signs that a repository uses this harness | `polyctl init`, `polyctl skill`, `polyctl content add` |
+| `directives.playbook` | `{path, header}`: where the playbook is rendered; `header` is text or `frontmatter` | `polyctl init`, `polyctl skill` |
+| `directives.coordination` | a steering file polyctl writes the coordination rules into | `polyctl init` |
+| `directives.rule_files` | the owner's rule files this harness reads (AGENTS.md is shared and needs no entry) | `--rules`, `polyctl doctor` |
+| `directives.steering_dir`, `directives.skills_dir` | directories the harness reads by itself | `polyctl doctor`, `polyctl content add` |
+| `directives.agents_dir`, `directives.agent_format` | where the harness reads agent definitions, and their format: `extension`, the fields that run a command (`commands`, taken out), those that grant trust (`grants`, named), the one that loads context (`context`, named when empty) and those whose `file://` value it loads as text (`loads`, taken out when it lies outside the project) | `polyctl content add` |
+| `directives.steering_inclusion`, `directives.hook_files` | which steering inclusion the harness honours (`field`, `default`, `honoured`, and `unhonoured`, the reason it gives), and the header a skill becomes a steering file under (`skill_header`); what a hook file's suffix says of its format | `polyctl content add` |
+| `directives.polyctl_files` | every path polyctl may have written for this harness; `polyctl remove` deletes the ones the package's adapter names, and names and leaves those only another layer does | `polyctl remove` |
+| `mcp` | `{file, key, extra, register, remove_when_empty}` or `{manual, snippet}`; a snippet's `{exe}` and `{root}` are written escaped for a double-quoted TOML string, and its `{args}` as a list of such strings: the server's arguments, with the role the registration names ([mcp.md](mcp.md#roles)) | `polyctl init`, `polyctl remove`, `polyctl uninstall` (the `polyctl` entry under `key`, the file itself only when nothing else is left in it) |
 
-A harness with no such fields is simply not set up: ao writes `.ao/PLAYBOOK.md` and prints the
-pointer, and `--agent` refuses a name no adapter answers to. A project can declare a harness ao
-has never shipped in `.ao/adapters/`, and init sets it up the same way.
+A harness with no such fields is simply not set up: polyctl writes `.polyctl/PLAYBOOK.md` and prints the
+pointer, and `--agent` refuses a name no adapter answers to. A project can declare a harness polyctl
+has never shipped in `.polyctl/adapters/`, and init sets it up the same way.
 
 Every path these fields name is held to the repository, since the project's layer is one an agent
 can write: a path that is absolute, starts with `~`, or leaves through `..` or a link is written
 nowhere and never removed, and init says it was not written, so a harness whose MCP file lives in
-the home directory is given ao by hand. `mcp.register` is read from the package's adapters only:
+the home directory is given polyctl by hand. `mcp.register` is read from the package's adapters only:
 another layer names the file its server goes in, never a program init runs (HARNESS-SETUP-2). So is
-what `ao remove` deletes of `directives.ao_files`: a layer that named `"src/"` there had the removal
+what `polyctl remove` deletes of `directives.polyctl_files`: a layer that named `"src/"` there had the removal
 delete the project's source, so a path only a user's or a project's layer names - for a harness of
 its own, or added to a shipped one's - is named by the removal and left for you (REMOVE-SHIPPED).
 
 ## Where a harness keeps its sessions is declared, not coded
 
-Session discovery, `session: auto`, each role's transcript path, `ao projects` and `ao fleet`
+Session discovery, `session: auto`, each role's transcript path, `polyctl projects` and `polyctl fleet`
 all read an adapter's `sessions` store (#76):
 
-| `sessions.kind` | Fields | How ao reads it |
+| `sessions.kind` | Fields | How polyctl reads it |
 |---|---|---|
 | `workspace-meta` | `dir`, `meta`, `transcript`, `workspaces`, `title`, `status` | `dir/<workspace>/<session>/meta` names the workspace paths; a session pinned by its id alone is found in the workspace directory that keeps it |
-| `escaped-cwd` | `dir`, `transcript` (with `{session}`), `cwd` | the working directory with `/` and `.` made dashes, or with every character but letters and digits made one, is a directory under `dir`, each transcript in it a session; `cwd` names the record field holding the working directory, which is how `ao projects` reads a directory back to its workspace, the newest records first |
+| `escaped-cwd` | `dir`, `transcript` (with `{session}`), `cwd` | the working directory with `/` and `.` made dashes, or with every character but letters and digits made one, is a directory under `dir`, each transcript in it a session; `cwd` names the record field holding the working directory, which is how `polyctl projects` reads a directory back to its workspace, the newest records first |
 
 Each store is read for the working directory a role works in. Where one role is alone in
 it, the newest session is that role's; where the implementer and the architect run one
-harness in one directory, ao takes a session only when a pin, a record in
-`.ao/sessions.json` or the one session the other role does not hold says whose it is, and
+harness in one directory, polyctl takes a session only when a pin, a record in
+`.polyctl/sessions.json` or the one session the other role does not hold says whose it is, and
 names the rest ambiguous. [profiles.md](profiles.md#how-auto-finds-a-session) has the
 rules. A store declared outside the package is never scanned; a role on such an adapter
 pins its session. `resume.continue_last` and `list_sessions` are declared for reference,
-and nothing reads them: ao resolves a session from the store rather than asking the
+and nothing reads them: polyctl resolves a session from the store rather than asking the
 harness for its latest.
 
 `directives.command_hooks` (`{format: "pre-tool-use", shell_tool, project_dir_env, files}`) names
-the settings whose hooks can rewrite an agent's shell commands, which `ao doctor` reports as a
+the settings whose hooks can rewrite an agent's shell commands, which `polyctl doctor` reports as a
 measurement filter (#51) and asks what each does to the commands an agent measures with (#52,
 [gates.md](gates.md#a-filters-exclusions-are-proved-not-trusted)). `shell_tool` is the tool name a
 hook's matcher is tested against, and `project_dir_env` the variable the harness sets to the
-project directory for a hook. A file under `~` is user-level; ao runs no hook that a file inside
+project directory for a hook. A file under `~` is user-level; polyctl runs no hook that a file inside
 the project names.
 
 What decides authority reads the **package's** adapters only: which directories are a harness's
@@ -413,14 +413,14 @@ can add a harness but cannot move a product path out of review by calling it a h
 
 ## Which processes are agents is declared, not coded
 
-`detect.processes` names the program an agent turn runs as. ao counts those processes as writers
-(`ao hold`, the nudge's one-turn rule) and treats an adapter's id, binaries and processes as one
+`detect.processes` names the program an agent turn runs as. polyctl counts those processes as writers
+(`polyctl hold`, the nudge's one-turn rule) and treats an adapter's id, binaries and processes as one
 agent's names when it asks whether the architect is already at the keyboard (#76). Like the
 directories, these are read from the package's adapters only.
 
 `detect.headless` names the arguments that make a process of that harness a turn started without a
 person: a flag, alone or with its value attached after `=` (`--print=…`), or a subcommand (`exec`,
-`run`). `ao hold` and the watchdog's reap stop only such turns, `ao writers` labels them, and an
+`run`). `polyctl hold` and the watchdog's reap stop only such turns, `polyctl writers` labels them, and an
 architect process holding one is not a person at the keyboard. An argument counts only for the
 harness whose names the command line runs as - hermes selects a profile with the `-p` that makes
 other harnesses print one answer - and only the package's adapters are read, so a layer an agent can
@@ -429,37 +429,37 @@ answers to is never taken for one. Every shipped adapter declares its list, and 
 `send` and `resume` run holds one of them; an adapter that starts no local turn declares `[]`.
 
 `options.mcp_isolation` (`{required, forbidden}`) is the flags a harness needs so a reviewer starts
-no MCP server it was not given (#24); `ao doctor` and the reviewer check read it by binary.
+no MCP server it was not given (#24); `polyctl doctor` and the reviewer check read it by binary.
 
 ## Accounts, windows and installs are declared, not coded
 
 | Field | What it declares | Used by |
 |---|---|---|
-| `billing.api.driver` | a protocol in `src/ao/drivers.py` (`usage-limits`) with its `token`, `profile`, `body`, `resource` and `login` | `ao credits`, `ao cost`, the credit sampler and the samples `ao doctor` reads, `ao digest`, handoff: each for the implementer's own adapter; `ao credits --all` asks every shipped adapter that declares one |
-| `billing.fallback.transcripts` | a glob of transcripts whose usage records are read when the account cannot be | `ao credits --offline`, `ao digest`, for the implementer's own adapter |
-| `quota` → `provider` | the keyflip provider an actor running this harness spends | window reserve, rotation (#32), `ao fanout` |
-| `quota` → `stops` | the words a turn of this harness ends on when a usage limit stops it: a list of `{words, hours}`, `words` a regular expression (a group named `epoch` holds a reset written in epoch seconds) and `hours` the longest the limit stands once hit | the watchdog's park ([watchdog.md](watchdog.md#a-slice-parked-on-quota)), `ao adapters validate` |
+| `billing.api.driver` | a protocol in `src/polyctl/drivers.py` (`usage-limits`) with its `token`, `profile`, `body`, `resource` and `login` | `polyctl credits`, `polyctl cost`, the credit sampler and the samples `polyctl doctor` reads, `polyctl digest`, handoff: each for the implementer's own adapter; `polyctl credits --all` asks every shipped adapter that declares one |
+| `billing.fallback.transcripts` | a glob of transcripts whose usage records are read when the account cannot be | `polyctl credits --offline`, `polyctl digest`, for the implementer's own adapter |
+| `quota` → `provider` | the keyflip provider an actor running this harness spends | window reserve, rotation (#32), `polyctl fanout` |
+| `quota` → `stops` | the words a turn of this harness ends on when a usage limit stops it: a list of `{words, hours}`, `words` a regular expression (a group named `epoch` holds a reset written in epoch seconds) and `hours` the longest the limit stands once hit | the watchdog's park ([watchdog.md](watchdog.md#a-slice-parked-on-quota)), `polyctl adapters validate` |
 | `quota` → `resets_at` | the path, in a reply the harness writes in the model's place, to the reset it records beside its words, in epoch seconds | the watchdog's park |
-| `telemetry.quota` | `{from: "command", argv, cache_seconds}`: the command that prints the machine's provider windows, keyflip's for Kiro, and how long a reading of it is kept | `ao status`, the watchdog's quota gates, the window reserve and rotation |
+| `telemetry.quota` | `{from: "command", argv, cache_seconds}`: the command that prints the machine's provider windows, keyflip's for Kiro, and how long a reading of it is kept | `polyctl status`, the watchdog's quota gates, the window reserve and rotation |
 | `detect.install_dirs` | where the harness installs itself outside the usual directories | the newest-binary search |
-| `detect.update` | the command that updates the harness | `ao doctor` on a stale binary |
+| `detect.update` | the command that updates the harness | `polyctl doctor` on a stale binary |
 
 A driver is chosen by name and reads every path, key, command and endpoint from the adapter, so
 adding a harness whose account answers the same protocol is a data change (#76). A lookup is asked
 only for the adapter the reading is about, the implementer's, and only as the package declares it:
 a lookup runs the command its adapter names, so what a layer an agent can write declares is never
 asked, and there is no first adapter to fall back on. An implementer whose adapter declares none has
-no account ao can read, no credit samples and no credits alarm; every sample names the adapter it
+no account polyctl can read, no credit samples and no credits alarm; every sample names the adapter it
 was read through ([telemetry.md](telemetry.md), "Whose account").
 
-*In ao since slice TRIAGE-HIGHS: `telemetry.quota` is read from the package's adapters only, as a
-lookup is. `ao status` and the watchdog's quota gates ran the command the implementer's adapter
-declares as every layer loads it, and a project's `.ao/adapters/` - a file the implementer writes -
-named one that ran. The quota is the one the adapter ao ships under the implementer's `adapter`
-declares; a layer still says how the implementer's transcript reads. `ao init` composes the
+*In polyctl since slice TRIAGE-HIGHS: `telemetry.quota` is read from the package's adapters only, as a
+lookup is. `polyctl status` and the watchdog's quota gates ran the command the implementer's adapter
+declares as every layer loads it, and a project's `.polyctl/adapters/` - a file the implementer writes -
+named one that ran. The quota is the one the adapter polyctl ships under the implementer's `adapter`
+declares; a layer still says how the implementer's transcript reads. `polyctl init` composes the
 architect's command from the package's adapter alone too ([safety.md](safety.md)).*
 
-*In ao since slice QUOTA-PARK: a harness's usage limit is read in the words its own adapter
+*In polyctl since slice QUOTA-PARK: a harness's usage limit is read in the words its own adapter
 declares. The watchdog read an implementer's stop by one pattern written in one harness's words,
 so another harness's limit never parked anything: Kiro's "You've reached your overage limit"
 ended every nudge until a person was told the agent was stuck, and even a Claude Code model's
@@ -482,7 +482,7 @@ which no transcript reading reads; the nudge that dies on it prints the same wor
 
 ## Profiles and actor names are declared, not coded
 
-`ao init --profile` offers the presets in [`adapters/profiles.json`](../src/ao/adapters/profiles.json):
+`polyctl init --profile` offers the presets in [`adapters/profiles.json`](../src/polyctl/adapters/profiles.json):
 which adapter holds each role. The blocks are composed from those adapters (#76) — the implementer's
 name from `actor_name`, the reviewer's argv from `send`, `models.review` and `options.trust_none`
 with its `family`, the architect's from `resume` with the grant `options.allowed_tools` spells
@@ -496,49 +496,49 @@ appears in a core module's code. Docstrings may name one; code reads an adapter 
 ## Shipping an adapter without forking
 
 Adapters load from three places, each overriding the one before by `id`: the package, then
-`~/.ao/adapters/`, then the project's `.ao/adapters/`. Supporting a new harness is a JSON file,
-not a change to ao and a wait for a release. `ao hold` and `ao fleet` read the project's
+`~/.polyctl/adapters/`, then the project's `.polyctl/adapters/`. Supporting a new harness is a JSON file,
+not a change to polyctl and a wait for a release. `polyctl hold` and `polyctl fleet` read the project's
 adapter too, so a harness a person started through that layer remains visible
 (TRIAGE-1-MEDIUM).
 
 ```bash
-ao adapters                          # each adapter, its source, contract and verification
-ao adapters validate my-harness.json # what a candidate is missing, before anyone relies on it
-ao adapters conform my-harness       # run send and resume through a fixture harness
+polyctl adapters                          # each adapter, its source, contract and verification
+polyctl adapters validate my-harness.json # what a candidate is missing, before anyone relies on it
+polyctl adapters conform my-harness       # run send and resume through a fixture harness
 ```
 
-An adapter declares `"contract": 1`, the adapter contract this ao implements. One declaring
+An adapter declares `"contract": 1`, the adapter contract this polyctl implements. One declaring
 another contract is listed as refused, with both versions named, and never loaded half-way.
 `validate` checks the fields every adapter needs - `id`, `name`, `verified`, `contract`, and a
 `send.argv` carrying `{prompt}` in exactly one argument - and that `resume.argv` carries
-`{session}` and uses only placeholders ao fills: `{prompt}` and `{session}` for turns;
+`{session}` and uses only placeholders polyctl fills: `{prompt}` and `{session}` for turns;
 a tool reviewer's `send.argv` may also use the tool-review placeholders. A turn cannot
 carry an unfilled `{model}` (TRIAGE-1-MEDIUM). `conform` runs `send` and `resume` with the
 harness binary replaced by a fixture that records what it was given, and passes only when the
 prompt, with spaces, quotes, `=` signs and a line break, arrives whole in one argument and,
 where `resume` takes a session id, the session arrives too. `transcript`, `busy` and `directives`
-are reported as declared or absent, and a declared transcript that names no store ao can reach is
-reported as **declared, not reached** (dim, not green: `ao adapters conform` exits 0 for it),
-because a shape nobody can load is not a capability - see "What ao can reach" below.
-ao's own tests run every shipped adapter through the same conformance, so a change in ao that
+are reported as declared or absent, and a declared transcript that names no store polyctl can reach is
+reported as **declared, not reached** (dim, not green: `polyctl adapters conform` exits 0 for it),
+because a shape nobody can load is not a capability - see "What polyctl can reach" below.
+polyctl's own tests run every shipped adapter through the same conformance, so a change in polyctl that
 would break a third party's adapter breaks ours first.
 
-*In ao since slice LEADS-ADAPTERS:* `validate` holds a path an adapter declares - in `project_config`,
+*In polyctl since slice LEADS-ADAPTERS:* `validate` holds a path an adapter declares - in `project_config`,
 `worktree_dirs` or `options.reviewer_agent.path` - to one within the folder it is read against: relative,
 with no `~`, `..`, backslash or drive, since `C:/outside` is absolute on Windows. `options` that are no object,
 and a `review` block whose `environment` is no object, are named rather than raising or read as no
 rules; an environment of null still says there are none.
 
-*In ao since slice LEADS-INSTALL: `ao adapters conform` starts its fixture harness with the
-interpreter that runs ao, isolated (`-I`). It was a copy whose first line named the interpreter:
+*In polyctl since slice LEADS-INSTALL: `polyctl adapters conform` starts its fixture harness with the
+interpreter that runs polyctl, isolated (`-I`). It was a copy whose first line named the interpreter:
 Windows runs no such line, and an interpreter whose path holds a space made one POSIX cannot read,
 so there every capability failed as "the harness did not run".*
 
 ## What a harness says it supports, asked in ACP
 
-*In ao since slice ACP-PROBE: an adapter's `acp` block and `ao harness probe`. It is the first step of
+*In polyctl since slice ACP-PROBE: an adapter's `acp` block and `polyctl harness probe`. It is the first step of
 driving harnesses through the Agent Client Protocol, where what a harness supports is asked, not measured
-by hand; nothing in ao reads what it answers yet but the command itself.*
+by hand; nothing in polyctl reads what it answers yet but the command itself.*
 
 An adapter whose harness speaks ACP says how to start it that way: `"acp": {"argv": ["qodercli",
 "--acp"], "measured": "…"}`, a plain command with no placeholder, since the protocol carries the prompt
@@ -547,11 +547,11 @@ to answer on 2026-09-28: `kiro-cli acp`, `opencode acp` and `qodercli --acp`. A 
 is known only from its documentation has none until it is measured.
 
 ```bash
-ao harness probe                  # every harness whose adapter declares acp.argv
-ao harness probe qoder --sessions # one, and how many sessions it lists for this directory
+polyctl harness probe                  # every harness whose adapter declares acp.argv
+polyctl harness probe qoder --sessions # one, and how many sessions it lists for this directory
 ```
 
-*In ao since slice LEADS-MCP: what the command prints of an adapter and of what its harness answered is
+*In polyctl since slice LEADS-MCP: what the command prints of an adapter and of what its harness answered is
 shown escaped - an adapter's id may come from a user's or the project's own layer, which an agent
 writes, and the answer is a vendor's - so a control character, a line feed among them, or a direction
 override reads as `\x1b`, `\x0a` or `‮` and acts on nothing.*
@@ -562,31 +562,31 @@ of a shipped one's - is named and never started, as a turn's command and a revie
 (PROBE-SHIPPED); the profile's file is named by the adapter's id, and an id that is not a plain name is
 refused.
 
-Each harness is started from its `acp.argv`, found as ao finds any program, and asked `initialize`;
+Each harness is started from its `acp.argv`, found as polyctl finds any program, and asked `initialize`;
 with `--sessions`, where it lists sessions, `session/list` for this directory too. It is sent no prompt
 and opens no session, so asking spends no quota, and it is stopped with everything it started as soon
 as it has answered. What it says - its protocol version, name and release, whether it loads sessions,
 which session, prompt and MCP capabilities it has and which ways it authenticates - is kept in
-`~/.ao/harness/<id>.json`, with when it was asked and which binary answered. How many sessions it listed
+`~/.polyctl/harness/<id>.json`, with when it was asked and which binary answered. How many sessions it listed
 is kept, and nothing of what they are. A harness that is not installed is said to be so; one that does
 not answer within `--timeout` seconds, or ends first, is said not to, and the command exits 1. It is
 stopped as one that answered is, and what of it still runs after the stop is named beside why it failed
 (ACP-PROBE-LEFT).
 
-*In ao since slice ACP-CLIENT: `ao.acp.Session`, which holds one session with a harness and runs one prompt
-turn in it. `ao review` is the first command to drive a harness through it, where a project sets
+*In polyctl since slice ACP-CLIENT: `polyctl.acp.Session`, which holds one session with a harness and runs one prompt
+turn in it. `polyctl review` is the first command to drive a harness through it, where a project sets
 `review.transport` to `acp` (ACP-REVIEWER, below).* The turn's
 answer is the agent's message chunks joined in the order they came, with a line break where a tool call
 fell between two, and its tool calls are kept with their last status, every kind they were reported as, and
 whether any report said they completed. Each `session/request_permission` is decided by a policy the caller gives, which picks an option
 the agent offered; the default allows nothing, and a policy that fails or names no offered option allows
 nothing either, answering with the agent's reject option or, where it offers none, `cancelled`. Every
-decision is kept with the tool call it was about. A request for a client method ao does not provide - files,
+decision is kept with the tool call it was about. A request for a client method polyctl does not provide - files,
 terminals - is answered as a method it does not have, since it declares none. A turn past its time is
 cancelled with `session/cancel`, a permission still pending then is answered `cancelled` as the protocol
 asks, and a turn that does not end even so is a timeout; the agent is stopped with everything it started.
 
-*In ao since slice ACP-REVIEWER: a reviewer answers its review through its adapter's `acp.argv` where the
+*In polyctl since slice ACP-REVIEWER: a reviewer answers its review through its adapter's `acp.argv` where the
 project sets `review.transport` to `acp`. The three declared commands were seen to answer `initialize`;
 none has yet been measured answering a review, which is why the transport is a project's choice and
 spawning stays the default.* A harness answers over ACP only where its adapter says its ACP command
@@ -604,8 +604,8 @@ allows that one call where every path it names lies in the directory the review 
 kind - an edit, a deletion, a move, a command, a fetch, a change of mode - is refused; an option that
 allows a tool always is never picked, since it would leave a standing rule in the harness's own settings.
 What a harness runs without asking is its own, so a turn in which the agent reports a tool of kind `edit`,
-`delete`, `move` or `execute` that ao never refused is no review, whatever it answered and whatever that
-call ended as, and neither is one in which a call ao refused is seen to have completed, whatever its kind
+`delete`, `move` or `execute` that polyctl never refused is no review, whatever it answered and whatever that
+call ended as, and neither is one in which a call polyctl refused is seen to have completed, whatever its kind
 (ACP-REVIEWER-3). A later report under the same id takes back neither, and a refused call without an id,
 which no report can be tied to, is taken to have run (ACP-REVIEWER-5). The whole exchange has `review_timeout`: a turn past it is cancelled and is a timeout, as a
 spawned reviewer killed at its timeout is. A route whose adapter declares no ACP command, or whose adapter
@@ -614,14 +614,14 @@ cannot carry, are spawned as before, each with a line saying why; so is a tool r
 route's command carries, an effort or an agent profile, belongs to the spawned command and does not reach
 the session ([roles.md](roles.md) says what a review records of it).
 
-*In ao since slice REVIEW-PATH-HIGHS: an ACP reviewer is held to reads. `review.transport` sat in
-`.ao/config.json`, which the implementer writes, outside the reviewer command a person accepts, and it was
+*In polyctl since slice REVIEW-PATH-HIGHS: an ACP reviewer is held to reads. `review.transport` sat in
+`.polyctl/config.json`, which the implementer writes, outside the reviewer command a person accepts, and it was
 read from the file again where a route started; `qodercli --acp` reviewed with none of
 `--tools Read,Grep,Glob`, `--permission-mode dont_ask` and `--strict-mcp-config`, held by nothing but its
 asking first, which nobody has measured; every read it asked for was allowed, a key in the person's home
 among them; and a write it ran without asking that ended `failed` was no write, its answer taken as a
 review. A transport other than spawn is now part of the reviewer a person accepts - turned to acp, it is
-`the reviewer's command (changed)`, and no review starts until `ao harness seen` - and a review reaches
+`the reviewer's command (changed)`, and no review starts until `polyctl harness seen` - and a review reaches
 its routes as it read the configuration whose reviewer it judged. Only an ACP command measured to hold a
 reviewer to reads answers, kiro's agent alone today. Every string value in a call's `locations` and
 `rawInput`, under any key and through nested objects and lists, is judged as a path it could read;
@@ -630,14 +630,14 @@ before checking, and a host, query, fragment, remaining percent escape or NUL is
 are expanded and paths followed through their links. Literal paths and simple `*` and `?` patterns
 are allowed only inside the review folder; a pattern's fixed directory prefix must lie there too,
 and `..` anywhere is refused. Other syntax, empty values, and calls that name no path or exceed the
-input limit are refused because ao cannot classify where they read. This deliberately also refuses
+input limit are refused because polyctl cannot classify where they read. This deliberately also refuses
 a grep for an absolute outside path or a complex expression: use a simple contained search instead.
 That holds what an agent asks leave for: a read the harness runs without asking is its own, and what
 kiro-cli asks before over ACP is not measured.*
 
 ## Support matrix
 
-One row per vendor in [`adapters/vendors.json`](../src/ao/adapters/vendors.json), the canonical list every
+One row per vendor in [`adapters/vendors.json`](../src/polyctl/adapters/vendors.json), the canonical list every
 surface derives from (#89); a test fails when this table, the list and the shipped adapters disagree.
 
 `full` = every capability verified against a running install. `partial` = the command surface or the store
@@ -650,7 +650,7 @@ the adapter says so in its `disclaimer`. **Reviewer** is whether the adapter can
 | `claude` | `claude-code` | full | eligible | Claude Code |
 | `codex` | `codex` | partial | eligible | OpenAI Codex CLI |
 | `opencode` | `opencode` | partial | eligible | opencode |
-| `traycer` | — | — | — | no adapter: an orchestrator of agents, as ao is, not an agent ao drives |
+| `traycer` | — | — | — | no adapter: an orchestrator of agents, as polyctl is, not an agent polyctl drives |
 | `cursor` | `cursor-agent` | documented | ineligible | Cursor Agent CLI |
 | `grok` | `grok` | untested | ineligible | Grok CLI (superagent-ai) |
 | `qwen` | `qwen` | untested | eligible | Qwen Code |
@@ -678,15 +678,15 @@ the adapter says so in its `disclaimer`. **Reviewer** is whether the adapter can
 | `trae` | `trae` | untested | ineligible | Trae Agent (ByteDance) |
 | `warp` | `warp` | partial | ineligible | Warp (the Oz agent CLI) |
 | `cloud` | `cloud-generic` | partial | ineligible | Generic cloud agent (pull-request delivered) |
-| `pr-agent` | `pr-agent` | untested | eligible | PR-Agent, a tool reviewer ao runs over the candidate (#86) |
-| `openai-api` | `openai-api` | partial | eligible | an OpenAI-compatible chat API, through ao's own client, a tool reviewer (API-REVIEWER) |
+| `pr-agent` | `pr-agent` | untested | eligible | PR-Agent, a tool reviewer polyctl runs over the candidate (#86) |
+| `openai-api` | `openai-api` | partial | eligible | an OpenAI-compatible chat API, through polyctl's own client, a tool reviewer (API-REVIEWER) |
 
-Warp runs `oz`, which ao finds on PATH or where Warp installs it:
+Warp runs `oz`, which polyctl finds on PATH or where Warp installs it:
 `/Applications/Warp.app/Contents/Resources/bin` and
 `~/Applications/Warp.app/Contents/Resources/bin`. The same declared directories
 reach child PATHs; the test suite excludes every shared install directory derived
 from package adapters. The app's SQLite container and CLI logs are state, not
-program locations. `ao init --agent warp` installs the generic playbook and
+program locations. `polyctl init --agent warp` installs the generic playbook and
 reports the files-only protocol, without claiming an MCP registration. Auto
 setup also falls back to generic when only Oz is installed. No answer record,
 sessions or store are declared, neither trust mode is claimed, and Warp remains
@@ -694,43 +694,43 @@ ineligible as a reviewer. The [measurement note](audit/2026-10-15-warp-store.md)
 records why those capabilities remain undeclared.
 
 Warp owns `.warp`, so pinned skills can be vendored into `.warp/skills` and those
-files are classified as harness configuration. With ao's playbook installed,
-`.warp/skills/ao` also satisfies the rules-wired check without an MCP setup
-declaration. `ao adapters` reports a harness as installed when ao finds a runnable
+files are classified as harness configuration. With polyctl's playbook installed,
+`.warp/skills/polyctl` also satisfies the rules-wired check without an MCP setup
+declaration. `polyctl adapters` reports a harness as installed when polyctl finds a runnable
 program on PATH or in its additional search directories, including the Warp bundle.
 
 The first twenty-one rows are Traycer's canonical enum, the coverage this list is measured
-against; then the harnesses ao shipped before it, and last a tool reviewer. Moving a row to `full` is the most valuable
-contribution this project can take. See [`adapters/README.md`](../src/ao/adapters/README.md).
+against; then the harnesses polyctl shipped before it, and last a tool reviewer. Moving a row to `full` is the most valuable
+contribution this project can take. See [`adapters/README.md`](../src/polyctl/adapters/README.md).
 
 ## A third: the harness says what it is doing
 
-*In ao since slice HOOK-SPOOL: `ao agent-hook EVENT [--harness ID]` and `ao agents`. A harness's lifecycle
-hooks can tell ao what a session is doing, where the two modes below read it back from a store or a
-record. No command installs the hooks yet, and nothing but `ao agents` reads them yet.*
+*In polyctl since slice HOOK-SPOOL: `polyctl agent-hook EVENT [--harness ID]` and `polyctl agents`. A harness's lifecycle
+hooks can tell polyctl what a session is doing, where the two modes below read it back from a store or a
+record. No command installs the hooks yet, and nothing but `polyctl agents` reads them yet.*
 
 A hook the harness runs on each lifecycle event records the event in the machine's event log
-(`~/.ao/events.jsonl`, as `agent-<event>`), named in ao's words: `session-start`, `prompt`, `tool`,
+(`~/.polyctl/events.jsonl`, as `agent-<event>`), named in polyctl's words: `session-start`, `prompt`, `tool`,
 `tool-done`, `subagent-end`, `compact`, `notification`, `turn-end` and `session-end`. From the JSON the
-hook hands over, ao keeps the session's id and directory, and a tool's name or a notification's type
+hook hands over, polyctl keeps the session's id and directory, and a tool's name or a notification's type
 where the event is one - never a prompt, a tool's input or output, or a transcript. The command prints
 nothing, which a harness may read as its own input, and always exits 0, so it neither fails nor holds the
-turn that ran it: input that does not arrive within two seconds is let go, an event ao does not know is
-not recorded, and a directory that is no ao project records nothing. `ao agents` shows each session's
+turn that ran it: input that does not arrive within two seconds is let go, an event polyctl does not know is
+not recorded, and a directory that is no polyctl project records nothing. `polyctl agents` shows each session's
 latest state: working, waiting (a notification, such as a permission prompt), idle (its turn ended) or
 ended. For Claude Code, the hooks are its settings' `hooks` block:
 
 ```json
-{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "ao agent-hook session-start --harness claude-code"}]}],
-           "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "ao agent-hook prompt --harness claude-code"}]}],
-           "Notification": [{"hooks": [{"type": "command", "command": "ao agent-hook notification --harness claude-code"}]}],
-           "Stop": [{"hooks": [{"type": "command", "command": "ao agent-hook turn-end --harness claude-code"}]}],
-           "SessionEnd": [{"hooks": [{"type": "command", "command": "ao agent-hook session-end --harness claude-code"}]}]}}
+{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "polyctl agent-hook session-start --harness claude-code"}]}],
+           "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "polyctl agent-hook prompt --harness claude-code"}]}],
+           "Notification": [{"hooks": [{"type": "command", "command": "polyctl agent-hook notification --harness claude-code"}]}],
+           "Stop": [{"hooks": [{"type": "command", "command": "polyctl agent-hook turn-end --harness claude-code"}]}],
+           "SessionEnd": [{"hooks": [{"type": "command", "command": "polyctl agent-hook session-end --harness claude-code"}]}]}}
 ```
 
-*In ao since slice LEADS-MCP: `ao agents` shows a session's harness and id as the hook gave them,
+*In polyctl since slice LEADS-MCP: `polyctl agents` shows a session's harness and id as the hook gave them,
 escaped. The hook is a command any program on the machine can run, with whatever command line and
-input it likes: an escape sequence in either acted on the terminal of whoever ran `ao agents`, and a
+input it likes: an escape sequence in either acted on the terminal of whoever ran `polyctl agents`, and a
 line feed added a row of its own.*
 
 ## Two observation modes
@@ -774,19 +774,19 @@ Three shapes cover everything seen so far:
 - **Opaque / none** — observation unavailable. `send` and `resume` still work; the
   dashboard degrades to repo and mailbox signals only.
 
-### What ao can reach
+### What polyctl can reach
 
-A shape is read from somewhere, and ao resolves a session's records from one store kind only:
+A shape is read from somewhere, and polyctl resolves a session's records from one store kind only:
 `escaped-cwd`, `workspace-meta` or `sqlite-sessions` (`sessions.kind`, `SESSION_STORE_KINDS`).
 An adapter that names a transcript and none of those three describes its records accurately and is
 read by nothing: every reader of it returns empty, `busy` says `unknown`, and a check that looked
 only for a `transcript` block would have called it declared. Twelve of the shipped adapters are in
-that state, including one on this machine, and `ao adapters` now marks the column
+that state, including one on this machine, and `polyctl adapters` now marks the column
 `<kind>, not reached` for them. The fix for each is one store declaration measured on that harness's
 own files, which is a per-vendor job, not a core one.
 
 A declaration can also be read by no core module at all, which is the same dishonesty in the other
-direction: `busy.mtime_file` is declared by nine adapters and consulted by none - the age ao reports
+direction: `busy.mtime_file` is declared by nine adapters and consulted by none - the age polyctl reports
 comes from the transcript's own last write, or from a row store's `transcript.freshness` query - so
 adding that key to an adapter changes nothing until a reader for it exists. Two reads that predate
 that key do ask a file how old it is where a row store answers: `throughput` says whether a
@@ -800,7 +800,7 @@ so they wait for their own measurement.
 
 A transcript's records are read through what the implementer's adapter declares about
 them (#76), whether they arrive as lines of a file or as rows of a database: the status panel's
-context, cost, messages and failed tool calls, `ao cost`, the
+context, cost, messages and failed tool calls, `polyctl cost`, the
 watchdog's "has the turn ended" and foreign-edit checks, and the offline credit estimate. A
 reader asked without an adapter reads what the implementer's adapter declares, and a part an
 adapter does not declare is read as nothing, never as another harness's field.
@@ -809,21 +809,21 @@ adapter does not declare is read as nothing, never as another harness's field.
 |---|---|---|
 | `transcript.record.kind` | the path to a record's kind (`payload.type`, `type`); every field below except `time` is read from the object holding the kind | every reader |
 | `transcript.record.time` | the path to a record's ISO timestamp, from the record itself | every reader |
-| `transcript.record.text_keys` | the keys whose string values are a message's text, at any depth; a dotted path is read by its last key | the panel's messages, `ao tail` |
-| `transcript.messages` | `{prompt, reply}`: the kinds of the owner's prompt and of the agent's reply | the panel's messages, `ao tail`, `ao cost` |
-| `transcript.turn` | `{start, end, bookkeeping}`: the kinds that open and close a turn, and those that may follow its end without meaning a turn is running | `ao cost`, the credit estimate, the watchdog's reap and idle answer |
-| `transcript.tool_call` | `{type, name, args, path_keys, write_tools, write_words}`: a tool call's kind, the paths to its name and arguments, the arguments naming a file, and the tools that write one - by name, or by a word their name holds in any case | `ao cost`, foreign edits |
-| `telemetry.context` | `{from: "transcript", type, match, field}`: the record and the path of the context percentage | the panel, `ao_status` |
-| `telemetry.cost` | `{from: "transcript", type, field, tools, unit}`: the usage record, the path to its value - or `fields`, several paths that add up - and the path to the tools each entry used | the panel, `ao cost`, the credit estimate |
-| `telemetry.cost.model`, `tokens`, `priced_when` | the path to the model that answered; each kind of token the price table names (`input`, `cache_write_5m`, `cache_write_1h`, `cache_read`, `output`) with the path to its count in the usage record, or a list of paths of which the first holding a count is read; and the fields, each `{field, values}`, that hold one of the values listed when the record was billed at list prices, null standing for a field the record does not hold. Read from the usage records under their reading; a declaration ao cannot read whole prices nothing, and `ao adapters validate` says why ([telemetry.md](telemetry.md)) | `ao cost --usd` |
+| `transcript.record.text_keys` | the keys whose string values are a message's text, at any depth; a dotted path is read by its last key | the panel's messages, `polyctl tail` |
+| `transcript.messages` | `{prompt, reply}`: the kinds of the owner's prompt and of the agent's reply | the panel's messages, `polyctl tail`, `polyctl cost` |
+| `transcript.turn` | `{start, end, bookkeeping}`: the kinds that open and close a turn, and those that may follow its end without meaning a turn is running | `polyctl cost`, the credit estimate, the watchdog's reap and idle answer |
+| `transcript.tool_call` | `{type, name, args, path_keys, write_tools, write_words}`: a tool call's kind, the paths to its name and arguments, the arguments naming a file, and the tools that write one - by name, or by a word their name holds in any case | `polyctl cost`, foreign edits |
+| `telemetry.context` | `{from: "transcript", type, match, field}`: the record and the path of the context percentage | the panel, `polyctl_status` |
+| `telemetry.cost` | `{from: "transcript", type, field, tools, unit}`: the usage record, the path to its value - or `fields`, several paths that add up - and the path to the tools each entry used | the panel, `polyctl cost`, the credit estimate |
+| `telemetry.cost.model`, `tokens`, `priced_when` | the path to the model that answered; each kind of token the price table names (`input`, `cache_write_5m`, `cache_write_1h`, `cache_read`, `output`) with the path to its count in the usage record, or a list of paths of which the first holding a count is read; and the fields, each `{field, values}`, that hold one of the values listed when the record was billed at list prices, null standing for a field the record does not hold. Read from the usage records under their reading; a declaration polyctl cannot read whole prices nothing, and `polyctl adapters validate` says why ([telemetry.md](telemetry.md)) | `polyctl cost --usd` |
 | `telemetry.failure` | `{from: "transcript", type, field, failed_when, text}`: the verdict on a tool result, the value that means it failed, and the path to its output | the panel's problems |
-| `billing.fallback.reading` | how usage records add up to spend: `sum` when every record is the whole cost of the turn it reports, `peak-per-turn` when a record is the running total of the turn in progress and a turn costs the highest total it reached, `per-response` when a response is written as several records that each carry its usage so far and each response counts once in a reading, at the highest usage its records reached, whichever turn or transcript holds a copy, by the path to its id (`telemetry.cost.response`). The panel and `ao cost` add usage up by it too, and add records up when none is declared; the estimate reads only a declared reading, and under a reading ao does not implement no reader reads usage | the panel, `ao cost`, `ao credits --offline`, `ao digest` |
+| `billing.fallback.reading` | how usage records add up to spend: `sum` when every record is the whole cost of the turn it reports, `peak-per-turn` when a record is the running total of the turn in progress and a turn costs the highest total it reached, `per-response` when a response is written as several records that each carry its usage so far and each response counts once in a reading, at the highest usage its records reached, whichever turn or transcript holds a copy, by the path to its id (`telemetry.cost.response`). The panel and `polyctl cost` add usage up by it too, and add records up when none is declared; the estimate reads only a declared reading, and under a reading polyctl does not implement no reader reads usage | the panel, `polyctl cost`, `polyctl credits --offline`, `polyctl digest` |
 
 A path steps into objects with dots (`value.usagePercentage`), and `[]` steps into each element
 of a list (`promptTurnSummaries[].usage`), one entry per element. A turn opens at a `start` kind,
 or at a `prompt` when no turn is open or the open one ended; a `start` that follows the prompt of
 a turn not yet started is that turn's start, not a second turn. `tests/test_transcript_shape.py`
-reads a harness ao never shipped, declared only in a project's adapter layer, and fails when a
+reads a harness polyctl never shipped, declared only in a project's adapter layer, and fails when a
 core module names a kind, a field or a tool of a shipped adapter's shape.
 
 A shipped declaration says what a harness writes, measured rather than believed. Kiro's turns,
@@ -845,12 +845,12 @@ turn. Beside the fields above, a store like it declares:
 
 | Field | What it declares | Used by |
 |---|---|---|
-| `transcript.tool_call.blocks`, `match` | the path to the blocks a record of the tool-call kind holds (`message.content[]`), and the values a block holds to be a call; `name` and `args` are then read from each such block | `ao cost`, foreign edits, the panel's tool calls |
+| `transcript.tool_call.blocks`, `match` | the path to the blocks a record of the tool-call kind holds (`message.content[]`), and the values a block holds to be a call; `name` and `args` are then read from each such block | `polyctl cost`, foreign edits, the panel's tool calls |
 | `telemetry.failure.blocks`, `match` | the same for tool results; `field`, `failed_when` and `text` are read from each such block | the panel's problems |
-| `transcript.turn.end_when` | `{type, field, values}`, or a list of them: a record of that kind whose field holds one of the values ends the turn it falls in, as an `end` kind does, under the one turn rule every reader applies | `ao cost`, the panel, the credit estimate, the watchdog's reap and idle answer |
+| `transcript.turn.end_when` | `{type, field, values}`, or a list of them: a record of that kind whose field holds one of the values ends the turn it falls in, as an `end` kind does, under the one turn rule every reader applies | `polyctl cost`, the panel, the credit estimate, the watchdog's reap and idle answer |
 | `transcript.turn.conversation` | the kinds a turn is made of; every other kind is bookkeeping that may follow a turn's end, so a kind a later release adds does not read as a running turn | the watchdog's reap and idle answer |
-| `transcript.messages.blocks`, `match` | the path to the blocks a prompt or a reply holds, and the values a block holds to be its words; a record holding blocks of which none match - a tool's result, a tool call - is no message, and one whose content is not blocks is read whole | the panel's messages, `ao tail` |
-| `telemetry.cost.response` | the path to a response's id, by which the `per-response` reading counts each response once in a reading, at its highest record: across every turn of a transcript, every subagent transcript read with it, and every transcript the credit estimate adds up; under that reading without it, no usage is read | the panel, `ao cost`, `ao_status`, the credit estimate |
+| `transcript.messages.blocks`, `match` | the path to the blocks a prompt or a reply holds, and the values a block holds to be its words; a record holding blocks of which none match - a tool's result, a tool call - is no message, and one whose content is not blocks is read whole | the panel's messages, `polyctl tail` |
+| `telemetry.cost.response` | the path to a response's id, by which the `per-response` reading counts each response once in a reading, at its highest record: across every turn of a transcript, every subagent transcript read with it, and every transcript the credit estimate adds up; under that reading without it, no usage is read | the panel, `polyctl cost`, `polyctl_status`, the credit estimate |
 
 ```jsonc
 // transcript
@@ -876,7 +876,7 @@ It was measured before it was declared, over 421 local session stores of release
 of one response carried the same usage and the same stop reason (83,779 responses, 51,865 of them
 written as several records), so adding the records up counted about twice the tokens. A parallel
 call's result may sit between two records of its response (4,799 responses); none of the 183 stores
-of print-mode runs (`-p`, the way ao starts an implementer) had a response whose records spanned two
+of print-mode runs (`-p`, the way polyctl starts an implementer) had a response whose records spanned two
 turns, or a record written twice. No response that ended a turn held a tool call. A store at rest
 ended with an `end_turn` response, or with a `stop_sequence` one - a reply the harness writes
 itself, an API error among them - in 375 of them, followed only by kinds such as titles, prompt
@@ -904,7 +904,7 @@ same `file_path` an `Edit` does, and foreign-edit detection took every call nami
 write: 4,503 paths in the stores' last 3 MB, of which 3,007 were written (8 of 466 in print-mode
 stores). Kiro's `read_file`, `readFile`, `read_files` and `list_directory` name a `path` too, and
 146 of its 152 were only read or listed. A write is now what `write_tools` and `write_words`
-declare, as `ao cost` reads it; every other kiro reading over its 17 stores is unchanged.
+declare, as `polyctl cost` reads it; every other kiro reading over its 17 stores is unchanged.
 
 The unit is the token, and every token a response read or wrote counts once: uncached input, input
 written to and read from the prompt cache, and output. Server tool requests are counts of requests,
@@ -930,10 +930,10 @@ declares, in place of `transcript.path`:
 | `transcript.record.table`, `session_key`, `order` | the table holding a session's records, the column naming the session, and the column ordering them oldest first | every reader |
 | `transcript.record.body` | the column holding a record's own JSON, whose keys become record fields where the row does not already carry them - so `record.kind` and every path above are read from inside it | every reader |
 | `transcript.record.children` | `{table, key, parent_key, as}`, and the same `session_key`, `order`, `body`, `time` and `time_unit` for them: the child table, the column of the child naming the parent record, the column of the parent it names, and the key the children are attached under. A child naming a parent outside the tail read is dropped, not guessed a home for | the nesting readers above |
-| `transcript.record.time`, `time_unit` | the column holding a record's time, and `seconds` or `milliseconds` since the epoch; it becomes an ISO time like a JSONL record's | `ao tail`, the watchdog, every reader that orders records |
+| `transcript.record.time`, `time_unit` | the column holding a record's time, and `seconds` or `milliseconds` since the epoch; it becomes an ISO time like a JSONL record's | `polyctl tail`, the watchdog, every reader that orders records |
 | `transcript.freshness` | `{query, time_unit}`: one SELECT, `?` bound to the session id, returning when the store last wrote this session | whether the implementer is working |
-| `transcript.subagent_sessions` | `{query, session}`: one SELECT, `?` bound to a session id, returning the sessions the store says descend from it. ao asks it of every session it finds, so a subagent's own subagent is reached by one declaration, and each id is asked of once | whether the implementer is working, whether its turn ended |
-| `sessions.kind` | `sqlite-sessions`, with `{query, session, title, mtime, mtime_unit}`: one SELECT, `?` bound to the working directory, listing a directory's sessions | `ao doctor`, and a role's session resolution |
+| `transcript.subagent_sessions` | `{query, session}`: one SELECT, `?` bound to a session id, returning the sessions the store says descend from it. polyctl asks it of every session it finds, so a subagent's own subagent is reached by one declaration, and each id is asked of once | whether the implementer is working, whether its turn ended |
+| `sessions.kind` | `sqlite-sessions`, with `{query, session, title, mtime, mtime_unit}`: one SELECT, `?` bound to the working directory, listing a directory's sessions | `polyctl doctor`, and a role's session resolution |
 
 Two of these exist because a row store is written to rather than appended. A row's time may be
 updated in place, so the newest row is not the newest work: a session whose rows the store rewrites
@@ -950,7 +950,7 @@ is another session of the same tables and the link is a value in a row. `transcr
 declares the query that finds one session's children, and each child is then asked the freshness question
 it would answer for itself, so a session waiting on a subagent reads as working and its turn is not taken
 for ended while one writes. The walk is over ids and not records: what a child wrote stays in the child's
-own tail, so `ao tail`, a turn's cost and what a reviewer reads are still the parent session's rows, and
+own tail, so `polyctl tail`, a turn's cost and what a reviewer reads are still the parent session's rows, and
 the join carries no size, since a parent's size is the whole store's file and counts a child's rows once
 already.
 
@@ -962,23 +962,23 @@ A store like that declares:
 
 | Field | What it declares | Used by |
 |---|---|---|
-| `transcript.subagents.dir` | the directory of a session's subagent transcripts, relative to the session transcript's own directory; `{session}` is the session transcript's name without its extension, and stands in every `dir`, so no session reads another's (below: where a subagent path may lead) | `ao cost`, the panel, `ao_status`, the credit estimate, foreign edits, and whether the implementer is working: its state in the panel and `ao_status`, the watchdog's idle guard, reap and spin check |
+| `transcript.subagents.dir` | the directory of a session's subagent transcripts, relative to the session transcript's own directory; `{session}` is the session transcript's name without its extension, and stands in every `dir`, so no session reads another's (below: where a subagent path may lead) | `polyctl cost`, the panel, `polyctl_status`, the credit estimate, foreign edits, and whether the implementer is working: its state in the panel and `polyctl_status`, the watchdog's idle guard, reap and spin check |
 | `transcript.subagents.transcripts` | `[{path, named_by}]`: where a subagent's transcript is under that directory, `*` standing for any name and `{id}` for the value a record of the session holds at `named_by` when that record starts it - the result of the call that started it, naming it | the same |
-| `transcript.subagents.sidecar` | `{path, call}`: the file beside a subagent's transcript, `{name}` standing for the transcript's name without its extension, whose `call` field holds the id of the tool call that started it, in the session's transcript or in another subagent's | `ao cost`, the panel, `ao_status`, the credit estimate |
+| `transcript.subagents.sidecar` | `{path, call}`: the file beside a subagent's transcript, `{name}` standing for the transcript's name without its extension, whose `call` field holds the id of the tool call that started it, in the session's transcript or in another subagent's | `polyctl cost`, the panel, `polyctl_status`, the credit estimate |
 | `transcript.tool_call.id` | the path to a tool call's id, read where its name is | the same |
-| `transcript.messages.not_words` | a list of matches, paths with the values they hold: a prompt or a reply holding every value of one - a note the harness writes, the summary of a compacted conversation - has no words; it still opens the turn the model answers | the panel's messages, `ao tail` |
+| `transcript.messages.not_words` | a list of matches, paths with the values they hold: a prompt or a reply holding every value of one - a note the harness writes, the summary of a compacted conversation - has no words; it still opens the turn the model answers | the panel's messages, `polyctl tail` |
 
 A subagent works for the turn that started it. Each reading reads a subagent's transcript right after
 the record that starts it - whichever comes first of the call its sidecar names and the record that
 names it - and charges the subagent's spend to the turn that record falls in, however many turns later
 the subagent wrote. Its own prompts and turn ends move only its own turn, under the adapter's reading,
 and a subagent it starts is charged to the same turn. The spend stays inside the turn's, so a total is
-still the sum of its turns, and `ao cost` shows how much of each class's was delegated, the panel how
-much of the total, and `ao_status` as `cost_delegated`. A subagent's tool calls, writes and commits are
+still the sum of its turns, and `polyctl cost` shows how much of each class's was delegated, the panel how
+much of the total, and `polyctl_status` as `cost_delegated`. A subagent's tool calls, writes and commits are
 its turn's, and every subagent transcript written within the foreign-edit window is the implementer's,
 whichever turn started it. A subagent transcript that no record of a reading starts is not counted: its
 spend is in no turn the reading holds. The panel reads a tail, and a subagent started before the tail
-belongs to a turn outside it, as `ao cost` leaves out the turn already under way where a transcript's
+belongs to a turn outside it, as `polyctl cost` leaves out the turn already under way where a transcript's
 records begin. A response written as several records costs the most its records reached.
 
 ```jsonc
@@ -1012,7 +1012,7 @@ reading each response at its highest record moved no session's own tokens; the c
 2,990,529 more, from three responses two transcripts hold with different usage.
 
 The readers were compared before and after on the 419 stores at rest, and every store's own tokens and
-turns read as before. The desktop app's 180 stores hold 2,908 subagent transcripts, all joined: `ao cost`
+turns read as before. The desktop app's 180 stores hold 2,908 subagent transcripts, all joined: `polyctl cost`
 read 26,128,151,129 tokens before and 34,913,789,378 after, 8,785,638,249 of them delegated, over the
 same 3,927 turns, and its tool calls went from 60,613 to 147,140 and its product writes from 2,006 to
 5,743. The 183 print-mode stores hold one: 210,548,799 tokens before, 213,215,662 after, over the same
@@ -1028,7 +1028,7 @@ holds these readings from synthetic records, and fails when a core module names 
 A subagent at work is its implementer at work. A session waits for a subagent with its own transcript
 quiet, or ends its turn while one works on in the background, so every reader that asks whether the
 implementer is working reads the subagent transcripts too. The implementer's last write is the latest of
-its session transcript's and theirs: its state in the panel and `ao_status` reads it, and so do the
+its session transcript's and theirs: its state in the panel and `polyctl_status` reads it, and so do the
 watchdog's idle guard, its reap, and its check that the implementer is working in a secondary project. A
 turn has not ended while a subagent transcript was written after the session transcript was: the session
 writes a record of each subagent it takes back - the notification of its end, or the result of the call
@@ -1071,7 +1071,7 @@ commands, more than the session's own in 34 of the 59. 1,116 of the 1,171 subage
 returned a result after it, and their sessions were told of 737 as completed, 45 as stopped and 3 as
 failed; 10 of the sessions' own failures were calls that started a subagent. Read beside the session's
 own, the subagents' failures would take a line of the panel's two in 20 of the 58 stores that show one,
-and both lines in 13. Of the 5,035 turns `ao cost` reads in the 419 stores, 1,477 open at a task
+and both lines in 13. Of the 5,035 turns `polyctl cost` reads in the 419 stores, 1,477 open at a task
 notification and 512 at a note, 295 of those another session's message, and 1,378 and 371 of them charge
 the model's tokens. Were those records bookkeeping, it would read 4,645 turns with the same tokens: a
 follow-up's first response would fall in the turn before it, and the tool result after that response
@@ -1080,9 +1080,9 @@ person's prompts (102) and summaries (2) alike, and 328 of them hold only a repl
 itself.
 
 The readers were compared before and after on the same stores at rest. Kiro declares no subagents, and
-every reading of its 17 stores is unchanged: `ao cost`, the panel's figures, failures and messages, the
+every reading of its 17 stores is unchanged: `polyctl cost`, the panel's figures, failures and messages, the
 turn end, the busy state, the spin check's growth, foreign-edit writes and the credit estimate. On the
-419 stores of the second harness, the turn end (373 ended), the busy state, `ao cost`, the panel's
+419 stores of the second harness, the turn end (373 ended), the busy state, `polyctl cost`, the panel's
 figures, failures and messages and foreign-edit writes read as before, and the spin check's growth now
 holds the subagent transcripts of the 59 that delegate, all 2,916 found through the declaration. The
 slowest busy reading took 6.3 ms of CPU against 0.02 before, for a session with 458 subagent transcripts,
@@ -1091,11 +1091,11 @@ synthetic records.
 
 ### Where a subagent path may lead, a background task's end, and a reply no model wrote
 
-A subagent declaration names files ao lists, stats and reads, and an adapter layer the agents it describes
+A subagent declaration names files polyctl lists, stats and reads, and an adapter layer the agents it describes
 can write may declare it (#77). So every path it names stays in the session's own subagent directory. `dir`,
 each transcript's `path` and the sidecar's `path` are names joined by `/`, with no empty step, `.`, `..`,
 absolute path or drive, and `dir` holds `{session}`: a declaration that breaks this is not read, and
-`ao adapters validate` names the path. A reading then compares real paths: the subagent directory must be
+`polyctl adapters validate` names the path. A reading then compares real paths: the subagent directory must be
 inside the session transcript's own directory, and every transcript and sidecar inside the subagent
 directory. A symbolic link whose target leaves it is not followed - a transcript, a sidecar, or a directory
 a wildcard reaches - and a link whose target stays inside is. `*` and `{id}` still match within one name,
@@ -1103,16 +1103,16 @@ and a name starting with a dot only where the step starts with one, as a glob ma
 
 The declaration is still read from every layer, unlike the sets that decide authority. Those are read from
 the package's adapters because a layer could take a product path out of review, hide a writer from a hold or
-name a command ao runs. Confined, a subagent declaration chooses only which of the files a store keeps for
+name a command polyctl runs. Confined, a subagent declaration chooses only which of the files a store keeps for
 that session are its subagents, and what that moves - spend, writes, whether the implementer is working -
-the same layer already moves through the rest of `transcript`, which is how a project declares a harness ao
+the same layer already moves through the rest of `transcript`, which is how a project declares a harness polyctl
 never shipped. Read from the package alone, it would guard nothing confinement leaves open, and one adapter's
 shape would come from two layers.
 
 | Field | What it declares | Used by |
 |---|---|---|
 | `telemetry.failure.ends` | the records that tell a session a task it ran in the background ended: `records`, each `{type, match, field}` - the kind, the values the record holds and the field holding its text - and the pairs of markers the end stands between in that text: `status`, of which `failed_when` lists the failures, `id`, naming the task, and `text`, what a person reads | the panel's problems |
-| `transcript.messages.harness_replies` | a list of matches: a reply holding every value of one, with no usage, was written by the harness in the model's place, and a turn holding no other reply was not answered | `ao cost`, `ao cost --features`, the panel's turns, `ao_status`, the credit estimate |
+| `transcript.messages.harness_replies` | a list of matches: a reply holding every value of one, with no usage, was written by the harness in the model's place, and a turn holding no other reply was not answered | `polyctl cost`, `polyctl cost --features`, the panel's turns, `polyctl_status`, the credit estimate |
 
 ```jsonc
 // transcript.messages and telemetry.failure, beside what the stores above declare
@@ -1153,17 +1153,17 @@ in their subagents hold `message.model` `<synthetic>` and no usage, 693 ending a
 `refusal`: 510 are an error the service or the account returned - a usage limit, an API error, a failed
 authentication - and 185 the words "No response requested.". Such a reply still ends its turn, for the
 watchdog as for every reading. But a turn holding no other reply was not answered: of the 5,035 turns
-`ao cost` reads, 344 charge nothing, and 328 of them hold no reply but these - 180 an error after a person's
+`polyctl cost` reads, 344 charge nothing, and 328 of them hold no reply but these - 180 an error after a person's
 prompt (96), a notification (79) or a note (5), and 148 "No response requested." after a note (133) or a
 notification (15). The other 16 hold no reply at all (14), each the last turn of its transcript, or a
 response that charged nothing (2), and read as before; 187 more turns hold such a reply beside the model's
 own response, and keep their class.
 
-So a turn holding only replies written in the model's place, with no usage, is `unanswered`: `ao cost`
+So a turn holding only replies written in the model's place, with no usage, is `unanswered`: `polyctl cost`
 counts it on a line of its own below the total, and no class, total or feature count holds it; the turns of
-the panel, `ao_status` and the credit estimate leave it out, and the panel's average is over the turns the
+the panel, `polyctl_status` and the credit estimate leave it out, and the panel's average is over the turns the
 model answered. It is no turn of work, and no bookkeeping either, which would let the next prompt run on in a
-turn that has ended. Compared before and after on the same stores, `ao cost` read the same 42,850,456,356
+turn that has ended. Compared before and after on the same stores, `polyctl cost` read the same 42,850,456,356
 tokens over the same 5,035 turns, analysis 2,968 turns before and 2,640 after beside 328 unanswered, every
 other class unchanged. The panel read the same 29,852,261,803 tokens over 3,348 turns against 3,634; its last
 turn is another in 59 stores, and the 49 stores whose every turn is unanswered show no cost line. The credit
@@ -1171,7 +1171,7 @@ estimate, had the adapter declared these stores, read the same 36,329,609,271 to
 5,021.
 
 Kiro declares none of the three, and every reading of its 17 stores is the same before and after, each
-reading's digest included: `ao cost` (470 turns, 26,457.94 credits), the panel's figures (90 turns, 4,575.93
+reading's digest included: `polyctl cost` (470 turns, 26,457.94 credits), the panel's figures (90 turns, 4,575.93
 credits), its 21 failure lines in 12 stores and its messages, the turn end, the busy state, foreign-edit
 writes and the credit estimate (26,457.92 credits over 447 turns). On the second harness's 419 stores the
 listing found the same 2,916 subagent transcripts, names and sidecar calls, and no subagent directory holds
@@ -1199,23 +1199,23 @@ deliberate: a false "idle" corrupts a session, a false "busy" only delays a nudg
 
 ## Capabilities, not flags
 
-The point of an adapter is that ao never learns which harness it is talking to. That only
-holds if ao asks in **its own vocabulary** and the adapter answers in the harness's. Four rules
+The point of an adapter is that polyctl never learns which harness it is talking to. That only
+holds if polyctl asks in **its own vocabulary** and the adapter answers in the harness's. Four rules
 make that work, and each exists because a real harness broke the naive version:
 
-**Ask for the capability; let the adapter spell it.** ao asks *run this with no tools*. One
-harness spells that `--trust-tools=` with an agent ao writes whose tools only read, another
+**Ask for the capability; let the adapter spell it.** polyctl asks *run this with no tools*. One
+harness spells that `--trust-tools=` with an agent polyctl writes whose tools only read, another
 `--allowedTools ""`, another a read-only sandbox
-mode. ao must not know which. It reads `options.trust_none` and uses whatever is there.
+mode. polyctl must not know which. It reads `options.trust_none` and uses whatever is there.
 
 **An absent capability is declared, not guessed.** `trae` has no documented tool-less mode, so
 its `trust_none` is `null` with a reason, and its `roles` block says
 `reviewer: ineligible: cannot be run without tools`. That is the honest outcome: the harness
-is a fine implementer and cannot hold the reviewer role, and ao refuses the binding instead of
+is a fine implementer and cannot hold the reviewer role, and polyctl refuses the binding instead of
 inventing a flag. Silence would mean guessing, and a reviewer that can write is not a reviewer.
 
 **Values are mapped and clamped, never passed through.** Effort ladders differ — one harness
-accepts `low|medium|high`, another `low|medium|high|xhigh|max`. ao asks for its own
+accepts `low|medium|high`, another `low|medium|high|xhigh|max`. polyctl asks for its own
 level; the adapter declares what it supports in `effort_values`; the resolver picks the nearest
 available and **records that it clamped**, because a run at `high` reported as `max` is a lie
 about how hard the model tried.

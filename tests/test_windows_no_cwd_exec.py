@@ -1,16 +1,16 @@
-"""ao never starts a program the current directory holds (WINDOWS-NO-CWD-EXEC).
+"""polyctl never starts a program the current directory holds (WINDOWS-NO-CWD-EXEC).
 
 Windows looks for a program named without a directory in the current directory before PATH:
 `subprocess` with a bare `taskkill`, `schtasks`, `git` or `cmd.exe`, and `shutil.which`, which before
-Python 3.12 put the current directory first whatever path it was given. ao runs in a tree an agent
+Python 3.12 put the current directory first whatever path it was given. polyctl runs in a tree an agent
 writes, so a `taskkill.exe`, `schtasks.exe`, `git.exe` or `powershell.exe` - or a `.bat`, `.cmd` or `.com`
-PATHEXT admits - left in the repository root would have run as the person: when ao stopped a turn, read
+PATHEXT admits - left in the repository root would have run as the person: when polyctl stopped a turn, read
 the process table, scheduled its jobs or committed. An empty or relative PATH entry names the same
-directory, or one below it, on Windows and POSIX alike, and ao's own searches took them too.
+directory, or one below it, on Windows and POSIX alike, and polyctl's own searches took them too.
 
 One resolver now starts every program: Windows' own tools from its system directory and nowhere else,
 every other program from PATH's absolute entries in order, never the current directory, honouring
-PATHEXT. `ao doctor` names an empty or relative PATH entry on Windows. Each failure is made here as
+PATHEXT. `polyctl doctor` names an empty or relative PATH entry on Windows. Each failure is made here as
 Windows makes it, on every platform: a system directory of the test's own, a repository with a program
 planted under each name, and Windows' own lookup in place of shutil.which's.
 """
@@ -23,15 +23,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import acp, cli, lib as A, procs
+from polyctl import acp, cli, lib as A, procs
 
 SYSTEM_PROGRAMS = ("taskkill", "schtasks", "tasklist", "cmd", "where", "powershell")
 PLANTED = ("taskkill.exe", "schtasks.exe", "tasklist.exe", "cmd.exe", "where.exe", "powershell.exe",
-           "git.exe", "git.bat", "ao.cmd", "claude.com")
+           "git.exe", "git.bat", "polyctl.cmd", "claude.com")
 
 
 def _program(path, mode=None):
-    """A program file: a PE header, which is what makes a git a compiled one to ao."""
+    """A program file: a PE header, which is what makes a git a compiled one to polyctl."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"MZ")
     if mode is not None:
@@ -57,7 +57,7 @@ def _windows_which(name, mode=None, path=None):
 @pytest.fixture
 def windows(tmp_path, monkeypatch):
     """A Windows of the test's own: its system directory, a repository an agent wrote into as the current
-    directory with a program planted under each name ao starts, and a PATH whose one good entry is `tools`."""
+    directory with a program planted under each name polyctl starts, and a PATH whose one good entry is `tools`."""
     windows_dir, repo, tools = tmp_path / "Windows", tmp_path / "repo", tmp_path / "tools"
     system = windows_dir / "System32"
     for name in SYSTEM_PROGRAMS:
@@ -71,7 +71,7 @@ def windows(tmp_path, monkeypatch):
     monkeypatch.setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
     monkeypatch.setenv("PATH", os.pathsep.join(["", ".", "bin", str(repo), str(tools)]))
     monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
-    monkeypatch.delenv("AO_GIT", raising=False)
+    monkeypatch.delenv("POLYCTL_GIT", raising=False)
     monkeypatch.setattr(shutil, "which", _windows_which)
     return SimpleNamespace(system=system, repo=repo, tools=tools)
 
@@ -104,12 +104,12 @@ def test_a_system_program_windows_does_not_hold_is_none_never_the_one_planted(wi
 
 
 def test_every_other_program_comes_from_paths_own_directories_never_the_current_one(windows, monkeypatch):
-    """Windows' lookup answers the git.exe planted in the current directory first; ao takes the one in `tools`,
+    """Windows' lookup answers the git.exe planted in the current directory first; polyctl takes the one in `tools`,
     the only entry that is absolute and not the current directory."""
     assert _windows_which("git", path=str(windows.tools)) == os.path.join(os.curdir, "git.exe")
 
     assert _as_windows(monkeypatch, lambda: A.program_path("git")) == str(windows.tools / "git.exe")
-    assert _as_windows(monkeypatch, lambda: A.program_path("ao")) is None           # ao.cmd is the planted one
+    assert _as_windows(monkeypatch, lambda: A.program_path("polyctl")) is None           # polyctl.cmd is the planted one
     assert _as_windows(monkeypatch, lambda: A.program_path("claude")) is None       # so is claude.com
 
 
@@ -135,7 +135,7 @@ def test_posix_looks_as_it_did_but_never_in_an_empty_or_relative_entry(tmp_path,
     monkeypatch.chdir(repo)
 
     monkeypatch.setenv("PATH", os.pathsep.join(["", "bin", ".", str(repo), str(tools)]))
-    assert shutil.which("git") == "git"                              # what ao asked before
+    assert shutil.which("git") == "git"                              # what polyctl asked before
     assert A.program_path("git") == str(tools / "git")
     monkeypatch.setenv("PATH", os.pathsep.join(["", "bin", "."]))
     assert A.program_path("git") is None
@@ -152,7 +152,7 @@ def test_the_binary_search_and_reviewer_discovery_skip_a_relative_entry(tmp_path
     assert cli._reviewer_candidate_paths("claude") == [str(tools / "claude")]
 
 
-# ---- what ao starts ----------------------------------------------------------------------------
+# ---- what polyctl starts ----------------------------------------------------------------------------
 
 def _started(monkeypatch):
     """What subprocess.run is asked to start, each argument vector with its keyword arguments, and nothing run."""
@@ -182,10 +182,10 @@ def test_a_turn_and_an_acp_agent_are_stopped_by_windows_own_taskkill(windows, mo
 def test_the_jobs_are_scheduled_with_windows_own_schtasks(windows, monkeypatch):
     started = _started(monkeypatch)
 
-    _as_windows(monkeypatch, lambda: cli._schtasks("/Query", "/TN", "ao-watchdog-proj"))
+    _as_windows(monkeypatch, lambda: cli._schtasks("/Query", "/TN", "polyctl-watchdog-proj"))
 
     schtasks = str(windows.system / "schtasks.exe")
-    assert [argv for argv, _ in started] == [[schtasks, "/Query", "/TN", "ao-watchdog-proj"]]
+    assert [argv for argv, _ in started] == [[schtasks, "/Query", "/TN", "polyctl-watchdog-proj"]]
 
 
 def test_a_command_line_runs_in_windows_own_cmd_which_looks_in_path_alone(windows, monkeypatch):
@@ -202,7 +202,7 @@ def test_a_command_line_runs_in_windows_own_cmd_which_looks_in_path_alone(window
         assert A.shell_program() is None                              # POSIX starts /bin/sh by its path
 
 
-def test_the_git_ao_measures_with_is_never_the_one_planted_nor_the_bare_name(windows, monkeypatch):
+def test_the_git_polyctl_measures_with_is_never_the_one_planted_nor_the_bare_name(windows, monkeypatch):
     assert _as_windows(monkeypatch, A._find_git_binary) == str(windows.tools / "git.exe")
 
     monkeypatch.setenv("PATH", os.pathsep.join(["", ".", "bin", str(windows.repo)]))
@@ -211,7 +211,7 @@ def test_the_git_ao_measures_with_is_never_the_one_planted_nor_the_bare_name(win
 
 
 def test_a_command_named_by_its_name_is_the_one_path_holds(windows, project, monkeypatch, capsys):
-    """`ao lock -- <command>` and a codebase provider: by its name a program is the one on PATH, by a path
+    """`polyctl lock -- <command>` and a codebase provider: by its name a program is the one on PATH, by a path
     that file."""
     started = _started(monkeypatch)
     monkeypatch.setattr(A, "gate_lock_holder", lambda: None)
@@ -223,7 +223,7 @@ def test_a_command_named_by_its_name_is_the_one_path_holds(windows, project, mon
                                                                                       wait=0)))
 
     assert lock("git", "status") == 0
-    assert lock("ao", "status") == 127 and "ao is not on PATH" in capsys.readouterr().out
+    assert lock("polyctl", "status") == 127 and "polyctl is not on PATH" in capsys.readouterr().out
     cfg = dict(project, codebase={"provider": {"argv": ["claude", "{question}"]}})
     with pytest.raises(ValueError, match="the codebase provider claude is not on PATH"):
         _as_windows(monkeypatch, lambda: A.ask_codebase(project["root"], cfg, "where is the ledger?"))
@@ -255,40 +255,40 @@ def test_the_doctor_names_an_empty_or_relative_path_entry_on_windows(windows, mo
 
     assert problems == [("path-relative", "PATH holds an empty entry, `.`, `bin`: each names the directory a program "
                                           "is started in, or one below it, and that can be a tree an agent writes; "
-                                          "ao starts no program found only through them - take them out of PATH")]
+                                          "polyctl starts no program found only through them - take them out of PATH")]
     if os.name != "nt":
-        assert cli._path_problems() == []                             # elsewhere ao says nothing of it
+        assert cli._path_problems() == []                             # elsewhere polyctl says nothing of it
     monkeypatch.setenv("PATH", str(windows.tools))
     assert _as_windows(monkeypatch, cli._path_problems) == []
 
 
-def test_ao_names_itself_by_an_absolute_program_or_not_at_all(project, monkeypatch, capsys, tmp_path):
-    """From the reviews of WINDOWS-NO-CWD-EXEC: with no ao on PATH, `ao mcp config`, `ao a2a-mcp config` and the MCP
-    registration `ao init` writes named `sys.argv[0]`, a bare `ao` a client started in the project would look for
-    there, or one made absolute against the current directory. ao names the file it was started as only when that is
-    absolute and executable, and otherwise says how to put ao on PATH."""
-    from ao import skillkit
+def test_polyctl_names_itself_by_an_absolute_program_or_not_at_all(project, monkeypatch, capsys, tmp_path):
+    """From the reviews of WINDOWS-NO-CWD-EXEC: with no polyctl on PATH, `polyctl mcp config`, `polyctl a2a-mcp config` and the MCP
+    registration `polyctl init` writes named `sys.argv[0]`, a bare `polyctl` a client started in the project would look for
+    there, or one made absolute against the current directory. polyctl names the file it was started as only when that is
+    absolute and executable, and otherwise says how to put polyctl on PATH."""
+    from polyctl import skillkit
     monkeypatch.setattr(A, "program_path", lambda name, path=None: None)
-    monkeypatch.setattr(A, "REPO", str(tmp_path / "an-installed-package"))         # no clone's bin/ao to fall back on
+    monkeypatch.setattr(A, "REPO", str(tmp_path / "an-installed-package"))         # no clone's bin/polyctl to fall back on
 
-    monkeypatch.setattr(sys, "argv", ["ao", "mcp"])
-    assert A.ao_program() is None
+    monkeypatch.setattr(sys, "argv", ["polyctl", "mcp"])
+    assert A.polyctl_program() is None
     assert cli.cmd_mcp(project, SimpleNamespace(action="config", role=None, allow_verify=False)) == 1
     assert cli.cmd_a2a_mcp(project, SimpleNamespace(action="config")) == 1
-    assert "put ao on PATH" in capsys.readouterr().out
+    assert "put polyctl on PATH" in capsys.readouterr().out
 
-    started = tmp_path / "clone" / "bin" / "ao"
+    started = tmp_path / "clone" / "bin" / "polyctl"
     started.parent.mkdir(parents=True)
     started.write_text("#!/bin/sh\n", encoding="utf-8")
     started.chmod(0o755)
     monkeypatch.setattr(sys, "argv", [str(started), "mcp"])
     if os.access(str(started), os.X_OK):
-        assert A.ao_program() == str(started)
+        assert A.polyctl_program() == str(started)
         root = str(tmp_path / "project")
         os.makedirs(root)
         assert skillkit.register_mcp(root, {"claude-code"})["claude-code"] == "registered"
         with open(os.path.join(root, ".mcp.json"), encoding="utf-8") as fh:
-            assert json.load(fh)["mcpServers"]["ao"]["command"] == str(started)
+            assert json.load(fh)["mcpServers"]["polyctl"]["command"] == str(started)
 
 
 
@@ -296,7 +296,7 @@ def test_ao_names_itself_by_an_absolute_program_or_not_at_all(project, monkeypat
 def test_with_no_git_anywhere_posix_names_where_git_installs_never_the_bare_name(monkeypatch, tmp_path):
     """From the review of WINDOWS-NO-CWD-EXEC: on POSIX the last resort was the bare `git`, which execvp looks up
     through every PATH entry, an empty one - the current directory - among them."""
-    monkeypatch.delenv("AO_GIT", raising=False)
+    monkeypatch.delenv("POLYCTL_GIT", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setattr(A, "search_directories", lambda path=None: [])
     monkeypatch.setattr(A, "program_path", lambda name, path=None: None)
@@ -305,39 +305,39 @@ def test_with_no_git_anywhere_posix_names_where_git_installs_never_the_bare_name
     assert A._find_git_binary() == "/usr/bin/git"
 
 
-def test_with_no_ao_to_name_init_registers_no_mcp_server(monkeypatch, tmp_path):
-    """From the review of WINDOWS-NO-CWD-EXEC-3: with no ao on PATH and none started from a file, the registration fell
-    back on a clone's bin/ao that a pip install does not have, and wrote a server that starts nothing."""
-    from ao import skillkit
-    monkeypatch.setattr(A, "ao_program", lambda: None)
+def test_with_no_polyctl_to_name_init_registers_no_mcp_server(monkeypatch, tmp_path):
+    """From the review of WINDOWS-NO-CWD-EXEC-3: with no polyctl on PATH and none started from a file, the registration fell
+    back on a clone's bin/polyctl that a pip install does not have, and wrote a server that starts nothing."""
+    from polyctl import skillkit
+    monkeypatch.setattr(A, "polyctl_program", lambda: None)
     monkeypatch.setattr(A, "REPO", str(tmp_path / "no-clone"))
     root = str(tmp_path / "project")
     os.makedirs(root)
 
     said = skillkit.register_mcp(root, {"claude-code"})["claude-code"]
 
-    assert said.startswith("not registered: no ao program to name") and not os.path.exists(os.path.join(root, ".mcp.json"))
+    assert said.startswith("not registered: no polyctl program to name") and not os.path.exists(os.path.join(root, ".mcp.json"))
 
 
 
-def test_a_clone_run_as_a_module_names_its_own_bin_ao_everywhere(project, monkeypatch, capsys, tmp_path):
-    """From the review of WINDOWS-NO-CWD-EXEC-3: the registration fell back on a clone's bin/ao and `ao mcp config` did
-    not, so `python -m ao mcp config` in a clone said there was no ao to name."""
+def test_a_clone_run_as_a_module_names_its_own_bin_polyctl_everywhere(project, monkeypatch, capsys, tmp_path):
+    """From the review of WINDOWS-NO-CWD-EXEC-3: the registration fell back on a clone's bin/polyctl and `polyctl mcp config` did
+    not, so `python -m polyctl mcp config` in a clone said there was no polyctl to name."""
     clone = tmp_path / "clone"
     (clone / "bin").mkdir(parents=True)
-    (clone / "bin" / "ao").write_text("#!/bin/sh\n", encoding="utf-8")
-    (clone / "bin" / "ao").chmod(0o755)
+    (clone / "bin" / "polyctl").write_text("#!/bin/sh\n", encoding="utf-8")
+    (clone / "bin" / "polyctl").chmod(0o755)
     monkeypatch.setattr(A, "program_path", lambda name, path=None: None)
     monkeypatch.setattr(A, "REPO", str(clone))
-    started = clone / "src" / "ao" / "__main__.py"         # on disk and executable, as Windows calls every file
+    started = clone / "src" / "polyctl" / "__main__.py"         # on disk and executable, as Windows calls every file
     started.parent.mkdir(parents=True)
     started.write_text("", encoding="utf-8")
     started.chmod(0o755)
     monkeypatch.setattr(sys, "argv", [str(started), "mcp"])
-    if not os.access(str(clone / "bin" / "ao"), os.X_OK):
+    if not os.access(str(clone / "bin" / "polyctl"), os.X_OK):
         pytest.skip("this platform marks no file executable")
 
-    assert A.ao_program() == str(clone / "bin" / "ao")
+    assert A.polyctl_program() == str(clone / "bin" / "polyctl")
     assert cli.cmd_mcp(project, SimpleNamespace(action="config", role=None, allow_verify=False)) == 0
     out = capsys.readouterr().out
-    assert json.loads(out[out.index("{"):])["mcpServers"]["agent-orchestrator"]["command"] == str(clone / "bin" / "ao")
+    assert json.loads(out[out.index("{"):])["mcpServers"]["polyctl"]["command"] == str(clone / "bin" / "polyctl")

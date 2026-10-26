@@ -1,6 +1,6 @@
 """A process runs on Windows when it says so, not when a snapshot two seconds old listed it (WINDOWS-PID-ALIVE).
 
-The Windows lane's weekly run found `ao verify` and `ao merge-check` starting their gates under a gate lock
+The Windows lane's weekly run found `polyctl verify` and `polyctl merge-check` starting their gates under a gate lock
 another live process held. Liveness there was read from the CIM snapshot, which the backend keeps for two
 seconds: a holder started inside them was missing from it, so its lock read as a dead run's, was cleared
 and was taken. The process is now opened and waited on for no time; a fresh snapshot answers only where
@@ -12,7 +12,7 @@ import sys
 
 import pytest
 
-from ao import lib as A, procs
+from polyctl import lib as A, procs
 
 
 class _Kernel32:

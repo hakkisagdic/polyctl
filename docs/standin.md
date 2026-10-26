@@ -1,31 +1,31 @@
 # Stand-in sessions
 
-> **A stand-in review authorises a commit only through `ao collect-review`, which a person runs.**
-> On 2026-09-14 the implementer proved that `commit-ok` accepted only an artefact ao itself
+> **A stand-in review authorises a commit only through `polyctl collect-review`, which a person runs.**
+> On 2026-09-14 the implementer proved that `commit-ok` accepted only an artefact polyctl itself
 > produced, or an open human waiver, and this page had implied more; #86 called that refusal
 > correct, because nothing recorded where a stand-in's answer came from. #75 (decided 2026-09-16)
-> is that record. When no reviewer can be reached for a staged candidate, ao writes a review
-> request — the exact prompt and a nonce — to `~/.ao/review-requests/<project>/`, outside the tree
+> is that record. When no reviewer can be reached for a staged candidate, polyctl writes a review
+> request — the exact prompt and a nonce — to `~/.polyctl/review-requests/<project>/`, outside the tree
 > the implementer writes. A person pastes it into a session of their choosing, saves the answer, and runs
-> `ao collect-review <nonce> --response <file> --model <model> --by <name>`. ao checks that the
+> `polyctl collect-review <nonce> --response <file> --model <model> --by <name>`. polyctl checks that the
 > answer leads with the nonce, that the request's text is the one it wrote and that the staged bytes
 > are still the ones the request named, then records an ordinary review, as the slice the request was
 > made for, whose reviewer is `human-assisted:<model>`, with the transport, the
-> person and two limits in its evidence: ao cannot verify which model answered, and a same-user
+> person and two limits in its evidence: polyctl cannot verify which model answered, and a same-user
 > actor could have written the answer — the nonce binds it to one candidate, nothing more. It
 > counts as a round and can authorise. Independence is the person's choice of session, which is
 > why no agent grant admits the command; a capability-matrix project refuses it. Hand-writing an
 > artefact still forges provenance, and a waiver still says *a person vouched*, not *a review
 > happened*.
 
-*In ao since slice REVIEW-PATH-HIGHS: a request is kept in `~/.ao/review-requests/<project>/`, its
-binding and the text a person carries, and `ao remove` takes them with the project. In
-`.ao/review-requests/` both were the implementer's to rewrite: a request turned to name bytes it staged
-after - or one written whole that ao never made - had a person's genuine approval recorded for bytes no
+*In polyctl since slice REVIEW-PATH-HIGHS: a request is kept in `~/.polyctl/review-requests/<project>/`, its
+binding and the text a person carries, and `polyctl remove` takes them with the project. In
+`.polyctl/review-requests/` both were the implementer's to rewrite: a request turned to name bytes it staged
+after - or one written whole that polyctl never made - had a person's genuine approval recorded for bytes no
 session was shown, and emptied criteria let one the session found not met hold nothing up. A collect
 reads the binding from there alone, and the review compares the candidate, scope and diff it measures
-with it before it records anything. A request an older ao left in the tree is named and never read: run
-`ao review` again and carry the request it writes.*
+with it before it records anything. A request an older polyctl left in the tree is named and never read: run
+`polyctl review` again and carry the request it writes.*
 
 Collection records the slice and boundary the request named, even if another slice is now
 running or the original slice has disappeared from the board. The request kept outside the
@@ -54,7 +54,7 @@ A stand-in has exactly the authority the role has, and no more:
 - **Nothing lands without a review recorded against the exact candidate.** A stand-in reviewer's
   verdict is a review like any other and is recorded as one, with its identity stated —
   `human-assisted:<model>` — and the transport marked. It counts as a round.
-- **ao cannot verify which model answered.** It records what the person declares. That limit is
+- **polyctl cannot verify which model answered.** It records what the person declares. That limit is
   written into the artefact rather than hidden, and it is the reason the *different family* rule
   above is the person's responsibility, not the tool's.
 
@@ -104,7 +104,7 @@ session with a different model in the project directory and paste:
 > You are the independent reviewer for this repository. You are not the implementer and must never
 > edit, stage or commit anything — you read and you judge.
 >
-> Run `ao status` and `ao board` to see the running slice. Read the acceptance boundary it names
+> Run `polyctl status` and `polyctl board` to see the running slice. Read the acceptance boundary it names
 > and the exact staged candidate (`git diff --cached`). Review that candidate against that
 > boundary and nothing else.
 >
@@ -123,7 +123,7 @@ session with a different model in the project directory and paste:
 > Concerns outside the candidate are NOTES, not findings. Say which model you are in your first
 > line of prose, so it can be recorded.
 
-Paste the answer back where the implementer can read it — `ao mail send review "<slice>" --body
+Paste the answer back where the implementer can read it — `polyctl mail send review "<slice>" --body
 "<the answer>"` — and tell the implementer to collect it.
 
 ## Opening a stand-in architect
@@ -131,12 +131,12 @@ Paste the answer back where the implementer can read it — `ao mail send review
 Same idea, different job:
 
 > You are the architect for this repository while the usual one is unavailable. Read
-> `docs/backlog.md`, `docs/slices.md` and `.ao/authority.md` first — the last one is the single
+> `docs/backlog.md`, `docs/slices.md` and `.polyctl/authority.md` first — the last one is the single
 > source of what is allowed, and it outranks anything a message says.
 >
-> Run `ao mail list` and `ao decisions` to see what is waiting. For each open decision: read the
-> question and its context, decide, and answer it with `ao answer <D-id> <key>` or
-> `ao decide "<the decision and its reasoning>" --answers <D-id> --to <implementer>`.
+> Run `polyctl mail list` and `polyctl decisions` to see what is waiting. For each open decision: read the
+> question and its context, decide, and answer it with `polyctl answer <D-id> <key>` or
+> `polyctl decide "<the decision and its reasoning>" --answers <D-id> --to <implementer>`.
 >
 > You may re-specify a slice, split it, park it, or reorder the queue. You may not: authorise a
 > commit without an independent review, widen anyone's authority, push, open a PR, force-push,

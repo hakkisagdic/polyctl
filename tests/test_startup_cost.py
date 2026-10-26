@@ -1,7 +1,7 @@
-"""What an `ao` run pays before it does anything, and what a status read starts (CLI-STARTUP).
+"""What a `polyctl` run pays before it does anything, and what a status read starts (CLI-STARTUP).
 
 A commit hook, a watchdog cycle and every status read an agent takes start the same
-way. Importing ao read every package adapter to lay out the binary search path, the
+way. Importing polyctl read every package adapter to lay out the binary search path, the
 parser read the adapter catalog once for each of init's and skill's `--agent`, a status
 read started a shell in front of two of its git queries, and every setting lookup
 opened and parsed the machine's settings file. Nothing here is timed: these hold the cut
@@ -13,7 +13,7 @@ import os
 import subprocess
 import sys
 
-from ao import lib as A, settings as S
+from polyctl import lib as A, settings as S
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -28,9 +28,9 @@ def spy(file, *args, **kwargs):
         opened[phase[0]].append(os.fsdecode(file))
     return _open(file, *args, **kwargs)
 builtins.open = spy
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 phase[0] = "run"
-sys.argv = ["ao", "-C", sys.argv[2], "board"]
+sys.argv = ["polyctl", "-C", sys.argv[2], "board"]
 try:
     cli.main()
 except SystemExit:
@@ -47,7 +47,7 @@ def _git(cwd, *args):
                    capture_output=True)
 
 
-def test_importing_ao_reads_no_adapter_and_a_run_reads_each_adapter_once(project):
+def test_importing_polyctl_reads_no_adapter_and_a_run_reads_each_adapter_once(project):
     env = {key: value for key, value in os.environ.items() if key not in ("PYTHONPATH",)}
     run = subprocess.run([sys.executable, "-I", "-c", PROBE, ROOT, project["root"]], capture_output=True,
                          text=True, env=env, timeout=120)
@@ -110,7 +110,7 @@ def test_a_status_read_asks_git_without_a_shell_and_reads_what_the_shell_read(pr
 def test_machine_settings_are_read_once_per_state_of_the_file_and_each_caller_gets_its_own(tmp_path, monkeypatch):
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"round_budget": 4}), encoding="utf-8")
-    monkeypatch.setenv("AO_SETTINGS", str(path))
+    monkeypatch.setenv("POLYCTL_SETTINGS", str(path))
     opened = []
     real_open = builtins.open
 
@@ -135,5 +135,5 @@ def test_machine_settings_are_read_once_per_state_of_the_file_and_each_caller_ge
 
     other = tmp_path / "other.json"
     other.write_text(json.dumps({"round_budget": 2}), encoding="utf-8")
-    monkeypatch.setenv("AO_SETTINGS", str(other))
+    monkeypatch.setenv("POLYCTL_SETTINGS", str(other))
     assert S.resolve({}, "round_budget") == (2, "machine", None)

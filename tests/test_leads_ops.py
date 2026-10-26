@@ -1,13 +1,13 @@
 """The bug hunter's leads on catch-up, cost, the doctor, completion and the hunt itself (LEADS-OPS).
 
-ao's read-only bug hunter read src/ao/parts on 2026-10-12 and sent nine leads. Seven were faults:
+polyctl's read-only bug hunter read src/polyctl/parts on 2026-10-12 and sent nine leads. Seven were faults:
 a NEEDS_CHANGES waiver closed before the architect's decision request was written, so a request
 that could not be written was never written; the scheduled check paged what the watchdog's first
-cycle was about to name whenever `ao watchdog uninstall` had taken the heartbeat; `ao doctor` said
-exhausted, in red, of a reading whose own reset had passed; `ao cost` printed a window that spent
+cycle was about to name whenever `polyctl watchdog uninstall` had taken the heartbeat; `polyctl doctor` said
+exhausted, in red, of a reading whose own reset had passed; `polyctl cost` printed a window that spent
 nothing as a total of 1, and ended on a review a prune removed while it counted; the completion
 scripts took every option for one that takes the next word alone, so the second path of
-`ao review --paths` was offered the command's actions; and two hunts at once each read the leads
+`polyctl review --paths` was offered the command's actions; and two hunts at once each read the leads
 already sent before either recorded its own, both sent one lead, and the second wrote its mail
 over the first's. One was half right: a review that exits 3 with nothing recorded asked no
 reviewer, so it holds no other review, but it was told as an unavailable reviewer. One was wrong:
@@ -28,7 +28,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage, watchdog as W
+from polyctl import cli, lib as A, storage, watchdog as W
 from tests.test_bug_hunter import _OneMinute, _repo, _stand_in
 from tests.test_catchup_ready import NEEDS_CHANGES, PERSON, _catchup, _land, _legacy_waiver
 from tests.test_completion import POSIX_SHELL, _run
@@ -53,7 +53,7 @@ def test_a_review_that_exits_3_with_nothing_recorded_is_told_as_one_and_holds_no
     seen = []
 
     def held(cfg, ns):
-        # What `ao review` does when another review of the range is asking its sections: no reviewer is asked.
+        # What `polyctl review` does when another review of the range is asking its sections: no reviewer is asked.
         seen.append(ns.commits)
         print("not reviewed: another review of this candidate is asking its sections")
         return 3
@@ -71,7 +71,7 @@ def test_a_review_that_exits_3_with_nothing_recorded_is_told_as_one_and_holds_no
 
 def test_a_decision_request_that_cannot_be_written_leaves_its_waiver_open_for_the_next_run(
         project, monkeypatch, capsys):
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     root = project["root"]
     _land(root, "a.py", "value = 1\n", "base")
     waiver = _legacy_waiver(root, "B7")
@@ -96,7 +96,7 @@ def test_a_decision_request_that_cannot_be_written_leaves_its_waiver_open_for_th
 
 
 def test_a_persons_needs_changes_closes_its_waiver_once_the_request_is_written(project, monkeypatch, capsys):
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     root = project["root"]
     _land(root, "a.py", "value = 1\n", "base")
     waiver = _legacy_waiver(root, "B7")
@@ -179,7 +179,7 @@ def test_the_doctor_shows_a_spent_reading_past_its_reset_as_the_last_reading_not
     (line,) = [" ".join(_plain(line).split()) for line in cli._doctor_credit_lines(project)]
 
     assert line.startswith("credits 10240/10000 at the last reading, taken before its reset on ")
-    assert line.endswith("— unknown since; `ao credits` reads them now") and "exhausted" not in line
+    assert line.endswith("— unknown since; `polyctl credits` reads them now") and "exhausted" not in line
     own = cli._implementer_credits(project)
     assert cli._credits_problem(own["rate"], own["samples"][-1]) is None        # as the check reads it
 
@@ -189,17 +189,17 @@ def test_the_doctor_shows_a_spent_reading_past_its_reset_as_the_last_reading_not
     assert line == "credits 10240/10000 at the last reading exhausted"
 
 
-# ---- ao cost ---------------------------------------------------------------------------------------------------
+# ---- polyctl cost ---------------------------------------------------------------------------------------------------
 
 def _spent(monkeypatch, total):
     monkeypatch.setattr(A, "account_usage", lambda timeout=20, adapter_id=None: {
         "used": 5000.0, "limit": 10000.0, "reset_at": None, "plan": "KIRO PRO+", "overage_status": "DISABLED"})
     monkeypatch.setattr(A, "turn_costs", lambda cfg, since=None: {
-        "turns": 3, "total": total, "unit": "credits", "ao_commands": Counter(),
+        "turns": 3, "total": total, "unit": "credits", "polyctl_commands": Counter(),
         "by_class": {"analysis": {"turns": 3, "usage": total, "wasted": 0, "wasted_usage": 0}}})
 
 
-def test_ao_cost_prints_a_window_that_spent_nothing_as_nothing(project, monkeypatch, capsys):
+def test_polyctl_cost_prints_a_window_that_spent_nothing_as_nothing(project, monkeypatch, capsys):
     _spent(monkeypatch, 0.0)
 
     assert cli.cmd_cost(project, SimpleNamespace(since=None)) == 0
@@ -210,7 +210,7 @@ def test_ao_cost_prints_a_window_that_spent_nothing_as_nothing(project, monkeypa
     assert "coordination + ceremony: no share: nothing was spent" in out
 
 
-def test_ao_cost_counts_no_review_a_prune_removed_after_it_was_listed(project, monkeypatch, capsys):
+def test_polyctl_cost_counts_no_review_a_prune_removed_after_it_was_listed(project, monkeypatch, capsys):
     root = project["root"]
     _spent(monkeypatch, 1250.0)
     reviews = os.path.join(root, "semantic-review")
@@ -233,7 +233,7 @@ def test_ao_cost_counts_no_review_a_prune_removed_after_it_was_listed(project, m
 
 def _arity_parser():
     """A command whose options take no word, the next alone, an optional one, two, any number, or all after."""
-    parser = argparse.ArgumentParser(prog="ao")
+    parser = argparse.ArgumentParser(prog="polyctl")
     sub = parser.add_subparsers(dest="cmd")
     pick = sub.add_parser("pick")
     pick.add_argument("what", nargs="?", choices=["first", "second"])
@@ -247,7 +247,7 @@ def _arity_parser():
 
 
 OPTIONS = ["--flag", "--help", "--many", "--maybe", "--one", "--rest", "--two"]
-# The words after `ao pick` before the cursor, the word at it, and what completes it.
+# The words after `polyctl pick` before the cursor, the word at it, and what completes it.
 ARITY = [(["--many", "a1"], "", ["a1", "a2"]),                 # a second value of --many, not the command's word
          (["--two", "t1"], "", ["t1", "t2"]),                  # the second of --two's two
          (["--two", "t1", "t2"], "", ["first", "second"]),     # both taken: the command's word
@@ -270,18 +270,18 @@ def test_fish_and_powershell_hold_each_options_arity():
     fish = cli.completion_script(_arity_parser(), "fish")
     powershell = cli.completion_script(_arity_parser(), "powershell")
 
-    assert "function __ao_arity --argument-names cmd option" in fish
+    assert "function __polyctl_arity --argument-names cmd option" in fish
     assert "    if contains -- \"$cmd\" 'pick'; and contains -- \"$option\" '--many'\n        printf '%s\\n' '*'" in fish
-    assert "set -l arity (__ao_arity \"$cmd\" \"$word\")" in fish
-    assert "    function Get-AoArity([string]$Command, [string]$Option) {" in powershell
+    assert "set -l arity (__polyctl_arity \"$cmd\" \"$word\")" in fish
+    assert "    function Get-PolyctlArity([string]$Command, [string]$Option) {" in powershell
     assert "                    '--two' {\n                        return @('2')" in powershell
-    assert "$arity = [string](@(Get-AoArity $command $word) | Select-Object -First 1)" in powershell
+    assert "$arity = [string](@(Get-PolyctlArity $command $word) | Select-Object -First 1)" in powershell
 
 
 def _bash_offers(script, asked, cwd):
     """What the bash script offers for each list of words, the last word the one at the cursor."""
     body = ['source "$1"'] + [f"COMP_WORDS=({' '.join(shlex.quote(word) for word in words)}); "
-                              f"COMP_CWORD={len(words) - 1}; _ao; printf '%s\\n' \"${{COMPREPLY[@]}}\"; echo --"
+                              f"COMP_CWORD={len(words) - 1}; _polyctl; printf '%s\\n' \"${{COMPREPLY[@]}}\"; echo --"
                               for words in asked]
     done = _run(["bash", "-c", "\n".join(body), "_", str(script)], cwd)
     assert done.returncode == 0, done.stderr
@@ -290,28 +290,28 @@ def _bash_offers(script, asked, cwd):
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason=POSIX_SHELL)
 def test_bash_completes_each_word_an_option_takes_as_that_options(tmp_path):
-    script = tmp_path / "ao.bash"
+    script = tmp_path / "polyctl.bash"
     script.write_text(cli.completion_script(_arity_parser(), "bash"), encoding="utf-8")
     ours = tmp_path / "ours.bash"
     ours.write_text(cli.completion_script(cli.build_parser(), "bash"), encoding="utf-8")
 
-    assert _bash_offers(script, [["ao", "pick", *before, cur] for before, cur, _ in ARITY], tmp_path) == \
+    assert _bash_offers(script, [["polyctl", "pick", *before, cur] for before, cur, _ in ARITY], tmp_path) == \
         [expected for _, _, expected in ARITY]
-    # A second path is a path: files, where `ao review`'s actions were offered.
-    assert _bash_offers(ours, [["ao", "review", "--paths", "a.py", ""], ["ao", "review", ""]], tmp_path) == \
+    # A second path is a path: files, where `polyctl review`'s actions were offered.
+    assert _bash_offers(ours, [["polyctl", "review", "--paths", "a.py", ""], ["polyctl", "review", ""]], tmp_path) == \
         [[], ["submit", "collect", "cancel"]]
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("zsh") is None, reason=POSIX_SHELL)
 def test_zsh_completes_each_word_an_option_takes_as_that_options(tmp_path):
-    script = tmp_path / "_ao"
+    script = tmp_path / "_polyctl"
     script.write_text(cli.completion_script(_arity_parser(), "zsh"), encoding="utf-8")
     body = ['autoload -U compinit; compinit -u -d "$2"', 'source "$1"',
             "compadd() { [[ $1 == -- ]] && shift; print -rl -- \"$@\"; }", "_files() { print -r -- '(files)'; }"]
     for before, cur, _ in ARITY:
-        words = ["ao", "pick", *before, cur]
+        words = ["polyctl", "pick", *before, cur]
         body.append(f"words=({' '.join(shlex.quote(w) for w in words)}); CURRENT={len(words)}; "
-                    f"PREFIX={shlex.quote(cur)}; _ao; print -- --")
+                    f"PREFIX={shlex.quote(cur)}; _polyctl; print -- --")
 
     done = _run(["zsh", "-f", "-c", "\n".join(body), "_", str(script), str(tmp_path / "zcompdump")], tmp_path)
 

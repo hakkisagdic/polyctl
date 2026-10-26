@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from ao import watchdog as W
+from polyctl import watchdog as W
 
 
 def _windows(monkeypatch, calls, code=0):
@@ -36,7 +36,7 @@ def test_a_toast_carries_its_text_in_the_environment_never_in_the_script(project
     [(argv, kwargs)] = calls
     assert argv[0].endswith("powershell.exe") and argv[1:4] == ["-NoProfile", "-NonInteractive", "-Command"]
     assert title not in argv[-1] and "boom" not in argv[-1]
-    assert kwargs["env"]["AO_TOAST_TITLE"] == title and kwargs["env"]["AO_TOAST_BODY"] == body
+    assert kwargs["env"]["POLYCTL_TOAST_TITLE"] == title and kwargs["env"]["POLYCTL_TOAST_BODY"] == body
 
 
 def test_a_failed_toast_is_reported_and_never_raises(project, monkeypatch, real_desktop_notify):

@@ -5,7 +5,7 @@ its own beside the session's - `<session>/subagents/agent-<id>.jsonl`, or `workf
 for the agents a workflow run starts - and the adapter declares where they are and what joins each to the
 session (`transcript.subagents`): the result of the call that started one names it, and its sidecar names
 the call. Every reading charges a subagent's spend to the turn that started it, once, and as delegated:
-`ao cost`, the panel, `ao_status` and the credit estimate. A subagent writes a response's records as it
+`polyctl cost`, the panel, `polyctl_status` and the credit estimate. A subagent writes a response's records as it
 streams them, its output tokens growing record by record, so a response costs its highest record; the
 usage the call's result carries is one response's, and is never read. A transcript nothing joins is not
 counted: its spend is in no turn the reading holds. A subagent's calls and writes are the implementer's,
@@ -20,7 +20,7 @@ import re
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A, mcp
+from polyctl import cli, lib as A, mcp
 from tests.test_harness_guard import _docstrings
 from tests.test_second_harness_cost import (HARNESS, R1, R2, R3, R4, _call, _prompt, _response, _result, _spent,
                                             _stamp, _text, _usage)
@@ -115,8 +115,8 @@ def _undelegated(project):
                 "contract": 1, "send": {"argv": ["undelegated-fixture", "{prompt}"]}, "billing": shipped["billing"],
                 "telemetry": shipped["telemetry"],
                 "transcript": {key: value for key, value in shipped["transcript"].items() if key != "subagents"}}
-    os.makedirs(os.path.join(project["root"], ".ao", "adapters"), exist_ok=True)
-    with open(os.path.join(project["root"], ".ao", "adapters", "undelegated-fixture.json"), "w",
+    os.makedirs(os.path.join(project["root"], ".polyctl", "adapters"), exist_ok=True)
+    with open(os.path.join(project["root"], ".polyctl", "adapters", "undelegated-fixture.json"), "w",
               encoding="utf-8") as fh:
         json.dump(declared, fh)
     return declared["id"]
@@ -278,7 +278,7 @@ def test_a_note_of_the_harness_a_compaction_summary_and_a_task_notification_are_
 def _declared_words():
     """Every path step and value a shipped adapter declares to name a subagent, or a record that is no one's words."""
     words = set()
-    for path in sorted((ROOT / "src" / "ao" / "adapters").glob("*.json")):
+    for path in sorted((ROOT / "src" / "polyctl" / "adapters").glob("*.json")):
         transcript = json.loads(path.read_text(encoding="utf-8")).get("transcript")
         transcript = transcript if isinstance(transcript, dict) else {}
         declared = transcript.get("subagents") if isinstance(transcript.get("subagents"), dict) else {}
@@ -302,7 +302,7 @@ def test_no_core_module_names_a_field_that_names_a_subagent_or_a_record_that_is_
                       + r")(?![A-Za-z0-9_])")
 
     found = []
-    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
+    for path in sorted((ROOT / "src" / "polyctl").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         docs = _docstrings(tree)
         found += [f"{path.name}:{node.lineno} {node.value[:80]!r}" for node in ast.walk(tree)

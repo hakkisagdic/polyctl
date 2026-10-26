@@ -3,7 +3,7 @@
 On Windows the process table is one PowerShell query. A PowerShell that was missing, failed, did not
 answer within its thirty seconds, or printed something that was not the table gave an empty table, and
 every caller read "no process" as fact: no agent turn in the tree, no reviewer alive, nothing holding
-the architect's session. `ao hold` said no turn was running and stopped nothing, `ao writers` counted
+the architect's session. `polyctl hold` said no turn was running and stopped nothing, `polyctl writers` counted
 none, and a watchdog cycle could start a turn or wake an architect beside one it never saw. The macOS
 and Linux readers and the `ps` they fall back to turned their own failures into the same empty table.
 Each reader now raises procs.TableUnreadable, naming the platform and why; each caller that decides from
@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, mcp, procs, watchdog as W
+from polyctl import cli, lib as A, mcp, procs, watchdog as W
 from tests.scenarios import World
 
 WHY = "the process table could not be read on Windows: powershell was not found"
@@ -285,7 +285,7 @@ def test_review_cancel_stops_and_records_nothing_it_cannot_see(project, powershe
 
     assert cli.cmd_review(project, args) == 1
     assert _plain(capsys).strip() == (f"R-1 is not cancelled: {WHY}, so whether its runner still runs cannot be told. "
-                                      "The review stays running: run `ao review cancel R-1` again once the table "
+                                      "The review stays running: run `polyctl review cancel R-1` again once the table "
                                       "can be read")
     args.rid = "R-2"
     assert cli.cmd_review(project, args) == 1
@@ -302,7 +302,7 @@ def test_a_command_stopped_by_an_unreadable_table_says_so_in_one_line(project, m
 
     assert cli.main(["-C", project["root"], "writers"]) == 1
 
-    assert capsys.readouterr().err.strip() == (f"ao writers stopped: {WHY}. It decides nothing from processes it "
+    assert capsys.readouterr().err.strip() == (f"polyctl writers stopped: {WHY}. It decides nothing from processes it "
                                                "cannot see; run it again once the table can be read")
 
 

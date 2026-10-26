@@ -1,18 +1,18 @@
 """What a person reads is in the project's language, and what a person types is read in either (LANGUAGE-OUTPUT).
 
-LANGUAGE-FILES gave ao its `language` setting and converted what ao writes into a repository and
+LANGUAGE-FILES gave polyctl its `language` setting and converted what polyctl writes into a repository and
 parses back. What a person reads stayed Turkish in every project: the digest and the handoff note, the
-phone's messages and its replies, the e-mail and Telegram setup, the notes `ao decide` and a released
+phone's messages and its replies, the e-mail and Telegram setup, the notes `polyctl decide` and a released
 hold leave, a decision's free-text option, and the watchdog's alarms, its red mail and its lines to the
-phone. Each now comes from src/ao/language.py: English by default and, with `language: tr`, the Turkish
-ao wrote before, byte for byte - every Turkish text below is copied from what ao printed, sent and wrote
+phone. Each now comes from src/polyctl/language.py: English by default and, with `language: tr`, the Turkish
+polyctl wrote before, byte for byte - every Turkish text below is copied from what polyctl printed, sent and wrote
 before the change, colour codes where they stood. The setup of a channel the whole machine shares
 follows the machine's choice.
 
-What ao parses back is read in both languages: the heading a handoff note goes to the phone up to, and a
+What polyctl parses back is read in both languages: the heading a handoff note goes to the phone up to, and a
 decision's free-text option. What a person types or taps on the phone is read the same in either. An
 alarm's key is never a text, so a project that changes its language rings no standing alarm again. And
-`ao init --language` chooses before init writes a file, where `ao config set` needs the config init writes.
+`polyctl init --language` chooses before init writes a file, where `polyctl config set` needs the config init writes.
 """
 import json
 import os
@@ -23,8 +23,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, email, language, lib as A, mcp, telegram, watchdog as W
-from ao import settings as S
+from polyctl import cli, email, language, lib as A, mcp, telegram, watchdog as W
+from polyctl import settings as S
 from tests import conftest
 from tests import test_noise_repeats as noise
 from tests.test_language_files import INIT_FILES, STEERING, TURKISH, _choose, _plain, _read
@@ -35,7 +35,7 @@ STAMP = datetime(2026, 9, 17, 16, 0)
 
 
 class _Now(datetime):
-    """The clock `ao handoff` stamps its note with, stopped."""
+    """The clock `polyctl handoff` stamps its note with, stopped."""
 
     @classmethod
     def now(cls, tz=None):
@@ -61,30 +61,30 @@ E-posta kanalı (kırmızı alarm) — sunucu gerekmez, formsubmit.co üzerinden
 1. Bir kez doğrulama: aşağıdaki komutu KENDİ adresinle çalıştır; formsubmit sana
    bir aktivasyon e-postası gönderir, içindeki bağlantıya tıkla.
      curl -s -X POST -H "Content-Type: application/json" -H "Accept: application/json" \\
-       -d '{{"message":"ao aktivasyon"}}' https://formsubmit.co/ajax/SENIN@ADRESIN
+       -d '{{"message":"polyctl aktivasyon"}}' https://formsubmit.co/ajax/SENIN@ADRESIN
 2. Aktivasyondan sonra formsubmit sana adresini gizleyen rastgele bir token verir
    (https://formsubmit.co/ajax/<token>). Adresin kendisi de token olarak çalışır.
-3. Kaydet:  ao email setup --token <token> --to SENIN@ADRESIN
-4. Dene:    ao email test        → gelen kutunda "[ao/<proje>] test" görmelisin.
+3. Kaydet:  polyctl email setup --token <token> --to SENIN@ADRESIN
+4. Dene:    polyctl email test        → gelen kutunda "[polyctl/<proje>] test" görmelisin.
 
-Kendi posta sunucun varsa formsubmit yerine SMTP; ao hesabın parolasını sorar ve ekrana
+Kendi posta sunucun varsa formsubmit yerine SMTP; polyctl hesabın parolasını sorar ve ekrana
 basmaz, böylece parola kabuğun geçmişinin tuttuğu komut satırına hiç yazılmaz (bir betik
 parolayı tutan değişkeni --password-env ile adlandırır):
-     ao email setup --provider smtp --host smtp.ornek.com \\
+     polyctl email setup --provider smtp --host smtp.ornek.com \\
        --user SEN@ORNEK.COM --to SEN@ORNEK.COM
 
 Token {conf} dosyasında {kept} durur; hiçbir depoya yazılmaz. Kırmızı alarmlar
 (bir saatten uzun süren turuncu durumlar, tükenmiş kota, başarısız mimar uyandırma)
-bu adrese gider; `ao alarms` merdiveni gösterir.
+bu adrese gider; `polyctl alarms` merdiveni gösterir.
 """
 # How the file is kept private, as the platform keeps it: Windows keeps no file mode (WINDOWS-SAY-WHY).
 KEPT = {"en": "as private as its folder's permissions (Windows keeps no file mode)",
         "tr": "klasörünün izinleri kadar gizli (Windows dosya kipi tutmaz)"} if os.name == "nt" \
     else {"en": "mode 0600", "tr": "0600 ile"}
 EMAIL_TEST = {
-    "en": "ao's e-mail channel works. Project: {root}\nRed alarms come here: orange conditions standing longer than "
+    "en": "polyctl's e-mail channel works. Project: {root}\nRed alarms come here: orange conditions standing longer than "
           "an hour, an exhausted quota, a failed architect wake.",
-    "tr": "ao e-posta kanalı çalışıyor. Proje: {root}\nKırmızı alarmlar buraya gelir: bir saatten uzun süren "
+    "tr": "polyctl e-posta kanalı çalışıyor. Proje: {root}\nKırmızı alarmlar buraya gelir: bir saatten uzun süren "
           "turuncu durumlar, tükenmiş kota, başarısız mimar uyandırma.",
 }
 
@@ -96,7 +96,7 @@ def test_the_email_setup_follows_the_machines_language_and_the_test_mail_the_pro
     assert cli.cmd_email(turkish_project, setup) == 0                # a project's choice is not the machine's
     english = capsys.readouterr().out
     assert english.startswith("The e-mail channel (the red alarm) — no server needed, it goes through formsubmit.co.\n")
-    assert "3. Save:    ao email setup --token <token> --to YOUR@ADDRESS\n" in english
+    assert "3. Save:    polyctl email setup --token <token> --to YOUR@ADDRESS\n" in english
     assert f"The token stays in {email.CONF}, {KEPT['en']}, and is never written" in english
     assert not TURKISH.search(english.replace(email.CONF, ""))
     _machine("tr")
@@ -104,7 +104,7 @@ def test_the_email_setup_follows_the_machines_language_and_the_test_mail_the_pro
     assert capsys.readouterr().out == EMAIL_SETUP_TR.format(conf=email.CONF, kept=KEPT["tr"]) + "\n"
 
     sent = []
-    monkeypatch.setattr(email, "config", lambda: {"provider": "formsubmit", "token": "t", "to": "", "name": "ao"})
+    monkeypatch.setattr(email, "config", lambda: {"provider": "formsubmit", "token": "t", "to": "", "name": "polyctl"})
     monkeypatch.setattr(email, "send", lambda subject, body, root=None, opener=None: sent.append((subject, body)) or True)
     for chosen in LANGUAGES:
         assert cli.cmd_email(_choose(project, chosen), SimpleNamespace(action="test", provider=None)) == 0
@@ -129,22 +129,22 @@ def test_the_telegram_setup_follows_the_machines_language_and_its_test_message_t
 
     assert cli.cmd_telegram(turkish_project, setup) == 0
     lines = capsys.readouterr().out.split("\n")
-    assert (f"{C['b']}2.{C['reset']} Write the bot a message from each chat that may reach it: ao finds those chats "
+    assert (f"{C['b']}2.{C['reset']} Write the bot a message from each chat that may reach it: polyctl finds those chats "
             "with the token.") in lines
-    assert (f"{C['b']}3.{C['reset']} {C['b']}You{C['reset']} give ao the token when it asks — a bot token is a "
+    assert (f"{C['b']}3.{C['reset']} {C['b']}You{C['reset']} give polyctl the token when it asks — a bot token is a "
             "credential: it is not shown, and no") in lines
     assert f"   bot, you choose the ones it allows, and it writes {telegram.CONF} itself, {KEPT['en']}." in lines
-    assert "No terminal is attached, so ao asks for nothing: run ao telegram setup in a terminal of yours, or" in lines
+    assert "No terminal is attached, so polyctl asks for nothing: run polyctl telegram setup in a terminal of yours, or" in lines
     _machine("tr")
     assert cli.cmd_telegram(turkish_project, setup) == 0
     lines = capsys.readouterr().out.split("\n")
-    assert f"{C['b']}2.{C['reset']} Ona ulaşabilecek her sohbetten bota bir mesaj yaz: ao bu sohbetleri token ile bulur." \
+    assert f"{C['b']}2.{C['reset']} Ona ulaşabilecek her sohbetten bota bir mesaj yaz: polyctl bu sohbetleri token ile bulur." \
         in lines
-    assert (f"{C['b']}3.{C['reset']} Token'ı ao sorduğunda {C['b']}sen{C['reset']} ver — bir bot token'ı kimlik "
+    assert (f"{C['b']}3.{C['reset']} Token'ı polyctl sorduğunda {C['b']}sen{C['reset']} ver — bir bot token'ı kimlik "
             "bilgisidir: ekrana basılmaz; onu ne") in lines
-    assert (f"   listeler, izin vereceklerini sen seçersin, {telegram.CONF} dosyasını da ao kendisi yazar, "
+    assert (f"   listeler, izin vereceklerini sen seçersin, {telegram.CONF} dosyasını da polyctl kendisi yazar, "
             f"{KEPT['tr']}.") in lines
-    assert ("Bağlı bir terminal yok, bu yüzden ao bir şey sormaz: ao telegram setup komutunu kendi terminalinde"
+    assert ("Bağlı bir terminal yok, bu yüzden polyctl bir şey sormaz: polyctl telegram setup komutunu kendi terminalinde"
             in lines)
 
     sent = []
@@ -163,16 +163,16 @@ REPLIES = {
            "commands": "Commands: /status /board /credits /notices /fleet /decisions\n\n"
                        "To answer a pending decision: tap a button, or type `D-123 b`.\n"
                        "Every message that is not a command is written to the mailbox as an urgent decision.",
-           "saved": "✅ Saved: `{name}`\n\nIt reaches the implementer through `ao lock`, `ao verify` and "
-                    "`ao commit-ok`; it cannot commit until it acknowledges it.",
+           "saved": "✅ Saved: `{name}`\n\nIt reaches the implementer through `polyctl lock`, `polyctl verify` and "
+                    "`polyctl commit-ok`; it cannot commit until it acknowledges it.",
            "free": "Other (free text)"},
     "tr": {"unauthorised": "yetkisiz", "recorded": "a) kaydedildi", "gone": "karar bulunamadı",
            "unknown": "`D-2` diye bir karar yok.",
            "commands": "Komutlar: /status /board /credits /notices /fleet /decisions\n\n"
                        "Bekleyen bir karara cevap: butona bas, ya da `D-123 b` yaz.\n"
                        "Komut olmayan her mesaj acil karar olarak kutuya yazılır.",
-           "saved": "✅ Kaydedildi: `{name}`\n\nUygulayıcıya `ao lock`, `ao verify` ve "
-                    "`ao commit-ok` üzerinden ulaşacak; onaylamadan commit edemez.",
+           "saved": "✅ Kaydedildi: `{name}`\n\nUygulayıcıya `polyctl lock`, `polyctl verify` ve "
+                    "`polyctl commit-ok` üzerinden ulaşacak; onaylamadan commit edemez.",
            "free": "Başka (serbest metin)"},
 }
 
@@ -213,7 +213,7 @@ def test_the_phone_is_answered_in_the_projects_language_and_what_it_types_works_
     run = subprocess.run
 
     def command(argv, *args, **kwargs):
-        if isinstance(argv, list) and argv and os.path.basename(str(argv[0])) == "ao":
+        if isinstance(argv, list) and argv and os.path.basename(str(argv[0])) == "polyctl":
             ran.append(argv[1:])
             return SimpleNamespace(stdout="working\n", stderr="", returncode=0)
         return run(argv, *args, **kwargs)
@@ -259,8 +259,8 @@ def test_a_blocked_report_and_a_question_reach_the_phone_in_the_projects_languag
     monkeypatch.setattr(telegram, "send", lambda text, root=None, keyboard=None: sent.append((text, keyboard)) or 1)
     monkeypatch.setattr(A, "recall", lambda *args, **kwargs: [])
 
-    mcp.call("ao_report", {"kind": "blocked", "summary": "queue empty", "needs": "the next slice"}, cfg, False)
-    asked = mcp.call("ao_ask", {"question": "which store keeps the ledger?", "options": ["sqlite", "files"],
+    mcp.call("polyctl_report", {"kind": "blocked", "summary": "queue empty", "needs": "the next slice"}, cfg, False)
+    asked = mcp.call("polyctl_ask", {"question": "which store keeps the ledger?", "options": ["sqlite", "files"],
                                 "context": "the ledger grows", "slice": "S3"}, cfg, False)
 
     [(blocked, _), (question, keyboard)] = sent
@@ -309,9 +309,9 @@ HANDOFF = {
            "", "## Blocked", "- **S2** sync — no reason recorded", "- **S6** auth — a key",
            "", "## Running", "- **S3** store", "", "## Next (2 item(s))", "- **S4** export",
            "", "## What a successor can do",
-           "- Answer a pending decision: tap a button on the phone, or `ao answer <id> <letter>`",
+           "- Answer a pending decision: tap a button on the phone, or `polyctl answer <id> <letter>`",
            "- Write a decision of your own: send a message on Telegram — it lands in the mailbox as urgent",
-           "- See the state: `ao status`, `ao board`, `ao decisions`",
+           "- See the state: `polyctl status`, `polyctl board`, `polyctl decisions`",
            "", "_push, PRs and closing an epic never transfer in a handoff._"],
     "tr": ["# Devir — proj", "_2026-09-17 16:00_", "", "**Sebep:** the provider's quota ran out", "",
            "## Şu an", "- uygulayıcı: **working**, son yazım 5dk önce", "- HEAD `abc1234 add the store`",
@@ -323,9 +323,9 @@ HANDOFF = {
            "", "## Blocked", "- **S2** sync — sebep kayıtlı değil", "- **S6** auth — a key",
            "", "## Yürüyen", "- **S3** store", "", "## Sıradaki (2 madde)", "- **S4** export",
            "", "## Devralan ne yapabilir",
-           "- Bekleyen kararı cevapla: telefondan butona bas, ya da `ao answer <id> <harf>`",
+           "- Bekleyen kararı cevapla: telefondan butona bas, ya da `polyctl answer <id> <harf>`",
            "- Serbest karar yaz: Telegram'a mesaj at — acil olarak kutuya düşer",
-           "- Durumu gör: `ao status`, `ao board`, `ao decisions`",
+           "- Durumu gör: `polyctl status`, `polyctl board`, `polyctl decisions`",
            "", "_push, PR ve epic kapatma hiçbir devirde aktarılmaz._"],
 }
 SUCCESSOR = {"en": "## What a successor can do", "tr": "## Devralan ne yapabilir"}
@@ -359,7 +359,7 @@ def test_the_handoff_note_is_in_the_projects_language_and_the_phone_is_sent_it_u
 
     note = "\n".join(HANDOFF[chosen])
     [name] = A.mailbox(cfg["root"], cfg["mailbox"])
-    # Written through write_mail, as every mail ao writes: its envelope, then the note (ROLE-TABLE-2).
+    # Written through write_mail, as every mail polyctl writes: its envelope, then the note (ROLE-TABLE-2).
     assert _read(os.path.join(cfg["root"], cfg["mailbox"], name)).endswith("\n---\n" + note + "\n")
     assert _plain(capsys.readouterr().out).startswith(note + "\n")
     assert sent == [note.split(SUCCESSOR[chosen])[0]]
@@ -397,7 +397,7 @@ def _digest_page(chosen, C):
                f"  state    {yellow}slowing{reset}{dim}, last wrote 10m ago{reset}  "
                f"{red}⚠ 12m busy, nothing produced{reset}",
                f"\n  {yellow}2 decision(s) waiting for an answer{reset}"
-               f"{dim} — these unblock the work: ao decisions{reset}",
+               f"{dim} — these unblock the work: polyctl decisions{reset}",
                f"\n{head}LANDED WORK {'─' * 42}{reset}", f"{dim}, 2 unpushed{reset}",
                f"\n{head}GATES {'─' * 48}{reset}",
                f"  verify     {green}5 passed{reset}, {red}1 failed{reset}",
@@ -409,7 +409,7 @@ def _digest_page(chosen, C):
         "tr": [f"{b}proj{reset}{dim}  son 24 saat{reset}", "",
                f"  durum    {yellow}slowing{reset}{dim}, son yazım 10dk önce{reset}  "
                f"{red}⚠ 12dk meşgul, üretim yok{reset}",
-               f"\n  {yellow}2 cevap bekleyen karar{reset}{dim} — bunlar işi açar: ao decisions{reset}",
+               f"\n  {yellow}2 cevap bekleyen karar{reset}{dim} — bunlar işi açar: polyctl decisions{reset}",
                f"\n{head}İNEN İŞ {'─' * 46}{reset}", f"{dim}, 2 push'suz{reset}",
                f"\n{head}KAPILAR {'─' * 46}{reset}",
                f"  doğrulama  {green}5 geçti{reset}, {red}1 düştü{reset}",
@@ -451,7 +451,7 @@ def test_the_digest_is_in_the_projects_language_and_its_sections_keep_their_widt
     assert windows == {"en": ["last 7 days", "last 0.5 days"], "tr": ["son 7 gün", "son 0.5 gün"]}[chosen]
 
 
-# ---- the notes ao decide and a released hold leave the implementer --------------------------------
+# ---- the notes polyctl decide and a released hold leave the implementer --------------------------------
 
 DECIDED = {
     "en": "# keep the ledger in sqlite\n\nkeep the ledger in sqlite\n\n**Why:** one file to back up\n\n**Scope:** S3\n\n"
@@ -491,12 +491,12 @@ def test_the_notes_a_decision_and_a_released_hold_leave_are_in_the_projects_lang
 # ---- alarms: worded in the project's language, keyed and routed the same in either -----------------
 
 ALARMS = {
-    "en": [("proj: alarm test", "red level test — ao alarms test"),
+    "en": [("proj: alarm test", "red level test — polyctl alarms test"),
            ("proj: architect at quota", "limit reached — wakes are held until {reset}; if auto-continue is on in the "
                                         "architect's app, the session goes on by itself"),
            ("proj: architect at quota", "architect quota exhausted — wakes are held until {reset}; if auto-continue "
                                         "is on in the architect's app, the session goes on by itself")],
-    "tr": [("proj: alarm testi", "red seviyesi testi — ao alarms test"),
+    "tr": [("proj: alarm testi", "red seviyesi testi — polyctl alarms test"),
            ("proj: mimar kotada", "limit reached — uyandırma {reset}'e kadar bekletiliyor; mimarın uygulamasında "
                                   "auto-continue açıksa oturum kendi devam eder"),
            ("proj: mimar kotada", "architect quota exhausted — uyandırma {reset}'e kadar bekletiliyor; mimarın "
@@ -542,9 +542,9 @@ def test_a_project_that_changes_its_language_rings_no_standing_alarm_again(proje
 
 RED_MAIL = {
     "en": "set by alice: maintenance\n\nStanding since {since}, raised 1×. Project: {root}\n"
-          "`ao alarms` shows the ladder, `ao status` the state.\n\nEvidence:\ncheck: hold\n  5h  from hold file, 2m ago",
+          "`polyctl alarms` shows the ladder, `polyctl status` the state.\n\nEvidence:\ncheck: hold\n  5h  from hold file, 2m ago",
     "tr": "set by alice: maintenance\n\nDuruyor: {since}'den beri (1 kez). Proje: {root}\n"
-          "`ao alarms` merdiveni, `ao status` durumu gösterir.\n\nKanıt:\ncheck: hold\n  5h  from hold file, 2m ago",
+          "`polyctl alarms` merdiveni, `polyctl status` durumu gösterir.\n\nKanıt:\ncheck: hold\n  5h  from hold file, 2m ago",
 }
 
 
@@ -571,12 +571,12 @@ def test_a_red_alarms_mail_is_worded_in_the_projects_language(project, monkeypat
 WATCHDOG = {
     "en": {"woken": "🤖 *Architect woken* — handling 2 report(s) (pid 99999)",
            "retried": "🤖 *Architect woken* — after failed attempts, for 2 report(s) (pid 99999)",
-           "failed": "proj: architect wake failed", "binary": " — binary: /agents/claude 2.1.261; `ao doctor`",
+           "failed": "proj: architect wake failed", "binary": " — binary: /agents/claude 2.1.261; `polyctl doctor`",
            "done": "✅ *Architect done* — 2 report(s) closed, queue empty",
            "handoffs": ["the architect could not be woken — no quota", "the provider's quota is exhausted"]},
     "tr": {"woken": "🤖 *Mimar uyandırıldı* — 2 rapor işleniyor (pid 99999)",
            "retried": "🤖 *Mimar uyandırıldı* — başarısız denemelerin ardından, 2 rapor için (pid 99999)",
-           "failed": "proj: mimar uyandırılamadı", "binary": " — ikili: /agents/claude 2.1.261; `ao doctor`",
+           "failed": "proj: mimar uyandırılamadı", "binary": " — ikili: /agents/claude 2.1.261; `polyctl doctor`",
            "done": "✅ *Mimar bitirdi* — 2 rapor kapandı, kuyruk boş",
            "handoffs": ["mimar uyandırılamadı — kota yok", "sağlayıcı kotası tükendi"]},
 }
@@ -646,7 +646,7 @@ def test_the_watchdog_hands_off_with_a_reason_in_the_projects_language(project, 
     assert reasons == WATCHDOG[chosen]["handoffs"]
 
 
-# ---- ao init --language ------------------------------------------------------------------------------
+# ---- polyctl init --language ------------------------------------------------------------------------------
 
 def _init_in(root, capsys, **overrides):
     root.mkdir(exist_ok=True)
@@ -659,29 +659,29 @@ def test_init_language_chooses_the_projects_language_before_init_writes_a_file(p
     root = tmp_path / "chosen"
     code, out = _init_in(root, capsys, language="tr")
 
-    assert code == 0 and "wrote  .ao/config.json (+language tr)" in out
-    assert json.loads((root / ".ao" / "config.json").read_text(encoding="utf-8"))["language"] == "tr"
+    assert code == 0 and "wrote  .polyctl/config.json (+language tr)" in out
+    assert json.loads((root / ".polyctl" / "config.json").read_text(encoding="utf-8"))["language"] == "tr"
     files = {rel: _read(root / rel) for rel in INIT_FILES}
-    assert files == {".ao/authority.md": language.TEXTS["init.authority"]["tr"],
-                     ".ao/board.md": language.TEXTS["init.board"]["tr"],
-                     ".ao/backlog.md": language.TEXTS["init.backlog"]["tr"].format(name="acme-api"),
+    assert files == {".polyctl/authority.md": language.TEXTS["init.authority"]["tr"],
+                     ".polyctl/board.md": language.TEXTS["init.board"]["tr"],
+                     ".polyctl/backlog.md": language.TEXTS["init.backlog"]["tr"].format(name="acme-api"),
                      "agent-mail/README.md": language.TEXTS["init.mail-readme"]["tr"].format()}
     assert "(`## ACİL`)" in _read(root / STEERING)
 
     _machine("tr")                                         # the flag outranks the machine's choice
     english = tmp_path / "english"
     code, out = _init_in(english, capsys, language="en")
-    assert code == 0 and _read(english / ".ao" / "board.md") == language.TEXTS["init.board"]["en"]
+    assert code == 0 and _read(english / ".polyctl" / "board.md") == language.TEXTS["init.board"]["en"]
 
-    config = json.loads((english / ".ao" / "config.json").read_text(encoding="utf-8"))
-    (english / ".ao" / "config.json").write_text(json.dumps(dict(config, language="en")), encoding="utf-8")
+    config = json.loads((english / ".polyctl" / "config.json").read_text(encoding="utf-8"))
+    (english / ".polyctl" / "config.json").write_text(json.dumps(dict(config, language="en")), encoding="utf-8")
     code, out = _init_in(english, capsys, language="tr")   # a config that chose: replaced, its files kept
-    assert code == 0 and "wrote  .ao/config.json (+language tr)" in out and "kept   .ao/board.md" in out
-    assert json.loads((english / ".ao" / "config.json").read_text(encoding="utf-8"))["language"] == "tr"
-    assert _read(english / ".ao" / "board.md") == language.TEXTS["init.board"]["en"]
+    assert code == 0 and "wrote  .polyctl/config.json (+language tr)" in out and "kept   .polyctl/board.md" in out
+    assert json.loads((english / ".polyctl" / "config.json").read_text(encoding="utf-8"))["language"] == "tr"
+    assert _read(english / ".polyctl" / "board.md") == language.TEXTS["init.board"]["en"]
 
 
-def test_init_takes_only_a_language_ao_has(capsys):
+def test_init_takes_only_a_language_polyctl_has(capsys):
     parser = cli.build_parser()
     assert parser.parse_args(["init", "--language", "tr"]).language == "tr"
     assert parser.parse_args(["init"]).language is None

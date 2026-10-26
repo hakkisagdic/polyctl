@@ -1,17 +1,17 @@
-"""The bug hunter's leads on the MCP server and on what ao prints, each held here (LEADS-MCP).
+"""The bug hunter's leads on the MCP server and on what polyctl prints, each held here (LEADS-MCP).
 
-ao's read-only bug hunter read src/ao on 2026-10-12 and named five leads. `ao_ack` took any name in the mailbox, so
+polyctl's read-only bug hunter read src/polyctl on 2026-10-12 and named five leads. `polyctl_ack` took any name in the mailbox, so
 an implementer consumed the architect's reports, the hunter's leads and the watchdog's anomalies: deleted, or, with
 `mail.store` append-only, recorded handled - which the store keeps from the actor deciding what was handled precisely
 so that it cannot erase the question. A line on the server's standard input that was JSON but no object reached
 `.get` outside its handler and ended the server, as it had ended the A2A bridge; so did a number past Python's 4300
-digits and nesting deeper than the parser recurses. `ao agents` printed what a hook's command line and input said,
-the status panel, the board and the mail what agents wrote, and `ao harness probe` what a vendor's harness answered,
+digits and nesting deeper than the parser recurses. `polyctl agents` printed what a hook's command line and input said,
+the status panel, the board and the mail what agents wrote, and `polyctl harness probe` what a vendor's harness answered,
 each as it was: an escape sequence acted on the terminal of whoever read it, and a line feed wrote a line that read as
-ao's. `ao harness seen` put the name it was given into the commands it prints to copy without quoting it, so a name
+polyctl's. `polyctl harness seen` put the name it was given into the commands it prints to copy without quoting it, so a name
 with a space broke the command and a `;` ran one of its own. The fifth lead, a server started with no role or one it
 does not know, is answered in the slice's report: an unknown role is refused by HUNT-LEADS-SEC, and a server with no
-role keeps every tool, the architect's - with `ao_ack` held to the implementer's mail whatever the role.
+role keeps every tool, the architect's - with `polyctl_ack` held to the implementer's mail whatever the role.
 """
 import io
 import json
@@ -24,7 +24,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import acp, cli, lib as A, mcp
+from polyctl import acp, cli, lib as A, mcp
 
 INVALID = {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "a request is a JSON object"}}
 PING = json.dumps({"jsonrpc": "2.0", "id": 7, "method": "ping"})
@@ -35,8 +35,8 @@ ACTED_ON = ("\x1b", "\x07", "\r", "‮")
 
 
 def _serve(monkeypatch, capsys, root, lines, *flags):
-    """Run `ao -C <root> mcp serve <flags>` over `lines` on its standard input: every reply it wrote, in order."""
-    monkeypatch.setattr(sys, "argv", list(sys.argv))            # `ao mcp serve` rewrites it for the server
+    """Run `polyctl -C <root> mcp serve <flags>` over `lines` on its standard input: every reply it wrote, in order."""
+    monkeypatch.setattr(sys, "argv", list(sys.argv))            # `polyctl mcp serve` rewrites it for the server
     monkeypatch.setattr(sys, "stdin", io.StringIO("".join(line + "\n" for line in lines)))
     capsys.readouterr()
     assert cli.main(["-C", root, "mcp", "serve", *flags]) == 0
@@ -44,11 +44,11 @@ def _serve(monkeypatch, capsys, root, lines, *flags):
 
 
 def _mail_store(project, store):
-    """The fixture's project with `mail.store` set to `store`, as ao loads it."""
+    """The fixture's project with `mail.store` set to `store`, as polyctl loads it."""
     root = project["root"]
     stored = {key: value for key, value in project.items() if key != "root"}
     stored["mail"] = {"store": store}
-    Path(root, ".ao", "config.json").write_text(json.dumps(stored), encoding="utf-8")
+    Path(root, ".polyctl", "config.json").write_text(json.dumps(stored), encoding="utf-8")
     return A.load_config(root)
 
 
@@ -60,7 +60,7 @@ def _acted_on(text):
 
 @pytest.mark.parametrize("store", ["deletion", "append-only"])
 @pytest.mark.parametrize("role", ["implementer", None], ids=["the implementer's server", "a server with no role"])
-def test_ao_ack_takes_only_mail_addressed_to_the_implementer(project, store, role):
+def test_polyctl_ack_takes_only_mail_addressed_to_the_implementer(project, store, role):
     root = project["root"]
     cfg = _mail_store(project, store)
     implementer, architect = A.mail_names(cfg)
@@ -71,11 +71,11 @@ def test_ao_ack_takes_only_mail_addressed_to_the_implementer(project, store, rol
     for name in others + [mine]:
         A.write_mail(root, cfg, name, f"# {name}\n\nApply it, then acknowledge it.\n", {"kind": "note"})
 
-    assert [message["id"] for message in mcp.call("ao_inbox", {}, cfg, False, role)["messages"]] == [mine]
+    assert [message["id"] for message in mcp.call("polyctl_inbox", {}, cfg, False, role)["messages"]] == [mine]
     for name in others:
-        answer = mcp.call("ao_ack", {"id": name, "outcome": "applied"}, cfg, False, role)
+        answer = mcp.call("polyctl_ack", {"id": name, "outcome": "applied"}, cfg, False, role)
         assert list(answer) == ["error"] and answer["error"].startswith(f"{name} is not addressed to the implementer")
-    assert mcp.call("ao_ack", {"id": mine}, cfg, False, role) == {"acknowledged": mine, "outcome": "applied"}
+    assert mcp.call("polyctl_ack", {"id": mine}, cfg, False, role) == {"acknowledged": mine, "outcome": "applied"}
 
     assert A.mailbox(root, "agent-mail") == others                      # each still waits for its own reader
     assert all(Path(root, "agent-mail", name).exists() for name in others)
@@ -85,7 +85,7 @@ def test_ao_ack_takes_only_mail_addressed_to_the_implementer(project, store, rol
 
 
 def test_a_line_that_is_no_object_is_answered_as_invalid_and_the_server_goes_on(project, monkeypatch, capsys):
-    lines = ["[]", "[1, 2]", "1", '"ao_status"', "null", "true"]
+    lines = ["[]", "[1, 2]", "1", '"polyctl_status"', "null", "true"]
 
     replies = _serve(monkeypatch, capsys, project["root"], lines + [PING], "--role", "implementer")
 
@@ -93,7 +93,7 @@ def test_a_line_that_is_no_object_is_answered_as_invalid_and_the_server_goes_on(
 
 
 def test_a_line_the_parser_cannot_hold_is_passed_over_and_the_server_goes_on(project, monkeypatch, capsys):
-    depth = 1_000_000                       # past what the parser recurses on every Python ao runs on
+    depth = 1_000_000                       # past what the parser recurses on every Python polyctl runs on
     nested = ('{"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {"x": ' + "[" * depth + "]" * depth + "}}")
     # More than 4300 digits, which Python will not read as a number, and no id: answered by nothing either way.
     huge = '{"jsonrpc": "2.0", "method": "ping", "params": {"agents": ' + "7" * 5000 + "}}"
@@ -104,9 +104,9 @@ def test_a_line_the_parser_cannot_hold_is_passed_over_and_the_server_goes_on(pro
     assert all(reply == {"jsonrpc": "2.0", "id": 1, "result": {}} for reply in replies[:-1])
 
 
-# ---- what ao prints ---------------------------------------------------------------------------------
+# ---- what polyctl prints ---------------------------------------------------------------------------------
 
-def test_ao_agents_shows_what_a_hook_said_escaped(project, capsys, monkeypatch):
+def test_polyctl_agents_shows_what_a_hook_said_escaped(project, capsys, monkeypatch):
     """The hook is a command any program on the machine can run, with whatever command line and input it likes."""
     monkeypatch.setenv("NO_COLOR", "1")
     A.emit_event(project["root"], "agent-prompt", {"harness": "claude\x1b]0;pwned\x07",
@@ -152,14 +152,14 @@ def test_the_status_panel_the_board_and_the_mail_show_what_agents_wrote_escaped(
     monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.setattr(A, "quota", lambda adapter, ttl=300: ["claude: 5h window\x1b[2J 40%"])   # no real keyflip
     root = project["root"]
-    Path(root, ".ao", "board.md").write_text(
+    Path(root, ".polyctl", "board.md").write_text(
         "# Board\n\n## running\n\n## blocked\n- [S1] fix it\x1b]0;pwned\x07 · needs: a reply\x1b[8m\n\n## queued\n"
         "- [S2] next\x1b[2J · acceptance: it works\n\n## inbox\n\n## verified\n\n## done\n", encoding="utf-8")
     urgent = "20261012-0900-fable-to-kiro-DECISION-stop‮gpj.md"
     Path(root, "agent-mail", urgent).write_text("# stop now\x1b[2J\n\n## URGENT\n\nline one\x1b[8m\nline two\n",
                                                 encoding="utf-8")
-    Path(root, ".ao", "reviews").mkdir()
-    Path(root, ".ao", "reviews", "R-9.json").write_text(json.dumps({
+    Path(root, ".polyctl", "reviews").mkdir()
+    Path(root, ".polyctl", "reviews", "R-9.json").write_text(json.dumps({
         "id": "R-1; touch pwned", "state": "finished", "verdict": "APPROVED\x1b[2J", "slice": "S1"}), encoding="utf-8")
 
     panel = cli.render(project, shown=False)
@@ -174,12 +174,12 @@ def test_the_status_panel_the_board_and_the_mail_show_what_agents_wrote_escaped(
     assert "stop now\\x1b[2J" in panel and "stop\\u202egpj.md" in panel and "APPROVED\\x1b[2J" in panel
     assert "fix it\\x1b]0;pwned\\x07" in board and "next\\x1b[2J" in board and "stop now\\x1b[2J" in board
     assert "line one\\x1b[8m\nline two\n" in mail                      # a body's lines stay lines
-    # The returned review's id is the record's, a file in the tree, and none ao makes: no command is made of it.
+    # The returned review's id is the record's, a file in the tree, and none polyctl makes: no command is made of it.
     returned = next(line for line in panel.splitlines() if "REVIEW RETURNED" in line)
-    assert "ao review collect" not in returned and "its id is none ao makes" in returned
+    assert "polyctl review collect" not in returned and "its id is none polyctl makes" in returned
 
 
-# ---- the commands ao prints to copy -------------------------------------------------------------------
+# ---- the commands polyctl prints to copy -------------------------------------------------------------------
 
 @pytest.mark.parametrize("by", ["Ada Lovelace", "Ada; touch pwned", "Ada $(touch pwned)"])
 def test_harness_seen_quotes_the_name_in_each_command_it_prints_to_copy(project, capsys, by):
@@ -196,7 +196,7 @@ def test_harness_seen_quotes_the_name_in_each_command_it_prints_to_copy(project,
     asked = seen(ask=True)                       # no terminal here: nothing is asked, and the command to run is named
     refused = seen(digest="sha256:" + "0" * 64)  # a digest of nothing shown: refused, naming the command that shows it
     commands = [part.split("`")[0].split("\n")[0].strip() for out in (shown, asked, refused)
-                for part in out.split("ao harness seen ")[1:]]
+                for part in out.split("polyctl harness seen ")[1:]]
 
     assert len(commands) == 4, (shown, asked, refused)
     for command in commands:
@@ -229,7 +229,7 @@ def test_a_tab_is_shown_escaped_where_it_would_move_what_follows():
     assert A.shown_text("real\tFORGED") == "real\\x09FORGED"
 
 
-def test_a_returned_review_whose_id_ao_made_is_given_its_command_to_copy(project, capsys, monkeypatch):
+def test_a_returned_review_whose_id_polyctl_made_is_given_its_command_to_copy(project, capsys, monkeypatch):
     monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.setattr(A, "returned_reviews", lambda root: [
         {"id": "R-1791849149123", "slice": "S1", "verdict": "APPROVED", "state": "done"},
@@ -237,5 +237,5 @@ def test_a_returned_review_whose_id_ao_made_is_given_its_command_to_copy(project
 
     panel = cli.render(project, shown=False)
 
-    assert f"(ao review collect {A.copyable_word('R-1791849149123')})" in panel
-    assert panel.count("ao review collect") == 1 and panel.count("its id is none ao makes") == 1
+    assert f"(polyctl review collect {A.copyable_word('R-1791849149123')})" in panel
+    assert panel.count("polyctl review collect") == 1 and panel.count("its id is none polyctl makes") == 1

@@ -1,4 +1,4 @@
-from ao import lib as A
+from polyctl import lib as A
 
 
 def test_hard_cap_refuses(project, monkeypatch):
@@ -29,7 +29,7 @@ def test_low_window_refuses_and_unreadable_window_is_said(project, monkeypatch):
 def test_the_window_is_named_for_the_provider_read_not_the_argument(project, monkeypatch, capsys):
     """HARNESS-ACCOUNTS-2: with no --provider the architect's provider's window was read, and the line named None."""
     from types import SimpleNamespace
-    from ao import cli
+    from polyctl import cli
     asked = []
     window = {"pct": 4, "window": "5h", "resets_in": "4h", "resets_s": 14400}
     monkeypatch.setattr(A, "provider_window", lambda name: asked.append(name) or window)
@@ -45,7 +45,7 @@ def test_the_window_is_named_for_the_provider_read_not_the_argument(project, mon
 
 def test_pipeline_bound_is_gated_not_the_root_count(project, monkeypatch, capsys):
     from types import SimpleNamespace
-    from ao import cli
+    from polyctl import cli
     monkeypatch.setattr(A, "provider_window", lambda name="claude": {"pct": 4, "window": "5h", "resets_in": "4h", "resets_s": 14400})
     args = SimpleNamespace(action="ok", agents=None, roots=7, per_root=12, per_agent_tokens=None, provider="claude", json=False,
                            done=None, errors=None, tokens=None, note=None, limit=20)

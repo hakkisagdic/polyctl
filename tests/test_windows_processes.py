@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, procs
+from polyctl import cli, lib as A, procs
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32",
                                 reason="reads a live Windows process; the Windows lane runs it (#9)")
@@ -59,7 +59,7 @@ def test_an_agent_in_the_tree_is_placed_by_its_directory_and_a_hold_stops_it(pro
 
 def test_a_command_line_outside_the_code_page_is_read_as_given_and_places_its_turn(tmp_path, monkeypatch):
     # PowerShell wrote the process table in the console's code page, and a repository whose name that page
-    # lacks was named on no command line ao could read: where the working directory cannot be read, its
+    # lacks was named on no command line polyctl could read: where the working directory cannot be read, its
     # turn was not placed (WINDOWS-CLOSE, #71).
     root = tmp_path / "proje-ılık-→"
     root.mkdir()

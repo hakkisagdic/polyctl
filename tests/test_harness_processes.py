@@ -1,4 +1,4 @@
-from ao import allowlist as AL, lib as A
+from polyctl import allowlist as AL, lib as A
 
 NEWCOMER = {"id": "newcomer", "name": "n", "verified": "untested", "contract": 1,
             "send": {"argv": ["nc", "{prompt}"]},
@@ -12,7 +12,7 @@ def test_the_agent_process_names_are_the_ones_the_shipped_adapters_declare():
 
 
 def test_a_harness_declared_by_its_adapter_is_a_writer_and_one_agent_under_all_its_names(monkeypatch):
-    from ao import procs
+    from polyctl import procs
     monkeypatch.setattr(A, "package_adapters", lambda: {"newcomer": NEWCOMER})
     vectors = {41: ["/opt/bin/newcomer-agent", "--resume", "s"], 42: ["/opt/bin/other-tool", "run"]}
     monkeypatch.setattr(procs, "all_pids", lambda: list(vectors))

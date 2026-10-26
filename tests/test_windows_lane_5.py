@@ -1,6 +1,6 @@
 """A tree stopped on Windows is gone from the next reading of the process list (WINDOWS-LANE-5).
 
-The Windows lane's run after WINDOWS-LANE-4 failed one test: `ao hold` stopped the turn it found, then
+The Windows lane's run after WINDOWS-LANE-4 failed one test: `polyctl hold` stopped the turn it found, then
 named that same turn as one it could not place, and exited 1. Since WINDOWS-PID-ALIVE a stopped process
 is known gone at once, where the wait used to last until the two-second snapshot was taken again; the
 snapshot taken before the stop still listed the turn, and its directory could no longer be read.
@@ -10,7 +10,7 @@ import signal
 
 import pytest
 
-from ao import lib as A, procs
+from polyctl import lib as A, procs
 
 
 @pytest.mark.parametrize("stop", [lambda: A.kill_turn(4242, signal.SIGTERM), lambda: A.sweep_orphans([4242])],

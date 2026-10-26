@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 from tests.scenarios import World
 
 LEADS = ("import sys\n"

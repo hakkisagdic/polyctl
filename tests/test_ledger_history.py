@@ -1,6 +1,6 @@
-"""Authority history the tree cannot make ao forget, and a landed-tree check that reads all of it (LEDGER-HISTORY).
+"""Authority history the tree cannot make polyctl forget, and a landed-tree check that reads all of it (LEDGER-HISTORY).
 
-The re-review of BOUNDED-STORES found that a seal was finished from an intent ao read from `.ao/ledger/`, which
+The re-review of BOUNDED-STORES found that a seal was finished from an intent polyctl read from `.polyctl/ledger/`, which
 the implementer writes: a ledger cut to its newest rows, beside an intent naming the cut rows as sealed, was
 accepted, and the record of its length outside the repository rewritten to match. Every reader that asked what
 had ever been granted read the live rows alone, so a waiver whose grant was sealed looked unused and stood in for
@@ -12,7 +12,7 @@ ledger's length was renamed into place without its folder synced.
 A seal's intent is now recorded outside the repository before the ledger is rewritten, and only that intent is
 finished; an intent in the tree is refused and left there. The archives are one chain ending at the seal's digest.
 History readers read the sealed rows too. The landed-tree check walks every commit since the first grant, names
-every merge as `ao commit-check --range` does, and tells a person, whatever else the cycle does.
+every merge as `polyctl commit-check --range` does, and tells a person, whatever else the cycle does.
 """
 import json
 import os
@@ -23,8 +23,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, email, lib as A, storage, telegram
-from ao import watchdog as W
+from polyctl import cli, email, lib as A, storage, telegram
+from polyctl import watchdog as W
 
 GIT = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
 
@@ -34,7 +34,7 @@ def _git(root, *args):
 
 
 def _authority(root):
-    return os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    return os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
 
 
 def _grants(root, count):
@@ -160,7 +160,7 @@ def test_a_seal_cut_short_is_finished_or_undone_from_the_intent_recorded_outside
 
 def test_an_archived_row_edited_after_its_seal_is_refused_wherever_history_is_read(project):
     root = project["root"]
-    verifications = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
+    verifications = os.path.join(root, ".polyctl", "ledger", "verifications.jsonl")
     for n in range(6):
         A.record_verification(root, {"id": f"V-{n}", "at": n, "passed": n != 1})
     A.record_authority(root, True, [], "sha256:t", "V-1", "C-1", review="2026-10-13-000000-aaa.md")
@@ -262,7 +262,7 @@ def test_an_ungranted_commit_under_fifty_one_granted_ones_is_named(project):
 
 def test_a_merge_is_named_even_where_git_made_it(project, monkeypatch):
     """Two changes each reviewed alone can act together where neither review looked, and a grant binds one parent:
-    ao lands no merge, and the landed-tree check names one as commit-check does (LEADS-GATE)."""
+    polyctl lands no merge, and the landed-tree check names one as commit-check does (LEADS-GATE)."""
     root = project["root"]
     sent = _channels(monkeypatch)
     _land(root, "base.txt", "base\n")
@@ -275,8 +275,8 @@ def test_a_merge_is_named_even_where_git_made_it(project, monkeypatch):
     merged = _git(root, "rev-parse", "HEAD")
     why = {}
 
-    assert A.commits_without_grant(root, why) == [merged] and "ao lands no merge" in why[merged]
-    assert any(key == "landed-without-grant" and merged[:12] in text and "a merge, which ao lands none of" in text
+    assert A.commits_without_grant(root, why) == [merged] and "polyctl lands no merge" in why[merged]
+    assert any(key == "landed-without-grant" and merged[:12] in text and "a merge, which polyctl lands none of" in text
                for key, text in cli.doctor_problems(project))
     W.report_ungranted_commits(root, A.project_key(root))
     assert _alarm(root) and any(kind == "telegram" and merged[:12] in text for kind, text, _ in sent)
@@ -316,7 +316,7 @@ def test_a_cycle_that_ends_early_still_tells_a_person_of_a_commit_no_grant_bound
     _land(root, "a.txt", "granted\n")
     stray = _land(root, "b.txt", "around the hook\n", granted=False)
     if missing == "the implementer":
-        with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+        with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
             json.dump({key: value for key, value in project.items() if key not in ("root", "implementer")}, fh)
 
     _cycle(root)
@@ -359,7 +359,7 @@ def test_a_landed_tree_check_that_cannot_run_is_named_and_told_not_passed(projec
     _land(root, "b.txt", "around the hook\n", granted=False)
     lines = open(_authority(root), "rb").read().splitlines(keepends=True)
     with open(_authority(root), "wb") as fh:
-        fh.write(b'{"not": "a row ao wrote"\n' + b"".join(lines[1:]))
+        fh.write(b'{"not": "a row polyctl wrote"\n' + b"".join(lines[1:]))
 
     found = dict(cli.doctor_problems(project))
     W.report_ungranted_commits(root, A.project_key(root))
@@ -384,7 +384,7 @@ def test_sealed_review_references_survive_every_prune_entrypoint(project, source
     else:
         for n in range(3):
             A.record_verification(root, {"id": f"V-{n}", "at": n, "review": kept if n == 0 else None})
-        storage.seal_chained_jsonl(os.path.join(root, ".ao/ledger/verifications.jsonl"),
+        storage.seal_chained_jsonl(os.path.join(root, ".polyctl/ledger/verifications.jsonl"),
                                    A.VERIFICATION_CHAIN, keep=1, legacy_prefix=True)
     if operation == "references":
         assert source in A.review_artefact_references(root, project)[kept]
@@ -499,14 +499,14 @@ def test_slice_outcome_size_survives_sealed_verifications_and_grants(project, se
     A.record_authority(root, True, [], "sha256:t", "V-1", "C-landed", review=None if waiver else "r1.md",
                        waiver=waiver["id"] if waiver else None,
                        candidate={"digest": "sha256:c1"})
-    _git(root, "-c", "core.hooksPath=", "commit", "--allow-empty", "-m", "land\n\nAo-Grant: C-landed")
+    _git(root, "-c", "core.hooksPath=", "commit", "--allow-empty", "-m", "land\n\nPolyctl-Grant: C-landed")
     before = A.slice_outcomes(root)
     assert before[0]["size"] == size
     A.record_verification(root, {"id": "V-later", "candidate": {"digest": "sha256:later"}})
     A.record_authority(root, False, ["refused"], "sha256:later", "V-later", "C-later")
     if sealed == "verifications and grants":
         storage.seal_chained_jsonl(_authority(root), A.AUTHORITY_CHAIN, keep=1)
-        storage.seal_chained_jsonl(os.path.join(root, ".ao/ledger/verifications.jsonl"), A.VERIFICATION_CHAIN,
+        storage.seal_chained_jsonl(os.path.join(root, ".polyctl/ledger/verifications.jsonl"), A.VERIFICATION_CHAIN,
                                    keep=1, legacy_prefix=True)
     elif sealed == "reviews":
         _review(root, "r2.md", "APPROVED", "S2", digest="sha256:later")
@@ -536,7 +536,7 @@ def test_read_only_history_refuses_an_unsettled_checkpoint_intent(project, reade
 
 @pytest.mark.parametrize("reader", ["archives", "report"])
 @pytest.mark.parametrize("missing", [False, True])
-def test_read_only_history_names_an_in_tree_intent_as_one_ao_did_not_begin(project, reader, missing):
+def test_read_only_history_names_an_in_tree_intent_as_one_polyctl_did_not_begin(project, reader, missing):
     from tests.test_evidence import _tool
     root = project["root"]
     _grants(root, 3)

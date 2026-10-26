@@ -4,7 +4,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 
 
 def _dead_pid():
@@ -21,14 +21,14 @@ def _seed(project, tmp_path):
         fh.write("edited afterwards\n")
     A.write_review_artefact(root, "semantic-review", "2026-09-01-100001-bbb.md", "VERDICT: APPROVED\n",
                             evidence={}, verdict="APPROVED")
-    archive = os.path.join(A.HOME, ".ao", "archive", A.project_key(root), "semantic-review-20260902-000000")
+    archive = os.path.join(A.HOME, ".polyctl", "archive", A.project_key(root), "semantic-review-20260902-000000")
     os.makedirs(archive)
     os.replace(os.path.join(root, "semantic-review", "2026-09-01-100001-bbb.md"),
                os.path.join(archive, "2026-09-01-100001-bbb.md"))
     A.record_authority(root, True, [], "sha256:t", "V-404", "C-1", review="2026-09-01-100002-gone.md")
-    with open(os.path.join(root, ".ao", "board.md"), "a", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "board.md"), "a", encoding="utf-8") as fh:
         fh.write("- [B7] a slice · landed: deadbee\n")
-    gone = str(tmp_path / "gone" / ".ao" / "ledger" / "authority.jsonl")
+    gone = str(tmp_path / "gone" / ".polyctl" / "ledger" / "authority.jsonl")
     marks = json.load(open(storage.checkpoint_path(), encoding="utf-8"))
     marks[gone] = {"count": 1, "digest": "sha256:x", "at": 1}
     with open(storage.checkpoint_path(), "w", encoding="utf-8") as fh:
@@ -56,7 +56,7 @@ def test_every_seeded_disagreement_is_found_with_both_sides(project, tmp_path):
 
 def test_a_repair_fixes_only_mechanical_state_records_itself_and_never_touches_authority(project, tmp_path, capsys):
     root, gone = _seed(project, tmp_path)
-    authority = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    authority = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     before = open(authority, "rb").read()
 
     assert cli.cmd_doctor(project, SimpleNamespace(check=False, consistency=True, repair=True)) == 1
@@ -67,6 +67,6 @@ def test_a_repair_fixes_only_mechanical_state_records_itself_and_never_touches_a
     assert gone not in json.load(open(storage.checkpoint_path(), encoding="utf-8"))
     assert not os.path.exists(A.architect_lock_path(root))
     assert "2026-09-01-100001-bbb.md" in A.archived_artefacts(root)
-    repairs = storage.read_chained_jsonl(os.path.join(root, ".ao", "ledger", "repairs.jsonl"), A.REPAIR_CHAIN)
+    repairs = storage.read_chained_jsonl(os.path.join(root, ".polyctl", "ledger", "repairs.jsonl"), A.REPAIR_CHAIN)
     assert sorted(row["kind"] for row in repairs) == ["architect-lock", "archive-pointer", "checkpoint"]
     assert "repaired" in capsys.readouterr().out

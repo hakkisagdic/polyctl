@@ -3,13 +3,13 @@
 A reviewer runs as the implementer when its command carries the implementer's session id, and that
 was read only as a whole argument or after `=`: `sh -c "kiro-cli chat --resume-id <id>"` and `-r<id>`
 ran unseen. The `auto` branch, where the session is discovered in the harness's store, had no test,
-and a store whose metadata held no JSON object stopped `ao review` with a traceback.
+and a store whose metadata held no JSON object stopped `polyctl review` with a traceback.
 """
 import json
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 LONG = "0b7f2c9e-4d1a-4c3e-9a55-1f2e3d4c5b6a"
 

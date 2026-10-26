@@ -1,4 +1,4 @@
-"""A harness ao never shipped is read through the transcript shape its adapter declares (#76).
+"""A harness polyctl never shipped is read through the transcript shape its adapter declares (#76).
 
 The readers assumed one harness's records - the kind under a payload, usage in turn
 summaries, a tool's name in one field, a write tool by its name - with branches for
@@ -17,13 +17,13 @@ import re
 import time
 from datetime import datetime, timezone
 
-from ao import lib as A
+from polyctl import lib as A
 from tests.test_harness_guard import _docstrings
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 FIXTURE = {
-    "id": "shape-fixture", "name": "A harness ao never shipped", "verified": "untested", "contract": 1,
+    "id": "shape-fixture", "name": "A harness polyctl never shipped", "verified": "untested", "contract": 1,
     "send": {"argv": ["shape-fixture", "run", "{prompt}"]},
     "transcript": {
         "kind": "jsonl",
@@ -53,8 +53,8 @@ def _event(at, name, **fields):
 def _world(project, monkeypatch, tmp_path, adapter=FIXTURE, records=None):
     """A project whose implementer runs a harness declared in its own adapter layer, and that harness's transcript."""
     root = project["root"]
-    os.makedirs(os.path.join(root, ".ao", "adapters"), exist_ok=True)
-    with open(os.path.join(root, ".ao", "adapters", f"{adapter['id']}.json"), "w", encoding="utf-8") as fh:
+    os.makedirs(os.path.join(root, ".polyctl", "adapters"), exist_ok=True)
+    with open(os.path.join(root, ".polyctl", "adapters", f"{adapter['id']}.json"), "w", encoding="utf-8") as fh:
         json.dump(adapter, fh)
     cfg = dict(project, implementer={"adapter": adapter["id"], "session": "s1"})
     now = time.time()
@@ -72,7 +72,7 @@ def _world(project, monkeypatch, tmp_path, adapter=FIXTURE, records=None):
             {"timestamp": _stamp(now - 499), "payload": {"type": "usage_summary",
                                                          "promptTurnSummaries": [{"unit": "credit", "usage": 99.0}]}},
             _event(now - 400, "round.open"),
-            _event(now - 390, "invoke", tool={"id": "shell.run", "params": {"cmd": "ao review --boundary b"}}),
+            _event(now - 390, "invoke", tool={"id": "shell.run", "params": {"cmd": "polyctl review --boundary b"}}),
             _event(now - 380, "meter", tokens={"in": 800, "out": 200}),
             _event(now - 379, "round.close"),
             _event(now - 200, "round.open"),
@@ -90,7 +90,7 @@ def _world(project, monkeypatch, tmp_path, adapter=FIXTURE, records=None):
     return cfg, transcript
 
 
-def test_a_harness_ao_never_shipped_has_its_turns_and_usage_read(project, monkeypatch, tmp_path):
+def test_a_harness_polyctl_never_shipped_has_its_turns_and_usage_read(project, monkeypatch, tmp_path):
     cfg, _ = _world(project, monkeypatch, tmp_path)
 
     costs = A.turn_costs(cfg)
@@ -98,7 +98,7 @@ def test_a_harness_ao_never_shipped_has_its_turns_and_usage_read(project, monkey
     assert A.implementer_adapter(cfg)["id"] == "shape-fixture"
     assert [(turn["cls"], turn["usage"], turn["product_writes"]) for turn in costs["turns"]] == [
         ("product", 1500, 1), ("ceremony", 1000, 0), ("analysis", 500, 0)]
-    assert costs["total"] == 3000 and costs["unit"] == "token" and costs["ao_commands"]["review"] == 1
+    assert costs["total"] == 3000 and costs["unit"] == "token" and costs["polyctl_commands"]["review"] == 1
 
 
 def test_its_context_usage_failures_and_messages_come_from_the_same_declaration(project, monkeypatch, tmp_path):
@@ -172,21 +172,21 @@ def test_an_adapter_that_declares_no_shape_has_nothing_read_from_another_harness
 
 # ── the core names no shipped harness's shape ──
 
-# Words a shipped shape declares that are plain words, or ao's own field names.
+# Words a shipped shape declares that are plain words, or polyctl's own field names.
 # Words a shape declares that are English first and a store's field second, so the core says them
 # about other things and is not held to a harness's vocabulary for it. `data`, `state`, `status`,
 # `error` and `tool` are opencode's own column and JSON keys (its transcript is a database, so a
-# field path reads data.state.status), and `credits` is what `ao credits` is named: Qoder bills in
+# field path reads data.state.status), and `credits` is what `polyctl credits` is named: Qoder bills in
 # credits, and the pin would otherwise forbid the core from naming its own command. `finish` and
 # `stop` join them for opencode, whose column is named finish and whose clean end is the value stop.
 # `data`, `state`, `status` and `error` are how a JSON store names its own columns, `tool` and
-# `finish` what a row of it is called, and `credits` is what `ao credits` is named: all ordinary
+# `finish` what a row of it is called, and `credits` is what `polyctl credits` is named: all ordinary
 # English a reader cannot avoid saying, and none of them a harness's field reached through a
-# declared path. `role` and `parts` join them for the same reason: every chat protocol ao speaks
+# declared path. `role` and `parts` join them for the same reason: every chat protocol polyctl speaks
 # - A2A above all, whose messages are literally made of parts and roles - names them, so a core
 # module that never reads a transcript still has to. A store's record is still reached only where
 # its adapter says, which is what this list is not allowed to stop protecting. `model` joins them: the
-# model a role runs is ao's own word throughout its configuration, and a store names the model that
+# model a role runs is polyctl's own word throughout its configuration, and a store names the model that
 # answered in a field of that name (USD-COST).
 ORDINARY = {"type", "timestamp", "text", "content", "message", "user", "assistant", "args", "path", "key", "value",
             "success", "result", "name", "usage", "tool_call", "input", "refusal",
@@ -203,7 +203,7 @@ def _steps(value):
 def _shape_words():
     """Every kind, field and tool name a shipped adapter's transcript shape declares, but the ordinary words."""
     words = set()
-    for path in sorted((ROOT / "src" / "ao" / "adapters").glob("*.json")):
+    for path in sorted((ROOT / "src" / "polyctl" / "adapters").glob("*.json")):
         adapter = json.loads(path.read_text(encoding="utf-8"))
         transcript = adapter.get("transcript") if isinstance(adapter.get("transcript"), dict) else {}
         record = transcript.get("record") if isinstance(transcript.get("record"), dict) else {}
@@ -236,7 +236,7 @@ def test_no_core_module_names_a_kind_field_or_tool_of_a_shipped_transcript_shape
                       + r")(?![A-Za-z0-9_])")
 
     found = []
-    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
+    for path in sorted((ROOT / "src" / "polyctl").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         docs = _docstrings(tree)
         found += [f"{path.name}:{node.lineno} {node.value[:80]!r}" for node in ast.walk(tree)

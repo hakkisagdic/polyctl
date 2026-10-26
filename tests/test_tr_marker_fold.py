@@ -9,7 +9,7 @@ message as the forms are lowered: `language.folded`, the capital İ as a plain i
 """
 import os
 
-from ao import language, lib as A
+from polyctl import language, lib as A
 
 
 def _mail(project, name, body):
@@ -27,7 +27,7 @@ def _report(project, marker):
 def test_every_marker_is_found_folded_however_it_is_cased_or_lowered():
     for key in ("urgent", "decision", "stop"):
         for form in language.forms(key):
-            # As ao writes it, with the plain capital I, as a person types it in lower case, and as str.lower() left it.
+            # As polyctl writes it, with the plain capital I, as a person types it in lower case, and as str.lower() left it.
             for written in (form, form.replace("İ", "I"), form.replace("İ", "i").lower(), form.lower()):
                 assert any(low in language.folded(written) for low in language.lowered(key)), written
     assert language.folded("## ACİL") == "## acil" and language.folded("## KARAR GEREKLİ") == "## karar gerekli"

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""What ao's ledgers show about its guarantee on the checkout they belong to, measured rather than stated (EVIDENCE).
+"""What polyctl's ledgers show about its guarantee on the checkout they belong to, measured rather than stated (EVIDENCE).
 
-docs/evidence.md gives these numbers for ao's own repository, and a number about the guarantee should be one a reader
+docs/evidence.md gives these numbers for polyctl's own repository, and a number about the guarantee should be one a reader
 can make again. This prints each of them: the commits on a revision's first-parent line since the first grant, and how
-many have a tree a grant bound; the commits that carry Ao- trailers, judged by the functions `ao commit-check --range`
+many have a tree a grant bound; the commits that carry Polyctl- trailers, judged by the functions `polyctl commit-check --range`
 judges them with; the reviews by kind, verdict, reviewer family and tier, with the findings they counted; and the
 waivers opened and how each closed.
 
-It only reads. ao takes a ledger's lock to append to it, and a reader that took the lock in a checkout ao is working in
+It only reads. polyctl takes a ledger's lock to append to it, and a reader that took the lock in a checkout polyctl is working in
 would wait on it and write beside it, so the ledgers are read without it - a row is read once its line is whole - and
-each chain is validated with ao's own check. `--state` names a copy of `.ao/` and the reviews folder taken at one
-moment, so a checkout in use is measured as it stood. A clone keeps no ledgers (`.ao/` is a checkout's own), and there
-only the trailers are checked, by tree alone, as CI checks them. Standard library only, with the ao of the checkout this
+each chain is validated with polyctl's own check. `--state` names a copy of `.polyctl/` and the reviews folder taken at one
+moment, so a checkout in use is measured as it stood. A clone keeps no ledgers (`.polyctl/` is a checkout's own), and there
+only the trailers are checked, by tree alone, as CI checks them. Standard library only, with the polyctl of the checkout this
 file is in.
 """
 import argparse
@@ -26,8 +26,8 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "src"))
 
-from ao import lib as A, storage  # noqa: E402
-from ao.verdicts import REVIEWER_VERDICTS, VERDICTS  # noqa: E402
+from polyctl import lib as A, storage  # noqa: E402
+from polyctl.verdicts import REVIEWER_VERDICTS, VERDICTS  # noqa: E402
 
 UTF8 = "utf-8"
 TIERS = {"independent": "another model family", "same-family": "same family", "person": "person", None: "none"}
@@ -45,9 +45,9 @@ def _git(root, *args):
 def _ledger(state, name, chain, legacy_prefix=False):
     """Every committed row of one chained ledger, its sealed rows first, once the chain validates; None when absent.
 
-    Read as ao reads it, less the lock: an append in flight leaves a line without its newline, which is no row.
+    Read as polyctl reads it, less the lock: an append in flight leaves a line without its newline, which is no row.
     """
-    path = os.path.join(state, ".ao", "ledger", name)
+    path = os.path.join(state, ".polyctl", "ledger", name)
     seal = storage._load_seal(path)
     # Refuse missing recorded ledgers and unfinished seals even when there are no live rows to read.
     retired = storage.sealed_rows(path, chain, legacy_prefix=legacy_prefix, seal=seal)
@@ -62,7 +62,7 @@ def _ledger(state, name, chain, legacy_prefix=False):
 
 def _reviews_folder(state):
     try:
-        with open(os.path.join(state, ".ao", "config.json"), encoding=UTF8) as fh:
+        with open(os.path.join(state, ".polyctl", "config.json"), encoding=UTF8) as fh:
             config = json.load(fh)
     except (OSError, ValueError):
         config = {}
@@ -76,7 +76,7 @@ def _family(block):
 
 
 def _commits(root, rev, authority):
-    """The first-parent line of `rev` since the first grant, held to the grants: by tree, and by Ao- trailers."""
+    """The first-parent line of `rev` since the first grant, held to the grants: by tree, and by Polyctl- trailers."""
     grants = [row for row in authority or [] if isinstance(row, dict) and row.get("granted") is True]
     first = next((row for row in grants if (row.get("candidate") or {}).get("head")), None)
     span = f"{first['candidate']['head']}..{rev}" if first else rev
@@ -89,16 +89,16 @@ def _commits(root, rev, authority):
         out.update(first_grant=first["token"], first_grant_day=_day(first["at"]),
                    tree_bound=sum(1 for commit in plain if commit["tree"] in trees))
     tokens = {row["token"]: row for row in authority or [] if isinstance(row, dict) and isinstance(row.get("token"), str)}
-    at = next((index for index, commit in enumerate(plain) if A._ao_trailers(commit["trailers"])), None)
+    at = next((index for index, commit in enumerate(plain) if A._polyctl_trailers(commit["trailers"])), None)
     since = plain[at:] if at is not None else []
     out.update(first_trailer=since[0]["sha"][:12] if since else None,
                since_first_trailer=len(since),
-               carrying=sum(1 for commit in plain if A._ao_trailers(commit["trailers"])),
+               carrying=sum(1 for commit in plain if A._polyctl_trailers(commit["trailers"])),
                # An empty ledger is a ledger, held to; only a checkout that keeps none is read by tree (EVIDENCE-2).
                trailers_match=sum(1 for commit in since
                                   if not A.trailer_problems(commit, tokens if authority is not None else None)),
                grant_on_record=sum(1 for commit in since
-                                   if (A._ao_trailers(commit["trailers"]).get("Ao-Grant") or [None])[0] in tokens))
+                                   if (A._polyctl_trailers(commit["trailers"]).get("Polyctl-Grant") or [None])[0] in tokens))
     return out
 
 
@@ -202,7 +202,7 @@ def report(found):
     if c.get("first_grant"):
         lines.append(f"  {c['tree_bound']} of {c['commits'] - c['merges']} have a tree a grant bound")
     if c["first_trailer"]:
-        lines.append(f"  {c['carrying']} carry Ao- trailers; from the first, {c['first_trailer']}, on: "
+        lines.append(f"  {c['carrying']} carry Polyctl- trailers; from the first, {c['first_trailer']}, on: "
                      f"{c['trailers_match']} of {c['since_first_trailer']} match the grant they name"
                      + (f", {c['grant_on_record']} of them on record" if found["ledgers"]
                         else ", checked by tree alone: this checkout keeps no ledgers"))
@@ -238,9 +238,9 @@ def report(found):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="What ao's ledgers show about its guarantee, measured (EVIDENCE).")
+    parser = argparse.ArgumentParser(description="What polyctl's ledgers show about its guarantee, measured (EVIDENCE).")
     parser.add_argument("--root", default=REPO, help="the git checkout (default: the one this file is in)")
-    parser.add_argument("--state", help="where .ao/ and the reviews folder are (default: --root); a copy taken at "
+    parser.add_argument("--state", help="where .polyctl/ and the reviews folder are (default: --root); a copy taken at "
                                         "one moment measures a checkout in use as it stood")
     parser.add_argument("--rev", default="main", help="the revision whose first-parent line is measured (default main)")
     parser.add_argument("--json", action="store_true", help="every number as one JSON document")

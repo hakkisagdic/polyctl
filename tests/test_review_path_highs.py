@@ -1,26 +1,26 @@
 """What a person approves is bound where the implementer cannot rewrite it, and an ACP reviewer only reads
 (REVIEW-PATH-HIGHS).
 
-An independent re-review of ao's history found these on the review path; each was reproduced here first.
+An independent re-review of polyctl's history found these on the review path; each was reproduced here first.
 
-- A stand-in request bound a person's carried answer through `.ao/review-requests/<nonce>.json`, a file the
-  implementer writes. Rewritten to name bytes it staged after the request - or written whole for a request ao never
+- A stand-in request bound a person's carried answer through `.polyctl/review-requests/<nonce>.json`, a file the
+  implementer writes. Rewritten to name bytes it staged after the request - or written whole for a request polyctl never
   made - it had a person's genuine approval recorded for bytes no session was shown; emptied criteria let a criterion
   the session found not met hold nothing up; and the text a person carried was the implementer's to change too. A
-  request is kept outside the tree now, in ~/.ao/review-requests/<project>/, its binding and its text, and
-  `ao remove` takes them with the project. A collect reads the binding there alone and the text it binds must be the
-  one ao wrote; the review compares the candidate, scope and diff it measures with the binding before it records
+  request is kept outside the tree now, in ~/.polyctl/review-requests/<project>/, its binding and its text, and
+  `polyctl remove` takes them with the project. A collect reads the binding there alone and the text it binds must be the
+  one polyctl wrote; the review compares the candidate, scope and diff it measures with the binding before it records
   anything, so bytes staged between the collect's check and the review are not taken either; and the answer is
   recorded as the slice its request was made for, where it went to whatever ran when a person collected it (#12).
-- `ao person-review` bound a person's verdict to the diff alone and read the board again when it recorded it: a slice
+- `polyctl person-review` bound a person's verdict to the diff alone and read the board again when it recorded it: a slice
   moved to running in between, one listing no criteria, had the approval recorded with none - a criterion the person
   had found not met then held nothing up - and as a slice they never judged. The digest a person quotes is of the
   diff and of the slice, boundary and criteria shown with it.
-- An ACP reviewer was not held to reads. `review.transport` came from `.ao/config.json`, outside the reviewer a person
+- An ACP reviewer was not held to reads. `review.transport` came from `.polyctl/config.json`, outside the reviewer a person
   accepts, and was read from the file again where a route started; `qodercli --acp`, with none of the flags that hold
   qoder's spawned reviewer, reviewed over ACP; every read it asked for was allowed, a key in the person's home among
   them; and a write it ran without asking that ended `failed` was no write, its answer taken as a review. The
-  transport is part of the reviewer a person accepts and is judged as ao read it; only an adapter whose ACP command
+  transport is part of the reviewer a person accepts and is judged as polyctl read it; only an adapter whose ACP command
   was measured to hold a reviewer to reads - kiro's agent - answers over ACP; a read or a search is let run only
   inside the folder the review runs in; and any write the agent reports, whatever its status, voids its answer.
   Round 2 found that an innocent location hid a traversal in a search pattern or an unknown input key, and an
@@ -39,7 +39,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 from tests.test_criteria_verdicts import THREE, _plain, _running
 from tests.test_review_chain import _args, _repo_with_change
 from tests.test_route_argv import _reviewer, _seen, _store
@@ -60,7 +60,7 @@ def _stage(root, text):
 
 
 def _bound_to(root, candidate):
-    """What a request for `candidate` binds, every digest as ao computes it - as the implementer can compute it too."""
+    """What a request for `candidate` binds, every digest as polyctl computes it - as the implementer can compute it too."""
     scope = A.candidate_scope(candidate)
     diff = A.candidate_diff(root, candidate, scope)
     return {"candidate": candidate["digest"], "index_tree": candidate["index_tree"], "scope": scope,
@@ -68,9 +68,9 @@ def _bound_to(root, candidate):
 
 
 def _write_in_tree(root, nonce, request, text=None):
-    """Write a request where ao kept them in the tree - and, while ao keeps them there, where it reads them - as the
+    """Write a request where polyctl kept them in the tree - and, while polyctl keeps them there, where it reads them - as the
     implementer can."""
-    folders = {os.path.join(root, ".ao", "review-requests")}
+    folders = {os.path.join(root, ".polyctl", "review-requests")}
     if _within(A.review_requests_dir(root), root):
         folders.add(A.review_requests_dir(root))
     for folder in folders:
@@ -100,9 +100,9 @@ def test_a_request_rewritten_in_the_tree_records_no_answer_for_bytes_staged_afte
     assert _carried_rows(root) == [] and not _within(A.review_requests_dir(root), root)
 
 
-def test_a_request_ao_never_wrote_is_named_and_never_read(project, tmp_path, capsys):
-    """A request is the implementer's to write whole while ao reads it from the tree: a text of its choosing for a
-    session to judge, bound to the bytes it staged. One in .ao/review-requests/ binds nothing now."""
+def test_a_request_polyctl_never_wrote_is_named_and_never_read(project, tmp_path, capsys):
+    """A request is the implementer's to write whole while polyctl reads it from the tree: a text of its choosing for a
+    session to judge, bound to the bytes it staged. One in .polyctl/review-requests/ binds nothing now."""
     root = project["root"]
     _repo_with_change(root)
     nonce = "c" * 32
@@ -113,21 +113,21 @@ def test_a_request_ao_never_wrote_is_named_and_never_read(project, tmp_path, cap
 
     code, out = _collect(project, nonce, _answer(tmp_path, nonce, APPROVED), capsys)
 
-    assert code == 2 and "where an older ao kept requests and the implementer can rewrite them" in out, out
+    assert code == 2 and "where an older polyctl kept requests and the implementer can rewrite them" in out, out
     assert _carried_rows(root) == []
 
 
-def test_the_text_a_person_carries_is_the_one_ao_wrote(project, tmp_path, capsys):
+def test_the_text_a_person_carries_is_the_one_polyctl_wrote(project, tmp_path, capsys):
     cfg, request = _unreachable(project)
     root, nonce = cfg["root"], request["nonce"]
     text = os.path.join(A.review_requests_dir(root), f"{nonce}.md")
     assert not _within(text, root)
     with open(text, "ab") as fh:
-        fh.write(b"\n+x = 'a line ao never wrote'\n")
+        fh.write(b"\n+x = 'a line polyctl never wrote'\n")
 
     code, out = _collect(cfg, nonce, _answer(tmp_path, nonce, APPROVED), capsys)
 
-    assert code == 1 and "text is not the one ao wrote for these bytes" in out and _carried_rows(root) == []
+    assert code == 1 and "text is not the one polyctl wrote for these bytes" in out and _carried_rows(root) == []
 
 
 def test_bytes_staged_after_the_collect_compared_them_are_not_recorded_for_the_answer(project, tmp_path,
@@ -165,7 +165,7 @@ def test_a_carried_answer_is_recorded_as_the_slice_its_request_was_made_for(proj
 
 
 def test_remove_takes_the_projects_requests_and_leaves_another_projects(tmp_path, monkeypatch, capsys):
-    """The requests left .ao/ with the project; kept in ~/.ao, they would outlive it, diffs and all."""
+    """The requests left .polyctl/ with the project; kept in ~/.polyctl, they would outlive it, diffs and all."""
     from tests.test_safe_remove import REMOVE, _home, _project
     _home(tmp_path, monkeypatch)
     monkeypatch.setattr(cli, "_installed_jobs", lambda key: [])
@@ -179,7 +179,7 @@ def test_remove_takes_the_projects_requests_and_leaves_another_projects(tmp_path
     cfg = {"root": root, "reviews": "semantic-review"}
 
     assert cli.cmd_remove(cfg, SimpleNamespace(yes=False, allow_shared_hooks=False)) == 0
-    assert "   ~/.ao/review-requests/proj/: the review requests ao wrote for it" in _plain(capsys)
+    assert "   ~/.polyctl/review-requests/proj/: the review requests polyctl wrote for it" in _plain(capsys)
     assert cli.cmd_remove(cfg, REMOVE) == 0
 
     assert not os.path.exists(A.review_requests_dir(root, "proj"))
@@ -253,19 +253,19 @@ def test_a_person_who_sets_the_transport_is_told_it_waits_for_them(project, caps
     assert cli.cmd_config(A.load_config(root), SimpleNamespace(action="set", key="review.transport", value="acp",
                                                                machine=False, by=None)) == 0
 
-    assert "ao harness seen --by <name>" in _plain(capsys)
+    assert "polyctl harness seen --by <name>" in _plain(capsys)
     assert [path for path, _, _ in A.unseen_harness_config(root)] == ["the reviewer's command"]
 
 
 def test_a_review_reaches_its_routes_as_it_read_the_transport_whatever_the_file_says_after(project, monkeypatch,
                                                                                            capsys):
-    """Read again where a route started, the file could say acp after ao had judged the reviewer it accepted."""
+    """Read again where a route started, the file could say acp after polyctl had judged the reviewer it accepted."""
     root = project["root"]
     _repo_with_change(root)
     implementer = {"adapter": "claude-code", "session": "s1", "name": "claude", "model": "model-a"}
     _store(root, implementer=implementer, reviewer=dict(A.compose_reviewer("kiro"), family="kiro-family"))
     cfg = A.hold_unseen_routes(root, A.load_config(root))
-    _store(root, review={"transport": "acp"})                      # after ao read it, as the implementer can
+    _store(root, review={"transport": "acp"})                      # after polyctl read it, as the implementer can
     through, spawned = [], []
     monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root, name: (f"/agents/{name}", "2.27.1"))
     monkeypatch.setattr(cli, "_run_acp_reviewer", lambda root, argv, *args, **kwargs: through.append(argv) or {
@@ -344,11 +344,11 @@ def test_a_read_through_a_link_inside_the_folder_to_a_file_outside_it_is_refused
                                         [{"optionId": "once", "kind": "allow_once"}], str(folder)) is None
 
 
-# A scripted agent: AO_TEST_STEPS lists its steps - a read it asks leave for ({"read": path}, `{cwd}` its own folder;
+# A scripted agent: POLYCTL_TEST_STEPS lists its steps - a read it asks leave for ({"read": path}, `{cwd}` its own folder;
 # allowed, it puts what it read into its answer) or a session update it sends ({"report": update}) - then it answers.
 AGENT = r"""
 import json, os, sys
-steps, said = json.loads(os.environ["AO_TEST_STEPS"]), []
+steps, said = json.loads(os.environ["POLYCTL_TEST_STEPS"]), []
 
 def say(message):
     print(json.dumps(message), flush=True)
@@ -397,7 +397,7 @@ while True:
 
 
 def _acp_review(project, monkeypatch, steps):
-    monkeypatch.setenv("AO_TEST_STEPS", json.dumps(steps))
+    monkeypatch.setenv("POLYCTL_TEST_STEPS", json.dumps(steps))
     return cli._run_acp_reviewer(project["root"], [sys.executable, "-c", AGENT], "kiro", "review this", 30,
                                  "kiro-reviewer")
 

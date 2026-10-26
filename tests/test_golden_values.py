@@ -16,7 +16,7 @@ import time
 
 import pytest
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 from tests.test_round_ledger import _review, _running
 
 HOUR = 3600
@@ -249,7 +249,7 @@ ROUNDS = [
     ("an approval ends the count", "R2", [("NEEDS_CHANGES", "R2"), ("APPROVED", "R2")], 0, None),
     ("a review that did not take place", "R2", [("NEEDS_CHANGES", "R2"), ("UNAVAILABLE", "R2")], 1, None),
     ("nothing running", None, [("NEEDS_CHANGES", "R2")], 0, None),
-    # `ao slice status` asks about any slice: its own reviews count, whichever runs (SLICE-LIFECYCLE)
+    # `polyctl slice status` asks about any slice: its own reviews count, whichever runs (SLICE-LIFECYCLE)
     ("a slice asked about that is not running", "R1", [("NEEDS_CHANGES", "R2")] * 2 + [("NEEDS_CHANGES", "R1")],
      2, "R2"),
     # TRIAGE-1-MEDIUM: only a recorded approval can reset rounds; legacy

@@ -7,7 +7,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 PROBE_OR_APPROVE = ("import sys; p = sys.argv[1]; "
                     "print(p.splitlines()[-1] if p.startswith('Reviewer invocation probe') else "
@@ -21,12 +21,12 @@ def _git(root, *args):
 
 def _configured(project, tmp_path, monkeypatch, script, installed=True):
     root = project["root"]
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         command = (subprocess.list2cmdline if os.name == "nt" else shlex.join)([sys.executable, "-c", "print('ok')"])
         json.dump({"gates": {"check": {"run": command, "timeout": 60}},
                    "profiles": {"quick": ["check"]}, "default_profile": "quick"}, fh)
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": [sys.executable, "-c", script, "{prompt}"]})
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in cfg.items() if key != "root"}, fh)
     monkeypatch.setattr(A, "GATE_LOCK", str(tmp_path / "gate.lock"))
     monkeypatch.setattr(cli, "_hook_execution_probe", lambda inv: {
@@ -53,7 +53,7 @@ def test_a_first_run_is_proven_end_to_end_and_leaves_nothing_behind(project, tmp
     assert _git(root, "status", "--porcelain") == before
     assert len(_git(root, "worktree", "list").splitlines()) == 1
     assert _git(root, "log", "--oneline").count("\n") == 1
-    reviews = glob.glob(os.path.join(A.HOME, ".ao", "archive", A.project_key(root), "prove-*", "semantic-review", "*.md"))
+    reviews = glob.glob(os.path.join(A.HOME, ".polyctl", "archive", A.project_key(root), "prove-*", "semantic-review", "*.md"))
     assert len(reviews) == 1
 
 
@@ -63,24 +63,24 @@ def test_each_guarantee_that_does_not_hold_says_what_would_fix_it(project, tmp_p
     assert cli.cmd_prove(cfg, SimpleNamespace(no_review=False)) == 1
 
     out = _plain(capsys)
-    assert "NOT PROVEN  hook refuses an unauthorised commit" in out and "ao hooks install" in out
+    assert "NOT PROVEN  hook refuses an unauthorised commit" in out and "polyctl hooks install" in out
     assert "proven  reviewer answers and is another actor" in out
     assert "NOT PROVEN  a throwaway slice lands end to end" in out
     assert "the reviewer did not approve a trivial candidate" in out
 
 
-def test_the_getting_started_page_types_only_commands_ao_has():
+def test_the_getting_started_page_types_only_commands_polyctl_has():
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     page = open(os.path.join(here, "docs", "getting-started.md"), encoding="utf-8").read()
     commands = set(re.findall(r"add_parser\(\s*[\"']([a-z0-9-]+)[\"']", open(cli.__file__, encoding="utf-8").read()))
-    typed = [line.split()[1] for line in re.findall(r"^ao [a-z-]+", page, re.M)]
+    typed = [line.split()[1] for line in re.findall(r"^polyctl [a-z-]+", page, re.M)]
 
     assert "prove" in typed and "init" in typed and "hooks" in typed
     assert [name for name in typed if name not in commands] == []
 
 
 
-def test_the_boundary_ao_prove_writes_is_one_criterion_and_no_order_to_a_reviewer():
+def test_the_boundary_polyctl_prove_writes_is_one_criterion_and_no_order_to_a_reviewer():
     """PROVE-BOUNDARY-2: reworded to say what is accepted, the boundary gained a semicolon, which parts a boundary into
-    criteria, so `ao prove` refused its own throwaway slice for a criterion with no verdict."""
+    criteria, so `polyctl prove` refused its own throwaway slice for a criterion with no verdict."""
     assert ";" not in cli.PROVE_BOUNDARY and "approve" not in cli.PROVE_BOUNDARY.lower()

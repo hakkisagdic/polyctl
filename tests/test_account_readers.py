@@ -1,17 +1,17 @@
-"""Every credit account ao reads is the implementer's own adapter's (ACCOUNT-READERS).
+"""Every credit account polyctl reads is the implementer's own adapter's (ACCOUNT-READERS).
 
-HARNESS-READINGS-2 gave `ao cost` the implementer's own account. `ao credits`, the credits
-section of `ao digest`, `ao handoff` and the watchdog's credit sampler still read the first
+HARNESS-READINGS-2 gave `polyctl cost` the implementer's own account. `polyctl credits`, the credits
+section of `polyctl digest`, `polyctl handoff` and the watchdog's credit sampler still read the first
 shipped adapter's, whatever the implementer ran, and the samples the sampler records fed the
 doctor's projection, page and credits line whoever had read them. An implementer on a harness
-that bills no account ao can read was shown, sampled and alarmed on one it never spends.
+that bills no account polyctl can read was shown, sampled and alarmed on one it never spends.
 
 Two harnesses are shipped beside the real ones, each the reference adapter under another id
 with a fake driver: one declares no account lookup, the other declares one. Both sort after
 the first shipped adapter that declares a lookup, whose driver records it if it is ever asked,
 and a layer the implementer can write claims a lookup for each. Every reader asks only the
 package's lookup of the implementer's own adapter; where a figure stood it says there is none
-ao can read for the first, samples nothing for it and raises no credits alarm for it, whatever
+polyctl can read for the first, samples nothing for it and raises no credits alarm for it, whatever
 the ledger holds. A sample names the adapter it was read through, and only that adapter's
 samples project its burn rate.
 """
@@ -23,8 +23,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, drivers, lib as A
-from ao import watchdog as W
+from polyctl import cli, drivers, lib as A
+from polyctl import watchdog as W
 from tests.scenarios import World
 from tests.test_transcript_readings import _transcript, _turn
 
@@ -54,7 +54,7 @@ def _fleet(project, monkeypatch, reading):
     shipped[METERED] = dict(reference, id=METERED, billing={
         "api": {"driver": "fake-usage", "marker": METERED, "login": ["metered", "login"]}})
     monkeypatch.setattr(A, "package_adapters", lambda: shipped)
-    layer = os.path.join(project["root"], ".ao", "adapters")
+    layer = os.path.join(project["root"], ".polyctl", "adapters")
     os.makedirs(layer, exist_ok=True)
     for ident in (PLAIN, METERED):
         claim = dict(shipped[ident], billing={"api": {"driver": "fake-usage", "marker": f"{ident} as a layer claims"}})
@@ -66,14 +66,14 @@ def _fleet(project, monkeypatch, reading):
 def _implementer(project, ident):
     """The project's configuration with its implementer on `ident`, written where a watchdog cycle loads it."""
     cfg = dict(project, implementer=dict(project["implementer"], adapter=ident))
-    with open(os.path.join(project["root"], ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(project["root"], ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in cfg.items() if key != "root"}, fh)
     return cfg
 
 
 def _ledger(root):
     """Every credit sample written, whichever adapter it names."""
-    path = os.path.join(root, ".ao", "ledger", "credits.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "credits.jsonl")
     if not os.path.exists(path):
         return []
     with open(path, encoding="utf-8") as fh:
@@ -94,20 +94,20 @@ def test_a_lookup_is_the_package_adapters_own_and_a_reader_that_names_no_adapter
     assert A.account_usage(adapter_id=METERED) == {"used": 1.0, "limit": 2.0} and asked == [METERED]
 
 
-# ── ao credits ──
+# ── polyctl credits ──
 
-def test_ao_credits_shows_the_implementers_own_account_or_that_its_adapter_declares_none(project, monkeypatch, capsys):
+def test_polyctl_credits_shows_the_implementers_own_account_or_that_its_adapter_declares_none(project, monkeypatch, capsys):
     asked = _fleet(project, monkeypatch, {"used": 4000.0, "limit": 10000.0, "plan": "METERED PLAN"})
     monkeypatch.setattr(A, "turn_costs", lambda cfg, since=None: {"turns": 0, "total": 0.0, "unit": "credits"})
     args = SimpleNamespace(offline=False, local=False, reset_day=None)
 
     assert cli.cmd_credits(_implementer(project, PLAIN), args) == 0
     out = _plain(capsys)
-    assert f"the account: {PLAIN} declares none ao can read" in out and "10,000" not in out and asked == []
+    assert f"the account: {PLAIN} declares none polyctl can read" in out and "10,000" not in out and asked == []
 
     assert cli.cmd_credits(_implementer(project, METERED), args) == 0
     out = _plain(capsys)
-    assert "METERED PLAN" in out and "4,000.00 of 10,000" in out and "none ao can read" not in out
+    assert "METERED PLAN" in out and "4,000.00 of 10,000" in out and "none polyctl can read" not in out
     assert set(asked) == {METERED} and _ledger(project["root"]) == [] and A.active_alarms("proj") == []
 
 
@@ -122,7 +122,7 @@ def test_the_offline_estimate_reads_only_the_implementers_own_adapters_transcrip
     plain = _implementer(project, PLAIN)
     assert cli.cmd_credits(plain, offline) == 0
     out = _plain(capsys)
-    assert f"the account: {PLAIN} declares none ao can read" in out and "ESTIMATE" not in out
+    assert f"the account: {PLAIN} declares none polyctl can read" in out and "ESTIMATE" not in out
     assert A.credit_usage(adapter_id=PLAIN)["days"] == {} and A.digest(project["root"], plain)["credit_days"] == []
 
     assert cli.cmd_credits(_implementer(project, "kiro"), offline) == 0
@@ -130,7 +130,7 @@ def test_the_offline_estimate_reads_only_the_implementers_own_adapters_transcrip
     assert sum(A.credit_usage(adapter_id="kiro")["days"].values()) == 12.5
 
 
-# ── ao digest ──
+# ── polyctl digest ──
 
 def test_the_digests_credits_are_the_implementers_own_account_or_say_its_adapter_declares_none(project, monkeypatch,
                                                                                                capsys):
@@ -143,17 +143,17 @@ def test_the_digests_credits_are_the_implementers_own_account_or_say_its_adapter
     digest = A.digest(root, plain)
     assert "credits" not in digest and digest["account"] == {"adapter": PLAIN, "readable": False}
     assert cli.cmd_digest(plain, args) == 0
-    assert f"{PLAIN} declares none ao can read" in _plain(capsys) and asked == []
+    assert f"{PLAIN} declares none polyctl can read" in _plain(capsys) and asked == []
 
     metered = _implementer(project, METERED)
     assert A.digest(root, metered)["credits"] == {"used": 4000.0, "limit": 10000.0, "remaining": 6000.0}
     assert cli.cmd_digest(metered, args) == 0
     out = _plain(capsys)
-    assert "4,000 / 10,000" in out and "none ao can read" not in out and set(asked) == {METERED}
+    assert "4,000 / 10,000" in out and "none polyctl can read" not in out and set(asked) == {METERED}
     assert _ledger(root) == [] and A.active_alarms("proj") == []
 
 
-# ── ao handoff ──
+# ── polyctl handoff ──
 
 def test_the_handoff_names_the_implementers_own_credit_or_that_its_adapter_declares_none(project, monkeypatch, capsys):
     asked = _fleet(project, monkeypatch, {"used": 4000.0, "limit": 10000.0})
@@ -161,7 +161,7 @@ def test_the_handoff_names_the_implementers_own_credit_or_that_its_adapter_decla
     args = SimpleNamespace(reason=None, no_send=True)
 
     assert cli.cmd_handoff(_implementer(project, PLAIN), args) == 0
-    assert f"- credit: {PLAIN} declares none ao can read" in _plain(capsys) and asked == []
+    assert f"- credit: {PLAIN} declares none polyctl can read" in _plain(capsys) and asked == []
 
     assert cli.cmd_handoff(_implementer(project, METERED), args) == 0
     assert "- credit: 4,000 / 10,000 (6,000 left)" in _plain(capsys) and asked == [METERED]
@@ -203,7 +203,7 @@ def test_a_watchdog_cycle_samples_only_the_account_its_implementers_own_adapter_
     asked = _fleet(project, monkeypatch, {"used": 10240.0, "limit": 10000.0, "reset_at": time.time() + 10 * DAY,
                                           "account": "acct-1"})
     _implementer(project, ident)
-    with open(os.path.join(world.root, ".ao", "hold"), "w", encoding="utf-8") as fh:     # the cycle stands down
+    with open(os.path.join(world.root, ".polyctl", "hold"), "w", encoding="utf-8") as fh:     # the cycle stands down
         json.dump({"by": "owner", "reason": "the credits are read all the same", "at": time.time()}, fh)
 
     world.cycle(dry_run=False)
@@ -229,7 +229,7 @@ def test_other_readings_in_the_ledger_project_page_and_show_nothing_for_this_imp
     plain = _implementer(project, PLAIN)
     assert cli._implementer_credits(plain) == {"adapter": PLAIN, "readable": False, "samples": [], "rate": None}
     assert [" ".join(re.sub(r"\x1b\[[0-9;]*m", "", line).split()) for line in cli._doctor_credit_lines(plain)] == [
-        f"credits {PLAIN} declares none ao can read"]
+        f"credits {PLAIN} declares none polyctl can read"]
     cli._doctor_check(plain, page=True)
     assert "PROBLEM credits-" not in _plain(capsys) and not {"credits-exhaust", "doctor:credits-check"} & set(raised)
 

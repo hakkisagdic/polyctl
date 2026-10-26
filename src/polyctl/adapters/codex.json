@@ -1,0 +1,47 @@
+{
+  "project_config": [".codex", "AGENTS.md", "AGENTS.override.md"],
+  "id": "codex", "name": "OpenAI Codex CLI", "verified": "partial",
+  "actor_name": "codex",
+  "family": "openai",
+  "models": {
+    "default": "gpt-6-astra",
+    "review": "gpt-6-luna",
+    "_note": "polyctl init --profile and the reviewer default read these; change here when OpenAI ships new ids"
+  },
+  "disclaimer": "The reviewer's command - exec with its prompt, --model, -c model_reasoning_effort and options.trust_none - was run against codex-cli 0.160.0 on 2026-10-05; the rest is written from the documented interface and not verified against an install. Flags drift; correct and open a PR.",
+  "send":   { "argv": ["codex", "exec", "{prompt}"],
+              "stdin": { "replaces": ["{prompt}"], "with": ["-"],
+                         "note": "Verified from the command reference (learn.chatgpt.com/docs/developer-commands, surface cli), read 2026-09-17: codex exec takes PROMPT as `string | - (read stdin)`, and `-` pipes the prompt from stdin." } },
+  "resume": { "argv": ["codex", "exec", "resume", "{session}", "{prompt}"], "continue_last": ["codex", "exec", "resume", "--last", "{prompt}"],
+              "stdin": { "replaces": ["{prompt}"], "with": ["-"],
+                         "note": "Verified from the same reference: codex exec resume takes its PROMPT as `string | - (read stdin)` too." } },
+  "quota": { "provider": "codex" },
+  "options": {
+    "trust_none": ["--sandbox", "read-only", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--ephemeral"],
+    "trust_none_note": "No flag removes codex exec's shell tool; its read-only sandbox leaves it reading. Measured on codex-cli 0.160.0, 2026-10-05: under --sandbox read-only, cat read a file, touch was refused (Operation not permitted) and curl resolved no host. Without --ignore-user-config the person's $CODEX_HOME/config.toml offered the model computer use, a browser and web search, and with it only the shell tool, waits and subagents. --ignore-rules leaves out the person's execpolicy rules, whose allow decisions approve commands without asking. polyctl runs a reviewer in a directory outside any repository, which codex exec refuses without --skip-git-repo-check, and --ephemeral keeps the review out of the person's sessions.",
+    "pin": {
+      "reviewer": ["--sandbox", "read-only"],
+      "note": "codex exec runs read-only unless told otherwise, and a person's config.toml may set sandbox_mode; a reviewer names its sandbox, so no setting widens it."
+    },
+    "mcp_isolation": { "required": ["--ignore-user-config"],
+                       "why": "MCP servers and plugins live in $CODEX_HOME/config.toml, which codex loads unless told not to (#24)" },
+    "model": ["--model", "{model}"],
+    "effort": ["-c", "model_reasoning_effort={effort}"],
+    "effort_values": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+    "effort_note": "The values the Responses API named when it refused another, through codex-cli 0.160.0 on 2026-10-05; each model takes a subset, listed in ~/.codex/models_cache.json.",
+    "output_json": ["--json"],
+    "trust_all": ["--dangerously-bypass-approvals-and-sandbox"],
+    "sandbox": ["--sandbox", "{mode}"],
+    "sandbox_note": "codex exec takes --sandbox and codex exec resume does not (openai/codex issue 40149; rechecked on codex-cli 0.160.0, 2026-10-16: `codex exec resume --sandbox read-only` errors 'unexpected argument --sandbox found' and suggests passing it as a value, while `codex exec resume -c sandbox_mode=\"read-only\"` is accepted); a resume takes -c sandbox_mode=\"<mode>\", which every exec subcommand accepts.",
+    "bypass": {
+      "--dangerously-bypass-approvals-and-sandbox": { "roles": ["implementer"], "sandbox": true,
+        "why": "No documented combination runs an unattended implementer's loop without it. codex exec asks nobody - it answers every approval with never - and runs in a read-only sandbox unless told otherwise. Its workspace-write sandbox (-c sandbox_mode=\"workspace-write\" after exec resume; --full-auto is gone since 0.147.0) keeps <writable_root>/.git read-only and the network off, so an implementer could edit and test but never stage, commit or run its reviewer. The watchdog starts no turn with it until a person names codex in watchdog.bypass_adapters on this machine, and polyctl doctor names what that allows. Read on 2026-09-17 from learn.chatgpt.com/docs/sandboxing, /docs/non-interactive-mode, /docs/developer-commands and /docs/config-file/config-reference, and github.com/openai/codex (codex-rs/exec/src/cli.rs; issues 40149 and 7071)." }
+    }
+  },
+  "transcript": { "kind": "jsonl", "path": "~/.codex/sessions/**/rollout-*.jsonl", "todo": "confirm record shape" },
+  "busy": { "mtime_glob": "~/.codex/sessions/**/rollout-*.jsonl", "idle_seconds": 240 },
+  "detect": { "dirs": [".codex"], "binaries": ["codex"], "processes": ["codex"], "headless": ["exec"] },
+  "mcp": { "manual": "~/.codex/config.toml",
+           "snippet": "[mcp_servers.polyctl]\ncommand = \"{exe}\"\nargs = {args}" },
+  "directives": { "steering_files": ["AGENTS.md", "~/.codex/AGENTS.md"], "config": "~/.codex/config.toml" }
+}

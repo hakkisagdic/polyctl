@@ -13,7 +13,7 @@ state. The project also keeps its standard-library-only runtime boundary.
 
 ## Decision
 
-Use the crash-safe JSONL primitive in [`src/ao/storage.py`](../../src/ao/storage.py)
+Use the crash-safe JSONL primitive in [`src/polyctl/storage.py`](../../src/polyctl/storage.py)
 for the migrated authority and verification ledgers.
 
 - Readers and writers take a cooperative sidecar `<ledger>.lock`: `flock` on POSIX
@@ -38,7 +38,7 @@ for the migrated authority and verification ledgers.
 ## Consequences
 
 Authority-critical writes pay for locking and synchronous persistence, but callers
-get a clear return boundary and independent AO processes do not interleave rows.
+get a clear return boundary and independent polyctl processes do not interleave rows.
 Append-in-place preserves the ledger model and avoids rewriting history. Sidecar lock
 files remain beside ledgers, and recovery is intentionally limited to the one failure
 shape that an interrupted append can produce.
@@ -55,7 +55,7 @@ shape that an interrupted append can produce.
 ## Limitations
 
 - Only `authority.jsonl` and `verifications.jsonl` have migrated to this primitive;
-  this ADR makes no durability claim for every `.ao/ledger/` file.
+  this ADR makes no durability claim for every `.polyctl/ledger/` file.
 - A complete-looking row written before the file `fsync` is ambiguous after a crash:
   it may be present, absent or not durably ordered even though the call never returned.
   JSON shape alone cannot certify that pre-`fsync` row.
@@ -70,8 +70,8 @@ shape that an interrupted append can produce.
 
 ## References/Supersession
 
-- Implementation: [`src/ao/storage.py`](../../src/ao/storage.py) and authority/
-  verification integration in [`src/ao/lib.py`](../../src/ao/lib.py)
+- Implementation: [`src/polyctl/storage.py`](../../src/polyctl/storage.py) and authority/
+  verification integration in [`src/polyctl/lib.py`](../../src/polyctl/lib.py)
 - Evidence: [`tests/test_storage_durability.py`](../../tests/test_storage_durability.py)
 - Background: [the ledger](../ledger.md) and [Windows support](../windows.md)
 - Landed in commit `6e089cb` (`feat: add crash-safe JSONL ledger storage`)

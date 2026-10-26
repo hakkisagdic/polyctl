@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import storage as S
+from polyctl import storage as S
 
 CHAIN = "test-ledger"
 
@@ -56,12 +56,12 @@ def test_nothing_is_appended_onto_a_ledger_that_lost_its_tail(tmp_path):
 
 
 def test_commit_check_refuses_when_the_authority_ledger_lost_its_tail(project, capsys):
-    from ao import cli, lib as A
+    from polyctl import cli, lib as A
 
     root = project["root"]
     for token in ("C-1", "C-2"):
         A.record_authority(root, False, ["no staged candidate"], "tree", "V-1", token=token)
-    _keep_first(os.path.join(root, ".ao", "ledger", "authority.jsonl"), 1)
+    _keep_first(os.path.join(root, ".polyctl", "ledger", "authority.jsonl"), 1)
 
     assert cli.cmd_commit_check(project, SimpleNamespace()) == 1
     assert "rows were removed from its end" in capsys.readouterr().out

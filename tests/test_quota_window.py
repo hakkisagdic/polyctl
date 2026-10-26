@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from ao import watchdog as W
+from polyctl import watchdog as W
 from tests.scenarios import World
 
 

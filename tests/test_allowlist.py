@@ -3,19 +3,19 @@ import pathlib
 import subprocess
 from types import SimpleNamespace
 
-from ao import allowlist as AL, cli, lib as A
+from polyctl import allowlist as AL, cli, lib as A
 
 ADAPTERS = sorted(pathlib.Path(A.adapters_dir()).glob("*.json"))
 
 
 def test_each_rule_is_asked_what_it_would_admit():
     assert AL.admits("Bash(git commit:*)", "git commit --no-verify -m x")
-    assert AL.admits("Bash(ao:*)", "ao push allow 30")
+    assert AL.admits("Bash(polyctl:*)", "polyctl push allow 30")
     assert AL.admits("Bash(find:*)", "find . -exec sh -c x ;")
-    assert not AL.admits("Bash(ao commit -m:*)", "ao push allow 30")
-    assert not AL.admits("Bash(ao commit-ok:*)", "ao commit --no-verify")
+    assert not AL.admits("Bash(polyctl commit -m:*)", "polyctl push allow 30")
+    assert not AL.admits("Bash(polyctl commit-ok:*)", "polyctl commit --no-verify")
     assert not AL.admits("Bash(git add:*)", "git -c core.hooksPath=/dev/null commit -m x")
-    assert not AL.admits("Bash(ao doctor)", "ao doctor --check --notify")
+    assert not AL.admits("Bash(polyctl doctor)", "polyctl doctor --check --notify")
     assert not AL.admits("Read", "python3 -c x")
 
 
@@ -49,13 +49,13 @@ def test_the_architect_grant_admits_no_bypass():
 
 def test_doctor_names_an_actor_whose_grant_admits_a_bypass(project):
     cfg = dict(project, architect={"name": "architect", "argv": [
-        "claude", "-p", "{prompt}", "--allowedTools", "Read,Bash(git commit:*),Bash(ao:*)"]})
+        "claude", "-p", "{prompt}", "--allowedTools", "Read,Bash(git commit:*),Bash(polyctl:*)"]})
 
     problems = dict(cli._actor_grant_problems(cfg))
 
     text = problems["actor-grant:architect"]
     assert "Bash(git commit:*) admits `git commit --no-verify -m x` (skips the commit hook)" in text
-    assert "Bash(ao:*) admits `ao push allow 30` (opens a push window)" in text
+    assert "Bash(polyctl:*) admits `polyctl push allow 30` (opens a push window)" in text
     assert "every tool" in problems["actor-grant:implementer"]
 
 
@@ -72,7 +72,7 @@ def test_doctor_names_a_rule_written_for_a_command_rewriter_that_admits_what_the
         ("runs any command", "rtk run sh -c x", "Bash(rtk run:*)")]
 
 
-def test_ao_commit_checks_authority_first_and_passes_nothing_but_the_message(project, monkeypatch):
+def test_polyctl_commit_checks_authority_first_and_passes_nothing_but_the_message(project, monkeypatch):
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda argv, **kw: calls.append(argv) or SimpleNamespace(returncode=0))
     monkeypatch.setattr(cli, "cmd_commit_check", lambda cfg, args: 1)
@@ -93,14 +93,14 @@ import pytest
 
 
 @pytest.mark.parametrize("rule, reason", [
-    ("Bash(ao features off review --by Alice)", "switches review off"),
-    ("Bash(ao waive review --slice S1 --by Alice --why late)", "waives a gate"),
-    ("Bash(ao waive review --slice S1 --by Alice --why *)", "waives a gate"),
-    ("Bash(ao person-review --by Alice --verdict APPROVED --digest abc)", "records a person's review"),
-    ("Bash(ao catchup --move-only S1 --by Alice)", "states which waived slices only moved code"),
-    ("Bash(ao init --profile x --review-tier same-family --by Alice)", "opts into same-family review"),
-    ("Bash(timeout 60 ao push allow 5)", "opens a push window"),
-    ("Bash(ao harness seen --by Alice --digest 0123abcd)", "records harness configuration as seen"),
+    ("Bash(polyctl features off review --by Alice)", "switches review off"),
+    ("Bash(polyctl waive review --slice S1 --by Alice --why late)", "waives a gate"),
+    ("Bash(polyctl waive review --slice S1 --by Alice --why *)", "waives a gate"),
+    ("Bash(polyctl person-review --by Alice --verdict APPROVED --digest abc)", "records a person's review"),
+    ("Bash(polyctl catchup --move-only S1 --by Alice)", "states which waived slices only moved code"),
+    ("Bash(polyctl init --profile x --review-tier same-family --by Alice)", "opts into same-family review"),
+    ("Bash(timeout 60 polyctl push allow 5)", "opens a push window"),
+    ("Bash(polyctl harness seen --by Alice --digest 0123abcd)", "records harness configuration as seen"),
 ])
 def test_a_person_s_act_written_out_in_full_is_named_by_its_first_words(rule, reason):
     """GRANTS-PREFIX (#114): each forbidden command was asked as a sample, `--by p`, so a rule that fixed another name
@@ -110,12 +110,12 @@ def test_a_person_s_act_written_out_in_full_is_named_by_its_first_words(rule, re
     assert [(r, granted) for r, _, granted in found] == [(reason, rule)]
 
 
-@pytest.mark.parametrize("rule", ["Bash(ao catchup --limit 5)", "Bash(ao init --profile claude-kiro)",
-                                  "Bash(ao features on review)", "Bash(ao status:*)",
-                                  "Bash(ao harness seen --by Alice)"])
+@pytest.mark.parametrize("rule", ["Bash(polyctl catchup --limit 5)", "Bash(polyctl init --profile claude-kiro)",
+                                  "Bash(polyctl features on review)", "Bash(polyctl status:*)",
+                                  "Bash(polyctl harness seen --by Alice)"])
 def test_a_rule_that_starts_no_person_s_act_is_not_named(rule):
     assert AL.problems(["claude", "-p", "{prompt}", "--allowedTools", f"Read,{rule}"], {}) == []
 
 
-def test_an_unknown_ao_subcommand_is_not_assumed_harmless():
-    assert AL.problems(["claude", "--allowedTools", "Bash(ao waiver-list)"])
+def test_an_unknown_polyctl_subcommand_is_not_assumed_harmless():
+    assert AL.problems(["claude", "--allowedTools", "Bash(polyctl waiver-list)"])

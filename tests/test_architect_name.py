@@ -1,13 +1,13 @@
 """The architect is named for its role in mail, never for a model (ARCHITECT-NAME, #72).
 
-A project that named no architect was given a model's name, "fable", in every message's file name, and `ao init` wrote
+A project that named no architect was given a model's name, "fable", in every message's file name, and `polyctl init` wrote
 that name into each project it set up. The default is now the role's own, `architect`. Mail a project wrote to the old
-default stays the architect's there: the ao repository held 104 such messages, and acknowledging them to move them would
+default stays the architect's there: the polyctl repository held 104 such messages, and acknowledging them to move them would
 have deleted them where the mail store deletes what is acknowledged.
 """
 import json
 
-from ao import cli, lib as A, mcp, settings
+from polyctl import cli, lib as A, mcp, settings
 from tests.test_profiles import _git_init, _init_args
 
 LEGACY_BLOCKED = "20260916-1200-kiro-to-fable-BLOCKED-queue.md"
@@ -52,8 +52,8 @@ def test_an_implementer_named_fable_keeps_its_mail(project):
 
 def test_a_standing_report_to_the_old_default_takes_the_repeat(project):
     """A repeat folds into the report already standing, whichever name it was addressed by, and keeps its age."""
-    first = mcp.call("ao_report", {"kind": "blocked", "summary": "queue empty"}, project, False)
-    again = mcp.call("ao_report", {"kind": "blocked", "summary": "queue empty"}, _unnamed(project), False)
+    first = mcp.call("polyctl_report", {"kind": "blocked", "summary": "queue empty"}, project, False)
+    again = mcp.call("polyctl_report", {"kind": "blocked", "summary": "queue empty"}, _unnamed(project), False)
 
     assert "-kiro-to-fable-BLOCKED-" in first["written"]
     assert again["written"] == first["written"] and again["repeated"] == 2
@@ -77,4 +77,4 @@ def test_init_names_the_architect_for_its_role(tmp_path, capsys, monkeypatch):
 
     assert cli.cmd_init({"root": str(root)}, _init_args()) == 0, capsys.readouterr().out
 
-    assert json.loads((root / ".ao" / "config.json").read_text(encoding="utf-8"))["architect"]["name"] == "architect"
+    assert json.loads((root / ".polyctl" / "config.json").read_text(encoding="utf-8"))["architect"]["name"] == "architect"

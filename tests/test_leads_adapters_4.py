@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, skillkit, storage
+from polyctl import cli, lib as A, skillkit, storage
 from tests.test_harness_config import _seen_by_a_person
 from tests.test_leads_adapters import _can_link, _fresh_repository, _git, _ignored, _write
 from tests.test_profiles import _init_args

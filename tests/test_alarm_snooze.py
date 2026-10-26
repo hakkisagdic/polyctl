@@ -1,8 +1,8 @@
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A, telegram
-from ao import watchdog as W
+from polyctl import cli, lib as A, telegram
+from polyctl import watchdog as W
 
 
 def _channels(monkeypatch):

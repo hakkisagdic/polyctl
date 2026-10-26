@@ -6,7 +6,7 @@ followed a remark that way had its verdict line read as no verdict line, and it 
 """
 import json
 
-from ao import acp, allowlist, cli, lib as A
+from polyctl import acp, allowlist, cli, lib as A
 from tests.test_acp_client import _turn, agent  # noqa: F401 - the fake agent is a fixture
 
 
@@ -71,7 +71,7 @@ def test_a_reviewer_whose_harness_declares_no_stream_or_that_writes_text_is_read
 
 def test_a_kiro_reviewer_that_names_text_output_is_named():
     assert allowlist.reviewer_problems(KIRO + ["--output-format", "text"]) == \
-        ["it runs with --output-format text, where ao pins stream-json"]
+        ["it runs with --output-format text, where polyctl pins stream-json"]
 
 
 # ---- a reviewer whose provider failed to answer this time is a passing failure, retried (KIRO-TRANSIENT) --------

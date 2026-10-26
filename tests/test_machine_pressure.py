@@ -1,13 +1,13 @@
-"""A gate run, `ao lock` and a lane start read the machine first, and wait or refuse rather than thrash
+"""A gate run, `polyctl lock` and a lane start read the machine first, and wait or refuse rather than thrash
 (MACHINE-PRESSURE).
 
 Five test suites at once swap a laptop into uselessness while each looks reasonable, and the machine then appears
-hung. The gate lock kept ao's own suites apart and nothing else: whatever else loaded the machine, `ao verify` started
-its suite into it, and `ao lane start` made a lane whatever the load. Now memory free, swap-ins a second and disk free
+hung. The gate lock kept polyctl's own suites apart and nothing else: whatever else loaded the machine, `polyctl verify` started
+its suite into it, and `polyctl lane start` made a lane whatever the load. Now memory free, swap-ins a second and disk free
 on the home volume are read once the lock is held - for a lane, before anything is made - each against a machine
 setting; a run waits up to --wait while one is past its limit, then refuses, naming what it read, the limit and what
 to do. The numbers are those measured on a working machine: the rate is the lower median of four one-second samples,
-so a burst of 96, 185, 237 and 1482 passes, and swap used, which macOS never hands back, is never read. `ao lane start`
+so a burst of 96, 185, 237 and 1482 passes, and swap used, which macOS never hands back, is never read. `polyctl lane start`
 also refuses a lane past limits.max_write_lanes. Nothing here reads the real machine: captured outputs and stand-in
 readings only.
 """
@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, pressure as P, settings as S
+from polyctl import cli, lib as A, pressure as P, settings as S
 from tests.conftest import CALM_MACHINE
 
 # What the programs print and the files hold, as captured on a Mac and on a Linux machine, the numbers changed.
@@ -196,8 +196,8 @@ def _counter(start, rises):
 
 
 def _machine_limits(**limits):
-    """Machine settings, in the file this test's ~/.ao/settings.json stands for."""
-    with open(os.environ["AO_SETTINGS"], "w", encoding="utf-8") as fh:
+    """Machine settings, in the file this test's ~/.polyctl/settings.json stands for."""
+    with open(os.environ["POLYCTL_SETTINGS"], "w", encoding="utf-8") as fh:
         json.dump({"limits": limits}, fh)
 
 
@@ -207,7 +207,7 @@ def _gates(root):
     command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
     spec = {"gates": {"smoke": {"run": command, "expect": "exit_zero", "timeout": 60}},
             "profiles": {"quick": ["smoke"], "full": ["smoke"]}, "default_profile": "quick"}
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         json.dump(spec, fh)
 
 
@@ -217,7 +217,7 @@ def _git(root, *args):
 
 
 def _programs(monkeypatch, outputs):
-    """Stand-ins for the programs ao asks on macOS: {name: [what it prints each time it is asked]}; a program not
+    """Stand-ins for the programs polyctl asks on macOS: {name: [what it prints each time it is asked]}; a program not
     named is not on PATH. Returns the names asked, in order."""
     asked = []
     printed = {name: iter(texts) for name, texts in outputs.items()}
@@ -254,7 +254,7 @@ def test_the_programs_and_files_are_read_as_captured_on_macos_and_linux():
     assert P.parse_vmstat(VMSTAT) == 1234567
     for parse in (P.parse_memory_pressure, P.parse_vm_stat, P.parse_meminfo, P.parse_vmstat):
         assert parse("") is None and parse("something else entirely\n") is None
-    # A kernel before MemAvailable names no figure ao would trust, rather than one worked out from MemFree.
+    # A kernel before MemAvailable names no figure polyctl would trust, rather than one worked out from MemFree.
     assert P.parse_meminfo(MEMINFO.replace("MemAvailable:    9788654 kB\n", "")) is None
 
 
@@ -333,13 +333,13 @@ def test_each_limit_refuses_a_verify_with_its_message_after_waiting_no_longer_th
     out = _plain(capsys.readouterr().out)
     assert f"the machine is short: {words} ({setting}) — waiting up to 60s for room" in out
     assert (f"the machine is still short after 60s; not starting the gates: {words} ({setting}). {remedy}, then run "
-            f"this again; or a person changes the limit for this machine: ao config set {setting} <n> --machine") in out
+            f"this again; or a person changes the limit for this machine: polyctl config set {setting} <n> --machine") in out
     assert 0 < clock.elapsed <= 60 and len(taken) > 1               # it read again while it waited, and no longer
     assert A.latest_verification(root) is None and "▶ smoke" not in out          # no gate ran
     assert not lock.exists()                                         # the lock it held while it waited is let go
 
 
-def test_ao_lock_and_merge_check_wait_for_the_machine_and_refuse_as_verify_does(project, lock, clock, monkeypatch,
+def test_polyctl_lock_and_merge_check_wait_for_the_machine_and_refuse_as_verify_does(project, lock, clock, monkeypatch,
                                                                                 capsys):
     root = project["root"]
     _gates(root)
@@ -355,7 +355,7 @@ def test_ao_lock_and_merge_check_wait_for_the_machine_and_refuse_as_verify_does(
     base = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
     _git(root, "checkout", "-q", "-b", "feature")
     Path(root, "feature.txt").write_text("feature\n", encoding="utf-8")
-    _git(root, "add", "feature.txt", ".ao/gates.json")
+    _git(root, "add", "feature.txt", ".polyctl/gates.json")
     _git(root, "commit", "-q", "-m", "feature")
     _git(root, "checkout", "-q", base)
     clock.start, clock.slept = clock.now, 0
@@ -391,7 +391,7 @@ def test_a_calm_machine_is_read_once_and_a_run_under_its_holders_lock_reads_none
     assert len(taken) == 1
     assert cli.cmd_lock(project, SimpleNamespace(command=["--", sys.executable, "-c", "pass"], wait=0)) == 0
     assert len(taken) == 2
-    # Inside a lock its own holder took - `ao lock -- ao verify` - a run reads nothing: the holder read the machine.
+    # Inside a lock its own holder took - `polyctl lock -- polyctl verify` - a run reads nothing: the holder read the machine.
     assert A.acquire_gate_lock(root, 0)
     try:
         assert cli.cmd_verify(project, SimpleNamespace(profile="quick", wait=0)) == 0
@@ -408,7 +408,7 @@ def test_windows_says_once_that_it_reads_nothing_and_refuses_nothing(project, lo
         asked = _programs(patch, {})
         reading = P.measure("win32")
     assert reading == P.Reading(None, None, (), None,
-                                (("machine", "ao reads memory, paging and disk on macOS and Linux"),))
+                                (("machine", "polyctl reads memory, paging and disk on macOS and Linux"),))
     assert asked == [] and clock.slept == 0                          # nothing was run or sampled
     _machine_limits(refuse_below_free_memory_pct=100, refuse_above_swapins_per_sec=1,
                     refuse_below_free_disk_gib=100000)                 # limits no measured machine meets
@@ -418,7 +418,7 @@ def test_windows_says_once_that_it_reads_nothing_and_refuses_nothing(project, lo
 
     out = _plain(capsys.readouterr().out)
     assert out.count("not measured") == 1
-    assert ("machine not measured (ao reads memory, paging and disk on macOS and Linux): nothing waits or refuses on "
+    assert ("machine not measured (polyctl reads memory, paging and disk on macOS and Linux): nothing waits or refuses on "
             "it") in out
     assert len(taken) == 1 and clock.slept == 0
     assert A.latest_verification(root)["passed"] is True
@@ -468,7 +468,7 @@ def _lane(action, item=None):
 def test_a_lane_start_reads_the_machine_last_and_refuses_at_once_when_it_is_short(project, tmp_path, clock,
                                                                                    monkeypatch, capsys):
     root = project["root"]
-    Path(root, ".ao", "board.md").write_text(BOARD, encoding="utf-8")
+    Path(root, ".polyctl", "board.md").write_text(BOARD, encoding="utf-8")
     taken = _machine(monkeypatch, clock, _reading(memory=9.0))
 
     assert cli.cmd_lane(project, _lane("start", "R")) == 2             # not READY: refused before the machine is read
@@ -478,7 +478,7 @@ def test_a_lane_start_reads_the_machine_last_and_refuses_at_once_when_it_is_shor
     out = _plain(capsys.readouterr().out)
     assert ("refused: the machine is short; not starting the lane: memory 9% free, under the 15% floor "
             f"({P.MEMORY_FLOOR}). Let the machine settle, then run this again; or a person changes the limit for this "
-            f"machine: ao config set {P.MEMORY_FLOOR} <n> --machine") in out
+            f"machine: polyctl config set {P.MEMORY_FLOOR} <n> --machine") in out
     assert len(taken) == 1 and clock.slept == 0                       # it waits for no lock, and for nothing else
     assert A.lane_records(root) == [] and not (tmp_path / "proj-lanes").exists()
     assert not _git(root, "branch", "--list", "lane/B")
@@ -486,9 +486,9 @@ def test_a_lane_start_reads_the_machine_last_and_refuses_at_once_when_it_is_shor
     assert cli.cmd_lane(project, _lane("start", "B")) == 0
 
 
-def test_ao_lane_start_refuses_a_lane_past_the_cap_and_makes_nothing(project, tmp_path, capsys):
+def test_polyctl_lane_start_refuses_a_lane_past_the_cap_and_makes_nothing(project, tmp_path, capsys):
     root = project["root"]
-    Path(root, ".ao", "board.md").write_text(BOARD, encoding="utf-8")
+    Path(root, ".polyctl", "board.md").write_text(BOARD, encoding="utf-8")
     assert cli.cmd_lane(project, _lane("start", "B")) == 0
     assert cli.cmd_lane(project, _lane("start", "D")) == 0
     capsys.readouterr()
@@ -497,7 +497,7 @@ def test_ao_lane_start_refuses_a_lane_past_the_cap_and_makes_nothing(project, tm
 
     out = _plain(capsys.readouterr().out)
     assert ("refused: this checkout has 2 lanes already, as many as limits.max_write_lanes allows: B (ready), "
-            "D (ready); `ao lane remove <item>` retires one, or `ao config set limits.max_write_lanes <n>` changes "
+            "D (ready); `polyctl lane remove <item>` retires one, or `polyctl config set limits.max_write_lanes <n>` changes "
             "the cap") in out
     assert A.lane_record(root, "E") is None and not (tmp_path / "proj-lanes" / "E").exists()
     assert not _git(root, "branch", "--list", "lane/E")
@@ -509,12 +509,12 @@ def test_ao_lane_start_refuses_a_lane_past_the_cap_and_makes_nothing(project, tm
 
 def test_two_lane_starts_at_once_never_both_pass_the_cap(project, tmp_path, monkeypatch, capsys):
     root = project["root"]
-    Path(root, ".ao", "board.md").write_text(BOARD, encoding="utf-8")
+    Path(root, ".polyctl", "board.md").write_text(BOARD, encoding="utf-8")
     assert cli.cmd_lane(project, _lane("start", "B")) == 0
 
     def another_start_meanwhile():
         # Both found room before either had a record; the other one makes its record while this one reads the machine.
-        Path(root, ".ao", "lanes", "D.json").write_text(json.dumps({"item": "D", "state": "preparing"}),
+        Path(root, ".polyctl", "lanes", "D.json").write_text(json.dumps({"item": "D", "state": "preparing"}),
                                                        encoding="utf-8")
         return CALM_MACHINE
 
@@ -549,4 +549,4 @@ def test_the_doctor_shows_the_machine_on_one_line(project, monkeypatch, capsys):
         "disk 500 GiB free")
     _machine(monkeypatch, None, P.measure("win32"))
     assert _plain(cli._machine_line(project)) == (
-        f"{'machine':<16}not measured (ao reads memory, paging and disk on macOS and Linux)")
+        f"{'machine':<16}not measured (polyctl reads memory, paging and disk on macOS and Linux)")

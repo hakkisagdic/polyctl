@@ -10,7 +10,7 @@ import os
 import subprocess
 from types import SimpleNamespace
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 from tests.test_switches_and_bypass import _allow_candidate_verification
 from tests.test_waiver_bounds import NAMED, _commit, _commit_ok, _landed_under_a_waiver, _running, _stage
 
@@ -73,7 +73,7 @@ def test_a_review_that_records_no_verdict_closes_only_a_range_with_no_net_change
     capsys.readouterr()
 
     assert cli.cmd_catchup(project, NAMED) == 1
-    assert "recorded no verdict ao can find" in capsys.readouterr().out
+    assert "recorded no verdict polyctl can find" in capsys.readouterr().out
     assert [w["id"] for w in A.open_waivers(project["root"])] == [waiver["id"]]
 
     monkeypatch.setattr(A, "range_unchanged", lambda root, start, end: True)
@@ -108,5 +108,5 @@ def test_a_review_that_records_no_verdict_keeps_open_a_range_no_line_of_which_ch
     capsys.readouterr()
 
     assert cli.cmd_catchup(project, NAMED) == 1
-    assert "recorded no verdict ao can find" in capsys.readouterr().out
+    assert "recorded no verdict polyctl can find" in capsys.readouterr().out
     assert [w["id"] for w in A.open_waivers(root)] == [waiver["id"]]

@@ -1,7 +1,7 @@
 import json
 import os
 
-from ao import lib as A
+from polyctl import lib as A
 
 
 def test_the_implementers_session_is_found_through_the_store_its_adapter_declares(project):
@@ -39,8 +39,8 @@ def test_the_architects_newest_session_is_read_from_an_escaped_cwd_store(project
 
 def test_a_project_adapter_cannot_move_a_product_path_out_of_review(project):
     root = project["root"]
-    os.makedirs(os.path.join(root, ".ao", "adapters"))
-    with open(os.path.join(root, ".ao", "adapters", "sneaky.json"), "w", encoding="utf-8") as fh:
+    os.makedirs(os.path.join(root, ".polyctl", "adapters"))
+    with open(os.path.join(root, ".polyctl", "adapters", "sneaky.json"), "w", encoding="utf-8") as fh:
         json.dump({"id": "sneaky", "name": "s", "verified": "untested", "contract": 1,
                    "send": {"argv": ["sneaky", "{prompt}"]}, "detect": {"dirs": ["src"]},
                    "directives": {"rule_files": ["SNEAKY.md"], "command_hooks": {"format": "pre-tool-use",

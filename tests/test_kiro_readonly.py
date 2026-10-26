@@ -1,16 +1,16 @@
-"""A kiro reviewer runs as an agent of ao's whose tools only read (KIRO-READONLY).
+"""A kiro reviewer runs as an agent of polyctl's whose tools only read (KIRO-READONLY).
 
 Measured on kiro-cli 2.27.1 on 2026-10-05: with --no-interactive, a tool `--trust-tools=` leaves untrusted runs all
 the same - asked to, it ran `touch` and made the file - and reviewers ran tests, built virtual environments under
 /tmp and installed packages. Run as an agent whose tools are read, grep and glob alone, it read the file it was asked
-to and made nothing. ao writes that agent into the reviewer's own directory for each run.
+to and made nothing. polyctl writes that agent into the reviewer's own directory for each run.
 """
 import json
 import os
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.standin import program
 
 KIRO = ["kiro-cli", "chat", "--no-interactive", "{prompt}", "--model", "m", "--trust-tools="]
@@ -63,7 +63,7 @@ def test_a_kiro_command_that_names_an_agent_of_its_own_is_refused():
         assert any("it names --agent" in problem for problem in A.reading_problems(composed + named)), named
 
 
-def test_a_reviewer_agent_ao_cannot_write_is_named():
+def test_a_reviewer_agent_polyctl_cannot_write_is_named():
     for name, adapter in A.package_adapters().items():
         assert A.reviewer_agent_problems(adapter) == [], name
     broken = {"options": {"reviewer_agent": {"argv": ["--agent"], "path": "../x/{agent}.json", "config": {}}}}
@@ -72,7 +72,7 @@ def test_a_reviewer_agent_ao_cannot_write_is_named():
 
 
 def test_a_kiro_review_runs_its_harness_as_the_agent_written_beside_the_tree(project, tmp_path):
-    """End to end: the stand-in kiro-cli finds the agent ao named in its own directory, holding read tools alone. A
+    """End to end: the stand-in kiro-cli finds the agent polyctl named in its own directory, holding read tools alone. A
     program on Windows too (WINDOWS-LANE-PARITY)."""
     harness = program(tmp_path, "kiro-cli", """import json, os, sys
 name = sys.argv[sys.argv.index("--agent") + 1]
@@ -90,8 +90,8 @@ for line in ("VERDICT: APPROVED", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0"
 
 
 def test_a_kiro_reviewer_over_acp_runs_as_the_agent_too(project, monkeypatch):
-    """KIRO-READONLY-2: with `review.transport` acp, a kiro reviewer ran `kiro-cli acp` with no agent of ao's."""
-    from ao import acp
+    """KIRO-READONLY-2: with `review.transport` acp, a kiro reviewer ran `kiro-cli acp` with no agent of polyctl's."""
+    from polyctl import acp
     seen = {}
 
     class Recording:
@@ -126,7 +126,7 @@ def _tree_with(tmp_path, name, make):
 
 @pytest.mark.skipif(os.name == "nt", reason="a link needs a privilege on Windows")
 def test_a_tree_that_commits_the_agents_folder_as_a_link_unpacks_no_link(tmp_path):
-    """KIRO-READONLY-2: the candidate's links are not unpacked, so ao's agent is written in a folder of its own."""
+    """KIRO-READONLY-2: the candidate's links are not unpacked, so polyctl's agent is written in a folder of its own."""
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     repo, tree = _tree_with(tmp_path, ".kiro", lambda path: os.symlink(elsewhere, path))

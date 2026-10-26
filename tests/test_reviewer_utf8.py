@@ -1,6 +1,6 @@
 """A reviewer that is a Python program answers in UTF-8, whatever its streams would default to (REVIEWER-UTF8).
 
-ao hands a reviewer its prompt and reads its answer as UTF-8. A Python program reads and writes its standard
+polyctl hands a reviewer its prompt and reads its answer as UTF-8. A Python program reads and writes its standard
 streams as PYTHONIOENCODING says, which wins over UTF-8 mode, and on Windows, without either, in the ANSI code
 page. The Windows leg without UTF-8 mode failed ten tests on it: a stand-in's em dash came back as a byte no
 UTF-8 reads, so a hunter's leads and a reviewer's findings lost the separator they are read by, and a Turkish
@@ -12,7 +12,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 SAID = "- [BLOCKER] src/a.py:3 parse — şu satır ığdır"
 ECHO = ("import sys\n"

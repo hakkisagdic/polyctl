@@ -1,6 +1,6 @@
-"""No tracked file names the private projects ao grew inside, their tracker or their owner (NEUTRAL-NAMES).
+"""No tracked file names the private projects polyctl grew inside, their tracker or their owner (NEUTRAL-NAMES).
 
-ao is public, and it was written inside one person's private projects. Their names reached its
+polyctl is public, and it was written inside one person's private projects. Their names reached its
 public surfaces: the landing page showed one project's board, the profiles table said where each
 profile ran, docs/sources.md quoted real tracker records, and tests signed waivers with the
 owner's first name. A sample needs a name, and `acme-api`, `ACME-` and `alice (owner)` serve.
@@ -156,8 +156,8 @@ def test_every_spelling_is_one_name_a_path_counts_and_what_is_allowed_or_ignored
     dotless = OWNER[:-1].capitalize() + "\u0131"                              # the Turkish dotless i
     dotted = OWNER[:-1].upper() + "\u0130"                                    # a capital I with a dot
     sample = {
-        ".gitignore": "# state and logs\n__pycache__/\n.ao/\n*.log\n",
-        ".ao/config.json": f'{{"project": "{project}"}}\n',
+        ".gitignore": "# state and logs\n__pycache__/\n.polyctl/\n*.log\n",
+        ".polyctl/config.json": f'{{"project": "{project}"}}\n',
         ".pytest_cache/v/cache/nodeids": f"{project}\n",
         "run.log": f"{project}\n",
         "src/__pycache__/x.pyc": f"{project}\n",

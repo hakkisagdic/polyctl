@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 from tests.conftest import review_off
 
 CHAIN = "test-atomic-chain-v1"
@@ -98,7 +98,7 @@ def test_a_row_the_chain_digest_cannot_read_is_never_written(tmp_path):
 
 def test_plan_baselines_survive_a_torn_append_and_fail_closed_on_corruption(project):
     root = project["root"]
-    ledger = os.path.join(root, ".ao", "ledger", "plans.jsonl")
+    ledger = os.path.join(root, ".polyctl", "ledger", "plans.jsonl")
     A.record_plan(root, "B4", "d4")
     with open(ledger, "a", encoding="utf-8") as handle:
         handle.write('{"item":"B5","dig')
@@ -115,8 +115,8 @@ def test_plan_baselines_survive_a_torn_append_and_fail_closed_on_corruption(proj
 
 def test_commit_ok_refuses_when_plan_baselines_cannot_be_read(project, monkeypatch, capsys):
     root = project["root"]
-    os.makedirs(os.path.join(root, ".ao", "ledger"), exist_ok=True)
-    plans = os.path.join(root, ".ao", "ledger", "plans.jsonl")
+    os.makedirs(os.path.join(root, ".polyctl", "ledger"), exist_ok=True)
+    plans = os.path.join(root, ".polyctl", "ledger", "plans.jsonl")
     with open(plans, "w", encoding="utf-8") as handle:
         handle.write("not json\n")
     storage._record_committed_length(plans, 1, None)
@@ -131,10 +131,10 @@ def test_commit_ok_refuses_when_plan_baselines_cannot_be_read(project, monkeypat
 
 def test_prune_keeps_evidence_whole_and_rewrites_logs_whole(project, capsys):
     root = project["root"]
-    verifications = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
+    verifications = os.path.join(root, ".polyctl", "ledger", "verifications.jsonl")
     A.record_verification(root, {"id": "V-old", "at": 1, "passed": True})
     kept = open(verifications, "rb").read()
-    notices = os.path.join(root, ".ao", "ledger", "notices.jsonl")
+    notices = os.path.join(root, ".polyctl", "ledger", "notices.jsonl")
     with open(notices, "w", encoding="utf-8") as handle:
         handle.write(json.dumps({"at": 1, "title": "old"}) + "\n")
         handle.write(json.dumps({"at": 4_000_000_000, "title": "new"}) + "\n")

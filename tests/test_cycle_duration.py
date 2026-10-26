@@ -3,7 +3,7 @@ import os
 import time
 from types import SimpleNamespace
 
-from ao import watchdog as W
+from polyctl import watchdog as W
 
 
 def test_a_real_cycle_records_when_it_started_and_how_long_it_took(project):

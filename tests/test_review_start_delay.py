@@ -1,9 +1,9 @@
 """A submitted review says what it is doing, and on what it waits (REVIEW-START-DELAY).
 
-A review was seen to start its reviewer 69 minutes after its submit while `ao reviews` said "running"
-the whole time, and its log held nothing. The run takes no gate lock - only `ao verify`, `ao
-merge-check` and `ao lock` do - so a suite holding that lock is shown here not to hold a review back.
-What was missing was any way to see what the run did: its state carries its phase now, `ao reviews`
+A review was seen to start its reviewer 69 minutes after its submit while `polyctl reviews` said "running"
+the whole time, and its log held nothing. The run takes no gate lock - only `polyctl verify`, `polyctl
+merge-check` and `polyctl lock` do - so a suite holding that lock is shown here not to hold a review back.
+What was missing was any way to see what the run did: its state carries its phase now, `polyctl reviews`
 shows it, and its log is written a line at a time from a first line that names the runner.
 """
 import contextlib
@@ -18,8 +18,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
-from ao.storage import LedgerLockTimeout, _exclusive_lock
+from polyctl import cli, lib as A
+from polyctl.storage import LedgerLockTimeout, _exclusive_lock
 from tests.test_review_chain import _repo_with_change
 
 # A reviewer run by what it inherits: it notes that it started; it records what its run's state names
@@ -28,27 +28,27 @@ from tests.test_review_chain import _repo_with_change
 REVIEWER = """
 import json, os, sys, time
 env = os.environ
-if env.get("AO_TEST_STARTED"):
-    open(env["AO_TEST_STARTED"], "a").close()
-if env.get("AO_TEST_STATE"):
+if env.get("POLYCTL_TEST_STARTED"):
+    open(env["POLYCTL_TEST_STARTED"], "a").close()
+if env.get("POLYCTL_TEST_STATE"):
     mine, deadline = "pid %d" % os.getpid(), time.time() + 60
     while True:
         try:
-            with open(env["AO_TEST_STATE"], encoding="utf-8") as fh:
+            with open(env["POLYCTL_TEST_STATE"], encoding="utf-8") as fh:
                 phase = json.load(fh).get("phase") or {}
         except (OSError, ValueError):
             phase = {}
         if str(phase.get("on")).endswith(mine) or time.time() > deadline:
             break
         time.sleep(0.05)
-    with open(env["AO_TEST_SEEN"], "a", encoding="utf-8") as fh:
+    with open(env["POLYCTL_TEST_SEEN"], "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"pid": os.getpid(), "phase": phase}) + "\\n")
-if env.get("AO_TEST_FAIL_ONCE") and not os.path.exists(env["AO_TEST_FAIL_ONCE"]):
-    open(env["AO_TEST_FAIL_ONCE"], "w").close()
+if env.get("POLYCTL_TEST_FAIL_ONCE") and not os.path.exists(env["POLYCTL_TEST_FAIL_ONCE"]):
+    open(env["POLYCTL_TEST_FAIL_ONCE"], "w").close()
     sys.exit(75)
-if env.get("AO_TEST_GO"):
+if env.get("POLYCTL_TEST_GO"):
     deadline = time.time() + 120
-    while not os.path.exists(env["AO_TEST_GO"]) and time.time() < deadline:
+    while not os.path.exists(env["POLYCTL_TEST_GO"]) and time.time() < deadline:
         time.sleep(0.05)
 for line in ("VERDICT: APPROVED", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0"):
     print(line)
@@ -68,9 +68,9 @@ def _plain(capsys):
 
 
 def _with_reviewer(project):
-    """The project with REVIEWER as its reviewer, in memory and in .ao/config.json for a run that reads it."""
+    """The project with REVIEWER as its reviewer, in memory and in .polyctl/config.json for a run that reads it."""
     reviewer = {"id": "r1", "family": "x", "argv": [sys.executable, "-c", REVIEWER, "{prompt}"]}
-    path = os.path.join(project["root"], ".ao", "config.json")
+    path = os.path.join(project["root"], ".polyctl", "config.json")
     with open(path, encoding="utf-8") as fh:
         config = json.load(fh)
     config["reviewer"] = reviewer
@@ -139,8 +139,8 @@ def test_while_a_reviewer_works_its_state_names_the_section_the_reviewer_and_its
     cfg = _with_reviewer(project)
     rid = _submitted(cfg, monkeypatch, boundary=SCENARIOS)
     seen = tmp_path / "seen.jsonl"
-    monkeypatch.setenv("AO_TEST_STATE", cli._review_state_path(root, rid))
-    monkeypatch.setenv("AO_TEST_SEEN", str(seen))
+    monkeypatch.setenv("POLYCTL_TEST_STATE", cli._review_state_path(root, rid))
+    monkeypatch.setenv("POLYCTL_TEST_SEEN", str(seen))
 
     assert cli.cmd_review(cfg, _args(run=rid, boundary=None)) == 0
 
@@ -156,7 +156,7 @@ def test_a_retry_wait_reads_waiting_and_is_in_the_log_before_the_wait_begins(pro
     _repo_with_change(root)
     cfg = _with_reviewer(project)
     rid = _submitted(cfg, monkeypatch)
-    monkeypatch.setenv("AO_TEST_FAIL_ONCE", str(tmp_path / "failed-once"))
+    monkeypatch.setenv("POLYCTL_TEST_FAIL_ONCE", str(tmp_path / "failed-once"))
     path = tmp_path / f"{rid}.log"
     # A detached run's standard output is its log: a file, which Python writes in blocks unless told.
     log = open(path, "a", encoding="utf-8")
@@ -192,7 +192,7 @@ def test_a_review_behind_the_held_keyflip_rotation_lock_reads_waiting_until_the_
     _repo_with_change(root)
     cfg = _with_reviewer(project)
     rid = _submitted(cfg, monkeypatch)
-    with open(os.environ["AO_SETTINGS"], "w", encoding="utf-8") as fh:
+    with open(os.environ["POLYCTL_SETTINGS"], "w", encoding="utf-8") as fh:
         json.dump({"keyflip": {"rotation": "on"}}, fh)
     # The reviewer spends a provider whose window reads spent, and has headroom when read again under
     # the lock, as after another actor's rotation: keyflip itself is never run.
@@ -201,7 +201,7 @@ def test_a_review_behind_the_held_keyflip_rotation_lock_reads_waiting_until_the_
     monkeypatch.setattr(A, "provider_window", lambda name: windows.append(name) or {
         "pct": 99 if len(windows) == 1 else 10, "window": "5h", "resets_in": "1h", "resets_s": 3600, "raw": ""})
     started = tmp_path / "reviewer-started"
-    monkeypatch.setenv("AO_TEST_STARTED", str(started))
+    monkeypatch.setenv("POLYCTL_TEST_STARTED", str(started))
     outcome, held = {}, {}
 
     def run():
@@ -212,7 +212,7 @@ def test_a_review_behind_the_held_keyflip_rotation_lock_reads_waiting_until_the_
 
     worker = threading.Thread(target=run, daemon=True)
     try:
-        with _exclusive_lock(os.path.join(A.HOME, ".ao", "keyflip-rotation.lock"), timeout=5):
+        with _exclusive_lock(os.path.join(A.HOME, ".polyctl", "keyflip-rotation.lock"), timeout=5):
             worker.start()
             _until(lambda: windows or not worker.is_alive(), 60)
             assert windows, outcome                      # it read a spent window and went for the lock
@@ -239,7 +239,7 @@ def test_a_run_that_stops_on_an_error_is_recorded_failed_rather_than_left_to_rea
     _repo_with_change(root)
     cfg = _with_reviewer(project)
     rid = _submitted(cfg, monkeypatch)
-    lock = os.path.join(A.HOME, ".ao", "keyflip-rotation.lock")
+    lock = os.path.join(A.HOME, ".polyctl", "keyflip-rotation.lock")
 
     def timed_out(cfg, argv, who, on_wait=None):
         raise LedgerLockTimeout(f"timed out locking {lock}", lock, 180)
@@ -269,23 +269,23 @@ def test_a_runner_gone_without_a_result_reads_lost_and_says_what_it_was_doing(pr
 
     out = _plain(capsys)
     assert re.search(r"R-21\s+lost\s.*  it was waiting: 30s, then r1 once more$", out, re.M)
-    assert re.search(r"R-22\s+lost\s.*  its runner never reported; its log is \.ao/reviews/R-22\.log$", out, re.M)
+    assert re.search(r"R-22\s+lost\s.*  its runner never reported; its log is \.polyctl/reviews/R-22\.log$", out, re.M)
     assert re.search(r"R-23\s+running\s+\S+\s+\S+\s*$", out, re.M)
 
 
 def test_a_detached_run_logs_its_first_line_and_its_reviewer_while_a_suite_holds_the_gate_lock(
         project, tmp_path, monkeypatch, capsys):
-    """The whole path, started apart as `ao review submit` starts it, with the gate lock held throughout."""
+    """The whole path, started apart as `polyctl review submit` starts it, with the gate lock held throughout."""
     root = project["root"]
     _repo_with_change(root)
     cfg = _with_reviewer(project)
-    # The run finds ~/.ao through the home it is handed, never the machine's own.
+    # The run finds ~/.polyctl through the home it is handed, never the machine's own.
     monkeypatch.setenv("HOME", A.HOME)
     monkeypatch.setenv("USERPROFILE", A.HOME)
     go = tmp_path / "go"
-    monkeypatch.setenv("AO_TEST_GO", str(go))
+    monkeypatch.setenv("POLYCTL_TEST_GO", str(go))
     suite = str(tmp_path / "suite")
-    lock = os.path.join(A.HOME, ".ao", "gate.lock")
+    lock = os.path.join(A.HOME, ".polyctl", "gate.lock")
     os.makedirs(os.path.dirname(lock), exist_ok=True)
     with open(lock, "w", encoding="utf-8") as fh:
         json.dump({"root": suite, "pid": os.getpid(), "at": int(time.time()) - 3600}, fh)
@@ -300,7 +300,7 @@ def test_a_detached_run_logs_its_first_line_and_its_reviewer_while_a_suite_holds
     try:
         _until(lambda: now().get("state") != "running" or (now().get("phase") or {}).get("what") == "running")
         assert (now().get("phase") or {}).get("what") == "running", now()
-        log = open(os.path.join(root, ".ao", "reviews", f"{rid}.log"), encoding="utf-8").read().splitlines()
+        log = open(os.path.join(root, ".polyctl", "reviews", f"{rid}.log"), encoding="utf-8").read().splitlines()
         capsys.readouterr()
         cli.cmd_reviews(cfg, SimpleNamespace())
         shown = _plain(capsys)
@@ -368,7 +368,7 @@ def test_a_review_whose_window_has_headroom_never_reads_waiting(project, monkeyp
     _repo_with_change(root)
     cfg = _with_reviewer(project)
     rid = _submitted(cfg, monkeypatch)
-    with open(os.environ["AO_SETTINGS"], "w", encoding="utf-8") as fh:
+    with open(os.environ["POLYCTL_SETTINGS"], "w", encoding="utf-8") as fh:
         json.dump({"keyflip": {"rotation": "on"}}, fh)
     monkeypatch.setattr(A, "provider_of", lambda argv: "claude")
     monkeypatch.setattr(A, "provider_window", lambda name: {"pct": 10, "window": "5h", "resets_in": "1h",

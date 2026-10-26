@@ -12,8 +12,8 @@ failure of another kind - is told.
 import os
 import time
 
-from ao import cli, email, features as F, lib as A, telegram
-from ao import watchdog as W
+from polyctl import cli, email, features as F, lib as A, telegram
+from polyctl import watchdog as W
 from tests.scenarios import World
 
 NOTIFY = W.notify                  # the scenario world replaces it; these are about the real ladder
@@ -166,8 +166,8 @@ def test_an_open_decision_rings_once_for_its_question_and_mails_on_reds_schedule
         assert W.escalate_open_decisions(root, "proj") == [first["id"]]
 
     assert _on(sent, "desktop") == ["proj: decision waiting"] and len(_on(sent, "telegram")) == 1
-    assert _mails(sent) == [f"{first['id']}: which store keeps the ledger? — open 75m; ao answer {first['id']} <key>",
-                            f"{first['id']}: which store keeps the ledger? — open 435m; ao answer {first['id']} <key>"]
+    assert _mails(sent) == [f"{first['id']}: which store keeps the ledger? — open 75m; polyctl answer {first['id']} <key>",
+                            f"{first['id']}: which store keeps the ledger? — open 435m; polyctl answer {first['id']} <key>"]
 
     second = A.ask(root, "who reviews the ledger?", ["a person", "the reviewer"])
     clock[0] += 16 * 60
@@ -189,7 +189,7 @@ def test_a_decision_no_architect_will_act_on_is_told_at_once_by_its_own_alarm_an
     world.cycle(dry_run=False)
 
     assert [(title, msg) for kind, title, msg, _ in sent if kind == "desktop"] == [
-        ("proj: decision waiting", f"{decision['id']}: which store keeps the ledger? — open 0m; ao answer "
+        ("proj: decision waiting", f"{decision['id']}: which store keeps the ledger? — open 0m; polyctl answer "
                                    f"{decision['id']} <key> — {WAKES_OFF}")]
 
     _cycles(world, clock, 3 * HOUR)

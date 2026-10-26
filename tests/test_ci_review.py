@@ -1,11 +1,11 @@
-"""`ao ci review`: a pull request's change reviewed in CI by a model of another family, with no setup (GITHUB-ACTION).
+"""`polyctl ci review`: a pull request's change reviewed in CI by a model of another family, with no setup (GITHUB-ACTION).
 
-ao reviewed a change only where it governs the repository, with a reviewer a person had set in the project's config,
-so a repository that does not use ao had no way to have a pull request read by another model family before merging
-it. `ao ci review` reviews what a pull request adds - from the merge base of its base and head, as the pull request
+polyctl reviewed a change only where it governs the repository, with a reviewer a person had set in the project's config,
+so a repository that does not use polyctl had no way to have a pull request read by another model family before merging
+it. `polyctl ci review` reviews what a pull request adds - from the merge base of its base and head, as the pull request
 shows it - the way catch-up reviews a landed range, with a reviewer composed for the run alone; it holds the change to
 the family the workflow states wrote it and writes the verdict and the findings where the job reads them. These run it
-on a repository with no .ao/ at all, with a stand-in reviewer, and once end to end through the API reviewer against a
+on a repository with no .polyctl/ at all, with a stand-in reviewer, and once end to end through the API reviewer against a
 stand-in of its endpoint.
 """
 import json
@@ -15,7 +15,7 @@ import sys
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_api_review import APPROVED, endpoint  # noqa: F401  (endpoint is a fixture these tests use)
 
 # The stand-in reviewer: it keeps the prompt it was handed and answers with what the test put beside it.
@@ -41,7 +41,7 @@ def _write(root, name, text):
 
 @pytest.fixture
 def repository(tmp_path):
-    """A repository that does not use ao: a base, a branch that adds b.py, and a base that moved on after it.
+    """A repository that does not use polyctl: a base, a branch that adds b.py, and a base that moved on after it.
 
     The branch's change is b.py alone; read from the base as it is now, two dots, it would also undo c.py.
     """
@@ -71,7 +71,7 @@ def _stand_in(monkeypatch, tmp_path, answer, family="reviewers"):
 
 
 def _ci(root, tmp_path, *words):
-    """`ao ci review` as a workflow runs it, its summary and outputs written to files of the test's own."""
+    """`polyctl ci review` as a workflow runs it, its summary and outputs written to files of the test's own."""
     summary, outputs = tmp_path / "summary.md", tmp_path / "outputs.txt"
     code = cli.main(["-C", root, "ci", "review", "--reviewer", "stand-in", "--family", "reviewers",
                      "--summary", str(summary), "--outputs", str(outputs), *words])
@@ -170,17 +170,17 @@ def test_a_pull_request_is_reviewed_end_to_end_through_the_api_reviewer(reposito
     """The adapter the action names, its client run as a tool, asking a stand-in of a provider's endpoint."""
     served = endpoint()
     home = tmp_path / "home"
-    (home / ".ao").mkdir(parents=True)
-    (home / ".ao" / "settings.json").write_text(json.dumps(
-        {"review": {"api_providers": [f"ci {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    (home / ".polyctl").mkdir(parents=True)
+    (home / ".polyctl" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"ci {served.url} POLYCTL_TEST_API_KEY"]}}), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))                    # the client reads the machine's settings, as in CI
     monkeypatch.setenv("USERPROFILE", str(home))
-    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
-    client = cli._tool_beside_interpreter("ao-api-review")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", "a-key-for-this-test")
+    client = cli._tool_beside_interpreter("polyctl-api-review")
     if client is None:
-        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+        pytest.skip("the client's script is installed with polyctl, and this interpreter has none")
     monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root, name: (
-        (client, "ao-api-review") if name == "ao-api-review" else (None, None)))
+        (client, "polyctl-api-review") if name == "polyctl-api-review" else (None, None)))
     summary = tmp_path / "summary.md"
 
     code = cli.main(["-C", repository, "ci", "review", "--base", "main", "--head", "feature", "--reviewer",

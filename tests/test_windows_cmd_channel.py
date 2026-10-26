@@ -16,11 +16,11 @@ import sys
 
 import pytest
 
-from ao import language, lib as A, watchdog as W
+from polyctl import language, lib as A, watchdog as W
 from tests.scenarios import World
 from tests.test_prompt_channel import LARGE, _linux, _private_temp
 
-NPM = "D:\\ao-home\\npm\\"      # where npm puts its CLIs; no person's home, which tracked-file hygiene refuses
+NPM = "D:\\polyctl-home\\npm\\"      # where npm puts its CLIs; no person's home, which tracked-file hygiene refuses
 # Short, and holding what cmd.exe reads as its own: a line break, a variable, quotes, `&`, `|` and `<`.
 SHORT = 'the first line\nthe second: %PATH% "quoted" & echo | more < nul'
 
@@ -184,9 +184,9 @@ def test_a_real_batch_program_is_handed_its_whole_prompt_on_standard_input(tmp_p
     out = tmp_path / "prompt.bin"
     reader = tmp_path / "read_stdin.py"
     reader.write_text("import os, sys\n"
-                      "open(os.environ['AO_TEST_OUT'], 'wb').write(sys.stdin.buffer.read())\n", encoding="utf-8")
+                      "open(os.environ['POLYCTL_TEST_OUT'], 'wb').write(sys.stdin.buffer.read())\n", encoding="utf-8")
     program = tmp_path / "claude.cmd"
-    program.write_text(f'@echo off\r\n"%AO_TEST_PY%" "%AO_TEST_SCRIPT%"\r\n', encoding="ascii")
+    program.write_text(f'@echo off\r\n"%POLYCTL_TEST_PY%" "%POLYCTL_TEST_SCRIPT%"\r\n', encoding="ascii")
     plan, argv = _rendered("claude-code", SHORT, str(program))
 
     given, why = A.prompt_input(plan, str(tmp_path / "repository"), argv)
@@ -194,8 +194,8 @@ def test_a_real_batch_program_is_handed_its_whole_prompt_on_standard_input(tmp_p
     assert all(SHORT not in part for part in given["argv"])
     try:
         done = subprocess.run(given["argv"], stdin=given["stdin"], capture_output=True, timeout=120,
-                              env=dict(os.environ, AO_TEST_PY=sys.executable, AO_TEST_SCRIPT=str(reader),
-                                       AO_TEST_OUT=str(out)))
+                              env=dict(os.environ, POLYCTL_TEST_PY=sys.executable, POLYCTL_TEST_SCRIPT=str(reader),
+                                       POLYCTL_TEST_OUT=str(out)))
     finally:
         A.release_prompt(given)
 

@@ -1,11 +1,11 @@
 """The commit hook reads an index path that starts with a drive letter as absolute (HOOK-V4).
 
-The hook ao installs is a POSIX sh script, and it told an absolute index path by its leading slash
+The hook polyctl installs is a POSIX sh script, and it told an absolute index path by its leading slash
 alone. Under Git for Windows' shell a drive-letter path - the temporary index the execution proof
 hands Git, or a linked worktree's index - was taken for a relative one and put after the directory
-Git ran the hook in, so ao read another index than the one Git commits, and refused: no proof passed
+Git ran the hook in, so polyctl read another index than the one Git commits, and refused: no proof passed
 on Windows. One ASCII letter, a colon and a slash or a backslash now start an absolute path as well.
-That is hook version 4, so the exact v3 hook reads as legacy and `ao hooks install` puts v4 in its
+That is hook version 4, so the exact v3 hook reads as legacy and `polyctl hooks install` puts v4 in its
 place. Here the lines of the hook that read the path run under sh, and Git runs no hook; on Windows
 the execution-proof tests in tests/test_hook_paths.py and tests/test_init_adoption.py run them under
 Git's own shell.
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli
+from polyctl import cli
 from tests.test_hook_paths import SHARED_HOOKS_REFUSED, _active, _git
 
 NO_BIN_SH = ("Windows has no /bin/sh; there the execution-proof tests run these lines under Git's own shell, "
@@ -25,15 +25,15 @@ NO_BIN_SH = ("Windows has no /bin/sh; there the execution-proof tests run these 
 
 # How Git names an index on Windows: the proof's temporary index, and a linked worktree's.
 DRIVE_LETTER = ("C:/repo/.git/index", "C:\\repo\\.git\\index", "c:/repo/.git/worktrees/linked/index",
-                "Z:\\temp\\ao-hook-probe-0\\index")
+                "Z:\\temp\\polyctl-hook-probe-0\\index")
 # Relative, each of them: no slash after the colon, two letters, a digit.
 RELATIVE = ("index", ".git/next-index-1.lock", "C:index", "CD:/index", "1:/index")
 
-# The v3 pre-commit hook of a project at the top of its repository, byte for byte: what ao installed,
-# and what an enrolled repository holds until `ao hooks install` replaces it.
+# The v3 pre-commit hook of a project at the top of its repository, byte for byte: what polyctl installed,
+# and what an enrolled repository holds until `polyctl hooks install` replaces it.
 V3_PRE_COMMIT = (
     b"#!/bin/sh\n"
-    b"# agent-orchestrator: ao-hook-v3 role=pre-commit binding=project-local\n"
+    b"# polyctl: polyctl-hook-v3 role=pre-commit binding=project-local\n"
     b"initial_cwd=$(CDPATH= cd -- . && pwd -P)\n"
     b'root="$initial_cwd"\n'
     b"case ${GIT_INDEX_FILE-} in\n"
@@ -44,14 +44,14 @@ V3_PRE_COMMIT = (
     b"GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM "
     b"GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS "
     b"GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS\n"
-    b'if ! git --literal-pathspecs -C "$root" ls-files --error-unmatch -- .ao-project >/dev/null 2>&1 &&\n'
-    b'   ! git --literal-pathspecs -C "$root" cat-file -e HEAD:.ao-project 2>/dev/null; then\n'
+    b'if ! git --literal-pathspecs -C "$root" ls-files --error-unmatch -- .polyctl-project >/dev/null 2>&1 &&\n'
+    b'   ! git --literal-pathspecs -C "$root" cat-file -e HEAD:.polyctl-project 2>/dev/null; then\n'
     b"  exit 0\n"
     b"fi\n"
-    b"ao=$(command -v ao) || { echo 'agent-orchestrator: ao not found' >&2; exit 1; }\n"
-    b'exec "$ao" -C "$root" commit-check\n'
+    b"polyctl=$(command -v polyctl) || { echo 'polyctl: polyctl not found' >&2; exit 1; }\n"
+    b'exec "$polyctl" -C "$root" commit-check\n'
 )
-FALLBACK = "/opt/ao tool/bin/ao"
+FALLBACK = "/opt/polyctl tool/bin/polyctl"
 INSTALL = SimpleNamespace(action="install", allow_shared_hooks=False)
 
 
@@ -71,7 +71,7 @@ def _reading(body):
 
 
 def _handed_on(body, cwd, value):
-    """GIT_INDEX_FILE as those lines leave it for ao, where Git ran the hook in `cwd` with `value` (None: unset)."""
+    """GIT_INDEX_FILE as those lines leave it for polyctl, where Git ran the hook in `cwd` with `value` (None: unset)."""
     env = {key: val for key, val in os.environ.items() if key != "GIT_INDEX_FILE"}
     if value is not None:
         env["GIT_INDEX_FILE"] = value
@@ -83,10 +83,10 @@ def _handed_on(body, cwd, value):
 
 
 def _v3_as_installed(body, fallback):
-    """A v3 body as install wrote it: naming the ao that installed it where the hook cannot travel (SAFE-REMOVE)."""
+    """A v3 body as install wrote it: naming the polyctl that installed it where the hook cannot travel (SAFE-REMOVE)."""
     if fallback is None:
         return body
-    return body.replace(cli._AO_LOOKUP.encode("utf-8"), cli._ao_lookup(fallback).encode("utf-8"), 1)
+    return body.replace(cli._POLYCTL_LOOKUP.encode("utf-8"), cli._polyctl_lookup(fallback).encode("utf-8"), 1)
 
 
 @pytest.mark.skipif(os.name == "nt", reason=NO_BIN_SH)
@@ -112,7 +112,7 @@ def test_the_v3_hook_put_the_directory_before_a_drive_letter_index(tmp_path):
 
 def test_v4_is_the_v3_hook_with_its_version_and_the_drive_letter_arm_and_nothing_else():
     arm = (b'  ""|/*) ;;\n', b'  ""|/*|[A-Za-z]:[\\\\/]*) ;;\n')
-    # The v4 bodies are kept as the legacy ao reads them as since the v5 guard (LEADS-GATE).
+    # The v4 bodies are kept as the legacy polyctl reads them as since the v5 guard (LEADS-GATE).
     pairs = [(cli._render_v3_local_hook(role, rel), cli._render_v4_local_hook(role, rel))
              for role in ("pre-commit", "pre-push") for rel in (".", "sub dir")]
     pairs += [(cli._render_v3_scoped_hook(role, ".", "/repo/.git", binding),
@@ -122,7 +122,7 @@ def test_v4_is_the_v3_hook_with_its_version_and_the_drive_letter_arm_and_nothing
     assert cli._render_v3_local_hook("pre-commit", ".") == V3_PRE_COMMIT
     for v3, v4 in pairs:
         assert v3.count(arm[0]) == 1
-        assert v3.replace(b"ao-hook-v3 ", b"ao-hook-v4 ").replace(*arm) == v4
+        assert v3.replace(b"polyctl-hook-v3 ", b"polyctl-hook-v4 ").replace(*arm) == v4
 
 
 @pytest.mark.parametrize(("hooks_path", "fallback"), ((None, FALLBACK), (".githooks", None)),
@@ -131,45 +131,45 @@ def test_an_exact_v3_hook_reads_as_legacy_and_install_puts_the_current_hook_in_i
     root = project["root"]
     if hooks_path:
         _git(root, "config", "core.hooksPath", hooks_path)
-    hooks = Path(cli._ao_hook_inventory(root)["active_dir"])
+    hooks = Path(cli._polyctl_hook_inventory(root)["active_dir"])
     hooks.mkdir(parents=True, exist_ok=True)
     for role in ("pre-commit", "pre-push"):
         (hooks / role).write_bytes(_v3_as_installed(cli._render_v3_local_hook(role, "."), fallback))
 
-    before = cli._ao_hook_inventory(root)
+    before = cli._polyctl_hook_inventory(root)
     finding = dict(cli.doctor_problems(project))["commit-hook"]
 
     assert [(_active(before, role)["static_state"], _active(before, role)["eligible"])
             for role in ("pre-commit", "pre-push")] == [("legacy (behavior unverified)", True)] * 2
-    assert "legacy (behavior unverified)" in finding and "ao hooks install" in finding
+    assert "legacy (behavior unverified)" in finding and "polyctl hooks install" in finding
     assert cli.cmd_hooks(project, INSTALL) == 0
-    after = cli._ao_hook_inventory(root)
+    after = cli._polyctl_hook_inventory(root)
     for role in ("pre-commit", "pre-push"):
         target = _active(after, role)
         assert target["static_state"] == "current-local (behavior unverified)"
         assert (hooks / role).read_bytes() == target["body"]
-        assert b"# agent-orchestrator: ao-hook-v7 " in target["body"]
+        assert b"# polyctl: polyctl-hook-v7 " in target["body"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason=SHARED_HOOKS_REFUSED)
 def test_an_exact_v3_shared_hook_reads_as_legacy_and_install_puts_the_current_hook_in_its_place(project, tmp_path):
     root = project["root"]
     _git(root, "worktree", "add", "-q", "-b", "linked", str(tmp_path / "linked"))
-    shared = cli._ao_hook_inventory(root)
+    shared = cli._polyctl_hook_inventory(root)
     hooks = Path(shared["active_dir"])
     for role in ("pre-commit", "pre-push"):
         body = cli._render_v3_scoped_hook(role, ".", shared["common_dir"], "shared")
         (hooks / role).write_bytes(_v3_as_installed(body, FALLBACK))
 
-    before = cli._ao_hook_inventory(root)
+    before = cli._polyctl_hook_inventory(root)
 
     assert before["directory_class"] == "shared"
     assert [_active(before, role)["static_state"] for role in ("pre-commit", "pre-push")] == \
         ["legacy (behavior unverified)"] * 2
     assert cli.cmd_hooks(project, SimpleNamespace(action="install", allow_shared_hooks=True)) == 0
-    after = cli._ao_hook_inventory(root)
+    after = cli._polyctl_hook_inventory(root)
     for role in ("pre-commit", "pre-push"):
         target = _active(after, role)
         assert target["static_state"] == "current-scoped (behavior unverified)"
         assert (hooks / role).read_bytes() == target["body"]
-        assert b"# agent-orchestrator: ao-hook-v7 " in target["body"]
+        assert b"# polyctl: polyctl-hook-v7 " in target["body"]

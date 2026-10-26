@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, mcp, settings as S, storage
+from polyctl import cli, lib as A, mcp, settings as S, storage
 
 
 @pytest.mark.parametrize("adapter, model, family", [
@@ -44,13 +44,13 @@ def test_reviewer_urgency_does_not_block_an_implementer_that_cannot_ack_it(proje
                                             to="reviewer", urgent=urgent)) == 0
     root = cfg["root"]
     [name] = A.mailbox(root, cfg["mailbox"])
-    assert mcp.call("ao_inbox", {}, cfg, False, "implementer")["messages"] == []
-    assert "not addressed to the implementer" in mcp.call("ao_ack", {"id": name}, cfg, False, "implementer")["error"]
+    assert mcp.call("polyctl_inbox", {}, cfg, False, "implementer")["messages"] == []
+    assert "not addressed to the implementer" in mcp.call("polyctl_ack", {"id": name}, cfg, False, "implementer")["error"]
     assert A.urgent_messages(root, cfg) == []
     assert [(message["id"], message["to"]) for message in A.urgent_messages(root, cfg, None)] == [(name, "reviewer")]
     mine = A.note(root, cfg, "implementer", "implementer action", "act on this", urgent=True)
     assert [message["id"] for message in A.urgent_messages(root, cfg)] == [mine]
-    assert mcp.call("ao_ack", {"id": mine}, cfg, False, "implementer")["acknowledged"] == mine
+    assert mcp.call("polyctl_ack", {"id": mine}, cfg, False, "implementer")["acknowledged"] == mine
     assert A.urgent_messages(root, cfg) == []
 
 

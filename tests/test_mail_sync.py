@@ -5,14 +5,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 
 def _store(project, sync_repo):
     root = project["root"]
     stored = {key: value for key, value in project.items() if key != "root"}
     stored["mail"] = {"store": "append-only", "sync_repo": sync_repo}
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(stored, fh)
     cfg = A.load_config(root)
     token = "gh" + "p_" + "B" * 36
@@ -43,11 +43,11 @@ def test_the_store_syncs_scanned_to_a_private_repository_under_its_project_ref(p
     assert where == f"{bare} {ref}"
     assert subprocess.run(["git", "--git-dir", str(bare), "rev-parse", ref], capture_output=True, text=True,
                           check=True).stdout.strip() == commit
-    body = subprocess.run(["git", "--git-dir", str(bare), "show", f"{ref}:.ao/mail/store/20260916-0900-fable-to-kiro-NOTE-a.md"],
+    body = subprocess.run(["git", "--git-dir", str(bare), "show", f"{ref}:.polyctl/mail/store/20260916-0900-fable-to-kiro-NOTE-a.md"],
                           capture_output=True, text=True, check=True).stdout
     assert "[redacted:" in body and "gh" + "p_" not in body
     assert A.mail_sync_state(root, cfg) == (commit, commit, None)
-    assert "refs/ao/mail" not in subprocess.run(["git", "for-each-ref", "refs/heads"], cwd=root, capture_output=True,
+    assert "refs/polyctl/mail" not in subprocess.run(["git", "for-each-ref", "refs/heads"], cwd=root, capture_output=True,
                                                 text=True).stdout
 
 
@@ -89,13 +89,13 @@ def test_a_compacted_body_is_scanned_before_it_leaves(project, tmp_path):
     A.sync_mail(root, cfg)
 
     blob = subprocess.run(["git", "--git-dir", str(tmp_path / "all-mail.git"), "show",
-                           f"refs/mail/{A.project_key(root)}:.ao/mail/archive/{name}.gz"],
+                           f"refs/mail/{A.project_key(root)}:.polyctl/mail/archive/{name}.gz"],
                           capture_output=True, check=True).stdout
     assert b"gh" + b"p_" not in gzip.decompress(blob) and b"[redacted:" in gzip.decompress(blob)
 
 
 def test_mail_stored_after_a_sync_or_never_synced_is_reported_ahead_of_its_copy(project, tmp_path, monkeypatch):
-    """MAIL-SYNC-2: only `ao mail sync` moves the ref the doctor compared, so mail stored since read as synced."""
+    """MAIL-SYNC-2: only `polyctl mail sync` moves the ref the doctor compared, so mail stored since read as synced."""
     root, cfg = _store(project, str(_bare(tmp_path)))
     local, remote, problem = A.mail_sync_state(root, cfg)
     assert local == "unsynced" and remote is None and problem is None                    # never synced
@@ -198,7 +198,7 @@ def test_github_answers_only_for_a_repository_on_github_itself(project, monkeypa
 
 
 def test_an_option_in_place_of_a_repository_never_reaches_git(project, tmp_path, monkeypatch):
-    """`--upload-pack=<command>` as mail.sync_repo was handed to `git ls-remote`, and every `ao doctor` ran it."""
+    """`--upload-pack=<command>` as mail.sync_repo was handed to `git ls-remote`, and every `polyctl doctor` ran it."""
     marker = tmp_path / "ran"
     root, cfg = _store(project, f"--upload-pack=touch {marker}")
     _never_pushed(monkeypatch)
@@ -221,7 +221,7 @@ def test_the_products_own_remote_is_refused_whatever_the_case_of_its_suffix(proj
 
 
 def test_a_governance_backup_remote_is_judged_by_the_url_it_pushes_to_on_github_itself(project, monkeypatch):
-    """`ao backup --to remote:<name>` asked GitHub about the fetch URL, matched anywhere in it, and pushed to the
+    """`polyctl backup --to remote:<name>` asked GitHub about the fetch URL, matched anywhere in it, and pushed to the
     pushurl."""
     import shutil
     root = project["root"]

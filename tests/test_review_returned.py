@@ -2,7 +2,7 @@ import re
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 
 def _returned(root, rid, minutes_ago, **fields):
@@ -12,7 +12,7 @@ def _returned(root, rid, minutes_ago, **fields):
     cli._write_review_state(root, state)
 
 
-def test_ao_status_names_a_returned_review_until_it_is_collected(project, monkeypatch, capsys):
+def test_polyctl_status_names_a_returned_review_until_it_is_collected(project, monkeypatch, capsys):
     root = project["root"]
     monkeypatch.setattr(A, "quota", lambda adapter, ttl=300: [])   # no real keyflip: status asks it for the quota
     _returned(root, "R-1", 5)

@@ -1,18 +1,18 @@
-"""Where ao had a person type, print or keep a secret, it no longer does (LEADS-SECRETS).
+"""Where polyctl had a person type, print or keep a secret, it no longer does (LEADS-SECRETS).
 
-ao's bug hunter and another slice's agent named six leads on 2026-10-12, all real. `ao telegram setup` had a person
+polyctl's bug hunter and another slice's agent named six leads on 2026-10-12, all real. `polyctl telegram setup` had a person
 put the bot token into a curl command line - on Windows a PowerShell one - to find their chat id, then echo the file
-into ~/.ao and chmod it: the shell's history and the process list kept the token, and anyone on the machine could read
-the file until the chmod. `ao telegram install`, `uninstall` and `status` refused on Windows alone, so on Linux they
-wrote into a ~/Library/LaunchAgents that is not there and asked for launchctl. `ao pings` printed the whole ping URL,
-whose UUID is all it takes to ping the check. `.ao/a2a-agents.json` held an agent's Authorization header in a file a
-commit takes. And `ao handoff` named its note by the minute and nothing else, so a second handoff in the same minute
+into ~/.polyctl and chmod it: the shell's history and the process list kept the token, and anyone on the machine could read
+the file until the chmod. `polyctl telegram install`, `uninstall` and `status` refused on Windows alone, so on Linux they
+wrote into a ~/Library/LaunchAgents that is not there and asked for launchctl. `polyctl pings` printed the whole ping URL,
+whose UUID is all it takes to ping the check. `.polyctl/a2a-agents.json` held an agent's Authorization header in a file a
+commit takes. And `polyctl handoff` named its note by the minute and nothing else, so a second handoff in the same minute
 was written over the first.
 
-ao asks for the bot token at the terminal and does not show it, finds the chats that wrote to the bot with it, and
-writes ~/.ao/telegram.json itself, 0600 from its creation; a script names the variable that holds the token. The
-poller's commands refuse wherever there is no launchd, and say what keeps it running there. `ao pings` shows where
-the pings go and the last four characters. A header in `.ao/a2a-agents.json` names the variable that holds its value,
+polyctl asks for the bot token at the terminal and does not show it, finds the chats that wrote to the bot with it, and
+writes ~/.polyctl/telegram.json itself, 0600 from its creation; a script names the variable that holds the token. The
+poller's commands refuse wherever there is no launchd, and say what keeps it running there. `polyctl pings` shows where
+the pings go and the last four characters. A header in `.polyctl/a2a-agents.json` names the variable that holds its value,
 and a credential written out there is refused. A handoff takes a name no mail had. Nothing here reaches Telegram, a
 health check or an agent: every request is faked.
 """
@@ -29,7 +29,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import a2a_mcp, cli, language, lib as A, telegram
+from polyctl import a2a_mcp, cli, language, lib as A, telegram
 
 TOKEN = "123456789:AAH-dqTcvCH1vGWJxfSeofSAs0K5PALDsaw"
 ADA = {"update_id": 7, "message": {"text": "hello", "chat": {"id": 42, "type": "private", "first_name": "Ada",
@@ -46,15 +46,15 @@ def _plain(capsys):
 
 @pytest.fixture
 def conf(project, monkeypatch, tmp_path):
-    """~/.ao/telegram.json of the project's own home, where no ~/.ao is yet."""
-    path = tmp_path / "home" / ".ao" / "telegram.json"
+    """~/.polyctl/telegram.json of the project's own home, where no ~/.polyctl is yet."""
+    path = tmp_path / "home" / ".polyctl" / "telegram.json"
     monkeypatch.setattr(telegram, "CONF", str(path))
     return path
 
 
 @pytest.fixture
 def telegram_api(monkeypatch):
-    """Telegram, faked: the requests ao makes of it, and the updates it answers getUpdates with."""
+    """Telegram, faked: the requests polyctl makes of it, and the updates it answers getUpdates with."""
     asked, updates = [], [ADA, STRANGER]
 
     def api(conf, method, **params):
@@ -95,7 +95,7 @@ def _created(monkeypatch, directory):
     return opened
 
 
-# ---- ao telegram setup: the token asked unseen, the chats found with it, the file written by ao --------------
+# ---- polyctl telegram setup: the token asked unseen, the chats found with it, the file written by polyctl --------------
 
 def test_the_setup_asks_for_the_token_unseen_and_writes_the_file_private_from_its_creation(project, conf,
                                                                                            telegram_api,
@@ -109,7 +109,7 @@ def test_the_setup_asks_for_the_token_unseen_and_writes_the_file_private_from_it
     assert prompts == ["bot token (not shown): ", "chats it allows, their ids separated by spaces: "]
     assert [(token, method) for token, method, _ in telegram_api] == [(TOKEN, "getUpdates")]
     assert "            42  Ada (@ada)" in out and "      -1001234  Ops[31m room" in out   # no escape reaches it
-    assert f"saved {conf} ({cli._private_mode()}): 1 chat(s) allowed" in out and "now: ao telegram test" in out
+    assert f"saved {conf} ({cli._private_mode()}): 1 chat(s) allowed" in out and "now: polyctl telegram test" in out
     assert TOKEN not in out and not [old for old in OLD_STEPS if old in out]
     assert json.loads(conf.read_text(encoding="utf-8")) == {"token": TOKEN, "chats": ["42"]}
     assert telegram.config() == {"token": TOKEN, "chats": ["42"]}
@@ -142,21 +142,21 @@ def test_without_a_terminal_the_setup_asks_nothing_and_says_how_a_script_names_t
     assert _setup(project) == 0
     out = _plain(capsys)
     kept = language.text(None, "private-file.kept-windows" if os.name == "nt" else "private-file.kept")
-    assert "3. You give ao the token when it asks — a bot token is a credential: it is not shown" in out
+    assert "3. You give polyctl the token when it asks — a bot token is a credential: it is not shown" in out
     assert f"it writes {conf} itself, {kept}." in out
-    assert "4. ao telegram test → ao telegram install" in out
-    assert "No terminal is attached, so ao asks for nothing" in out and "--token-env NAME --chat ID" in out
+    assert "4. polyctl telegram test → polyctl telegram install" in out
+    assert "No terminal is attached, so polyctl asks for nothing" in out and "--token-env NAME --chat ID" in out
     assert not [old for old in OLD_STEPS if old in out] and not conf.exists()
 
     assert _setup(project, chat=["42"]) == 2
     assert ("not saved: the bot token is asked at a terminal, and none is attached; --token-env names a variable "
             "that holds it") in _plain(capsys)
-    assert _setup(project, chat=["42"], token_env="AO_TEST_TELEGRAM_TOKEN") == 2
-    assert "not saved: $AO_TEST_TELEGRAM_TOKEN is not set" in _plain(capsys)
+    assert _setup(project, chat=["42"], token_env="POLYCTL_TEST_TELEGRAM_TOKEN") == 2
+    assert "not saved: $POLYCTL_TEST_TELEGRAM_TOKEN is not set" in _plain(capsys)
     assert not conf.exists()
 
-    monkeypatch.setenv("AO_TEST_TELEGRAM_TOKEN", TOKEN)
-    assert _setup(project, chat=["42", "42"], token_env="AO_TEST_TELEGRAM_TOKEN") == 0     # named: nothing is asked
+    monkeypatch.setenv("POLYCTL_TEST_TELEGRAM_TOKEN", TOKEN)
+    assert _setup(project, chat=["42", "42"], token_env="POLYCTL_TEST_TELEGRAM_TOKEN") == 0     # named: nothing is asked
     assert telegram.config() == {"token": TOKEN, "chats": ["42"]}
     assert TOKEN not in _plain(capsys)
 
@@ -164,9 +164,9 @@ def test_without_a_terminal_the_setup_asks_nothing_and_says_how_a_script_names_t
 def test_a_script_that_names_no_chat_is_told_the_chats_that_wrote_and_saves_nothing(project, conf, telegram_api,
                                                                                     monkeypatch, capsys):
     _at_a_terminal(monkeypatch, False)
-    monkeypatch.setenv("AO_TEST_TELEGRAM_TOKEN", TOKEN)
+    monkeypatch.setenv("POLYCTL_TEST_TELEGRAM_TOKEN", TOKEN)
 
-    assert _setup(project, token_env="AO_TEST_TELEGRAM_TOKEN") == 2
+    assert _setup(project, token_env="POLYCTL_TEST_TELEGRAM_TOKEN") == 2
 
     out = _plain(capsys)
     assert "chats that wrote to the bot:" in out and "42  Ada (@ada)" in out
@@ -206,8 +206,8 @@ def test_what_telegram_refuses_is_said_without_the_token(project, conf, monkeypa
 # ---- the poller: a launchd job, refused wherever there is no launchd --------------------------------------------
 
 @pytest.mark.parametrize("scheduler, said", [
-    ("systemd", "Linux does not have; keep `ao telegram poll` running as a systemd user service instead"),
-    ("schtasks", "Windows does not have; schedule `ao telegram poll` with Task Scheduler instead"),
+    ("systemd", "Linux does not have; keep `polyctl telegram poll` running as a systemd user service instead"),
+    ("schtasks", "Windows does not have; schedule `polyctl telegram poll` with Task Scheduler instead"),
 ])
 def test_the_poller_is_refused_wherever_there_is_no_launchd(project, monkeypatch, capsys, scheduler, said):
     monkeypatch.setattr(cli, "_scheduler", lambda: scheduler)
@@ -222,10 +222,10 @@ def test_the_poller_is_refused_wherever_there_is_no_launchd(project, monkeypatch
     monkeypatch.setattr(telegram, "api", lambda *args, **kwargs: pytest.fail("Telegram was asked"))
     _at_a_terminal(monkeypatch, False)
     assert _setup(project) == 0
-    assert "4. ao telegram test → ao telegram poll" in _plain(capsys)
+    assert "4. polyctl telegram test → polyctl telegram poll" in _plain(capsys)
 
 
-# ---- ao pings: where the pings go, never the secret ---------------------------------------------------------------
+# ---- polyctl pings: where the pings go, never the secret ---------------------------------------------------------------
 
 @pytest.mark.parametrize("url, shown", [
     ("https://hc-ping.com/1f0e7c55-9a3b-4c7e-8d2a-6b5f4e3d2c1a", "https://…"),
@@ -234,7 +234,7 @@ def test_the_poller_is_refused_wherever_there_is_no_launchd(project, monkeypatch
     ("hc-ping.com/1f0e7c55-9a3b-4c7e-8d2a-6b5f4e3d2c1a", "…"),
     ("https://hc-ping.com:port/1f0e7c55-9a3b-4c7e-8d2a-6b5f4e3d2c1a", "https://…"),
 ])
-def test_ao_pings_shows_where_the_pings_go_and_never_the_secret(project, monkeypatch, tmp_path, capsys, url, shown):
+def test_polyctl_pings_shows_where_the_pings_go_and_never_the_secret(project, monkeypatch, tmp_path, capsys, url, shown):
     monkeypatch.setattr(A, "pings_path", lambda: str(tmp_path / "pings.json"))
     assert cli.cmd_pings(project, SimpleNamespace(action="status", url=None, all=False)) == 0
     assert _plain(capsys) == "ping url: not configured\n"
@@ -247,7 +247,7 @@ def test_ao_pings_shows_where_the_pings_go_and_never_the_secret(project, monkeyp
     assert "9a3b-4c7e" not in out and "someone" not in out and "pw@" not in out
 
 
-# ---- .ao/a2a-agents.json: a header names the variable that holds it -----------------------------------------------
+# ---- .polyctl/a2a-agents.json: a header names the variable that holds it -----------------------------------------------
 
 @pytest.fixture
 def bridge(project, monkeypatch, tmp_path):
@@ -267,8 +267,8 @@ def bridge(project, monkeypatch, tmp_path):
     monkeypatch.setattr(a2a_mcp, "ROOT", project["root"])
 
     def register(headers, where="project"):
-        path = (os.path.join(project["root"], ".ao", "a2a-agents.json") if where == "project"
-                else os.path.join(A.HOME, ".ao", "a2a-agents.json"))
+        path = (os.path.join(project["root"], ".polyctl", "a2a-agents.json") if where == "project"
+                else os.path.join(A.HOME, ".polyctl", "a2a-agents.json"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"weather": {"url": "http://127.0.0.1:9/a2a", "version": "1.0", "headers": headers}}, fh)
@@ -279,9 +279,9 @@ def bridge(project, monkeypatch, tmp_path):
 
 def test_a_header_takes_its_value_from_the_variable_it_names(bridge, monkeypatch):
     register, sent = bridge
-    register({"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}"}, where="machine")      # the machine's file binds it
-    register({"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}", "X-Tenant": "acme"})
-    monkeypatch.setenv("AO_TEST_A2A_TOKEN", "from-the-env")
+    register({"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}"}, where="machine")      # the machine's file binds it
+    register({"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}", "X-Tenant": "acme"})
+    monkeypatch.setenv("POLYCTL_TEST_A2A_TOKEN", "from-the-env")
 
     view = a2a_mcp.call("a2a_send", {"agent": "weather", "message": "hello"})
     listed = a2a_mcp.call("a2a_agents", {})
@@ -293,12 +293,12 @@ def test_a_header_takes_its_value_from_the_variable_it_names(bridge, monkeypatch
 
 def test_a_variable_that_is_not_set_is_named_and_nothing_is_sent(bridge, monkeypatch):
     register, sent = bridge
-    register({"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}"})
-    monkeypatch.delenv("AO_TEST_A2A_TOKEN", raising=False)
+    register({"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}"})
+    monkeypatch.delenv("POLYCTL_TEST_A2A_TOKEN", raising=False)
 
     refused = a2a_mcp.call("a2a_send", {"agent": "weather", "message": "hello"})
 
-    assert refused == {"error": "agent weather: its Authorization header names ${AO_TEST_A2A_TOKEN}, which is not set "
+    assert refused == {"error": "agent weather: its Authorization header names ${POLYCTL_TEST_A2A_TOKEN}, which is not set "
                                 "where the bridge runs: set it in the environment the MCP client starts the bridge "
                                 "with"}
     assert sent == []
@@ -312,7 +312,7 @@ def test_a_credential_written_into_the_projects_file_is_refused_and_the_machines
     refused = a2a_mcp.call("a2a_send", {"agent": "weather", "message": "hello"})
     listed = a2a_mcp.call("a2a_agents", {})
 
-    assert "written into .ao/a2a-agents.json, which a commit takes with the project" in refused["error"]
+    assert "written into .polyctl/a2a-agents.json, which a commit takes with the project" in refused["error"]
     assert "\"Bearer ${NAME}\"" in refused["error"] and "written-here" not in json.dumps([refused, listed])
     assert listed["agents"] == [{"id": "weather", "url": "http://127.0.0.1:9", "error": refused["error"],
                                  "reachable": False}]
@@ -330,9 +330,9 @@ def test_a_credential_written_into_the_projects_file_is_refused_and_the_machines
 
 def test_a_value_with_a_line_break_is_refused_without_being_quoted(bridge, monkeypatch):
     register, sent = bridge
-    register({"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}"}, where="machine")
-    register({"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}"})
-    monkeypatch.setenv("AO_TEST_A2A_TOKEN", "first\r\nX-Injected: second")
+    register({"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}"}, where="machine")
+    register({"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}"})
+    monkeypatch.setenv("POLYCTL_TEST_A2A_TOKEN", "first\r\nX-Injected: second")
 
     refused = a2a_mcp.call("a2a_send", {"agent": "weather", "message": "hello"})
 
@@ -341,20 +341,20 @@ def test_a_value_with_a_line_break_is_refused_without_being_quoted(bridge, monke
 
 
 def test_a_variable_goes_only_to_an_origin_the_machines_file_sends_it_to(bridge, monkeypatch, project):
-    """An agent can write .ao/a2a-agents.json: one that kept the header and named its own host had the bridge send
+    """An agent can write .polyctl/a2a-agents.json: one that kept the header and named its own host had the bridge send
     the person's token there (LEADS-SECRETS)."""
     register, sent = bridge
-    monkeypatch.setenv("AO_TEST_A2A_TOKEN", "the-persons")
-    register({"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}"})                       # no machine file binds it
+    monkeypatch.setenv("POLYCTL_TEST_A2A_TOKEN", "the-persons")
+    register({"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}"})                       # no machine file binds it
 
     unbound = a2a_mcp.call("a2a_send", {"agent": "weather", "message": "hello"})
 
     assert "sends to no agent at http://127.0.0.1:9" in unbound["error"] and sent == []
-    register({"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}"}, where="machine")
-    path = os.path.join(project["root"], ".ao", "a2a-agents.json")
+    register({"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}"}, where="machine")
+    path = os.path.join(project["root"], ".polyctl", "a2a-agents.json")
     with open(path, "w", encoding="utf-8") as fh:                                    # the agent moves the URL
         json.dump({"weather": {"url": "https://collector.example:8443/a2a", "version": "1.0",
-                               "headers": {"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}"}}}, fh)
+                               "headers": {"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}"}}}, fh)
 
     moved = a2a_mcp.call("a2a_send", {"agent": "weather", "message": "hello"})
     listed = a2a_mcp.call("a2a_agents", {})
@@ -365,7 +365,7 @@ def test_a_variable_goes_only_to_an_origin_the_machines_file_sends_it_to(bridge,
 
 
 def test_the_config_command_shows_a_header_naming_its_variable(project, monkeypatch, capsys):
-    monkeypatch.setattr(A, "ao_program", lambda: "ao")
+    monkeypatch.setattr(A, "polyctl_program", lambda: "polyctl")
 
     assert cli.cmd_a2a_mcp(project, SimpleNamespace(action="config")) == 0
 
@@ -374,10 +374,10 @@ def test_the_config_command_shows_a_header_naming_its_variable(project, monkeypa
     assert "${NAME} is read from the environment the client starts the bridge with" in out
 
 
-# ---- ao handoff: a second note in the same minute is a second note ------------------------------------------------
+# ---- polyctl handoff: a second note in the same minute is a second note ------------------------------------------------
 
 class _Now(datetime):
-    """The clock `ao handoff` stamps its note with, stopped at one minute."""
+    """The clock `polyctl handoff` stamps its note with, stopped at one minute."""
 
     @classmethod
     def now(cls, tz=None):
@@ -439,9 +439,9 @@ def test_an_agent_that_echoes_the_credential_it_was_sent_has_it_answered_as_cred
     """What an agent answers is its own text: one that echoed its header had the bridge hand the person's token to
     the model that called it, and to the notice it records (LEADS-SECRETS)."""
     register, sent = bridge
-    register({"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}"}, where="machine")
-    register({"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}"})
-    monkeypatch.setenv("AO_TEST_A2A_TOKEN", "the-token")
+    register({"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}"}, where="machine")
+    register({"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}"})
+    monkeypatch.setenv("POLYCTL_TEST_A2A_TOKEN", "the-token")
     answers = iter([
         {"jsonrpc": "2.0", "id": 1, "error": {"code": -32000, "message": "refused Bearer the-token"}},
         {"jsonrpc": "2.0", "id": 1, "result": {"id": "t-the-token", "status": {
@@ -455,7 +455,7 @@ def test_an_agent_that_echoes_the_credential_it_was_sent_has_it_answered_as_cred
     assert sent and all(headers["Authorization"] == "Bearer the-token" for headers in sent)
     answered = json.dumps([refused, taken])
     assert "the-token" not in answered and "[credential]" in answered
-    notices = open(os.path.join(project["root"], ".ao", "ledger", "notices.jsonl"), encoding="utf-8").read()
+    notices = open(os.path.join(project["root"], ".polyctl", "ledger", "notices.jsonl"), encoding="utf-8").read()
     assert "the-token" not in notices
 
 
@@ -490,9 +490,9 @@ def test_a_short_value_a_variable_holds_is_sent_in_no_header(bridge, monkeypatch
     """A variable holds a credential whatever its header is called; one too short to hide was sent in a header
     whose name said nothing of a credential, and an echo of it came back unhidden (LEADS-SECRETS)."""
     register, sent = bridge
-    register({"X-Partner": "${AO_TEST_A2A_TOKEN}"}, where="machine")
-    register({"X-Partner": "${AO_TEST_A2A_TOKEN}"})
-    monkeypatch.setenv("AO_TEST_A2A_TOKEN", "key42")
+    register({"X-Partner": "${POLYCTL_TEST_A2A_TOKEN}"}, where="machine")
+    register({"X-Partner": "${POLYCTL_TEST_A2A_TOKEN}"})
+    monkeypatch.setenv("POLYCTL_TEST_A2A_TOKEN", "key42")
 
     refused = a2a_mcp.call("a2a_send", {"agent": "weather", "message": "hello"})
 
@@ -502,9 +502,9 @@ def test_a_short_value_a_variable_holds_is_sent_in_no_header(bridge, monkeypatch
 def test_the_answer_is_hidden_by_the_registry_the_request_was_made_from(bridge, monkeypatch, project):
     """Read twice, the registry could change between the request and the reading of what to hide (LEADS-SECRETS)."""
     register, sent = bridge
-    register({"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}"}, where="machine")
-    register({"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}"})
-    monkeypatch.setenv("AO_TEST_A2A_TOKEN", "the-token")
+    register({"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}"}, where="machine")
+    register({"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}"})
+    monkeypatch.setenv("POLYCTL_TEST_A2A_TOKEN", "the-token")
     reads = []
     real = a2a_mcp.registry
     monkeypatch.setattr(a2a_mcp, "registry", lambda: reads.append(1) or real())
@@ -533,8 +533,8 @@ def test_a_project_registry_gone_after_its_reading_is_still_judged_the_projects(
     """Told apart by a second look, a project file renamed away after it was read was taken for the machine's, and
     its URL sent the person's variable with no origin bound to it (LEADS-SECRETS)."""
     register, sent = bridge
-    register({"Authorization": "Bearer ${AO_TEST_A2A_TOKEN}"})          # no machine file binds the variable
-    monkeypatch.setenv("AO_TEST_A2A_TOKEN", "the-persons")
+    register({"Authorization": "Bearer ${POLYCTL_TEST_A2A_TOKEN}"})          # no machine file binds the variable
+    monkeypatch.setenv("POLYCTL_TEST_A2A_TOKEN", "the-persons")
     monkeypatch.setattr(a2a_mcp.os.path, "exists", lambda path: False)   # gone by the time anything looks again
 
     refused = a2a_mcp.call("a2a_send", {"agent": "weather", "message": "hello"})
@@ -544,7 +544,7 @@ def test_a_project_registry_gone_after_its_reading_is_still_judged_the_projects(
 
 def test_an_agents_url_is_answered_with_no_credential_it_carries(bridge, monkeypatch, project):
     register, sent = bridge
-    path = os.path.join(A.HOME, ".ao", "a2a-agents.json")
+    path = os.path.join(A.HOME, ".polyctl", "a2a-agents.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         json.dump({"weather": {"url": "https://user:pass-word-9@agent.example:8443/a2a/path-value-2?code=query-value-1#x",

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ao import cli, lib as A, skillkit, storage
+from polyctl import cli, lib as A, skillkit, storage
 from tests.test_leads_adapters import _can_link, _fresh_repository
 from tests.test_profiles import _init_args
 
@@ -54,18 +54,18 @@ def test_first_config_appearing_at_create_is_kept(tmp_path, monkeypatch, capsys)
     appeared = []
 
     def race(operation, where, rel, data, **kwargs):
-        if rel == ".ao/config.json" and not appeared:
+        if rel == ".polyctl/config.json" and not appeared:
             appeared.append(True)
-            (root / ".ao").mkdir(exist_ok=True)
+            (root / ".polyctl").mkdir(exist_ok=True)
             (root / rel).write_bytes(theirs)
         return operation(where, rel, data, **kwargs)
 
     monkeypatch.setattr(storage, "create_in_tree", lambda *a, **kw: race(real_create, *a, **kw))
     monkeypatch.setattr(storage, "replace_in_tree", lambda *a, **kw: race(real_replace, *a, **kw))
     code = cli.cmd_init({"root": str(root)}, _init_args(profile=None))
-    assert appeared and (root / ".ao/config.json").read_bytes() == theirs
+    assert appeared and (root / ".polyctl/config.json").read_bytes() == theirs
     assert code == 1 and "appeared while init ran" in capsys.readouterr().out
-    assert not (root / ".ao/board.md").exists()
+    assert not (root / ".polyctl/board.md").exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows keeps no POSIX mode")
@@ -88,9 +88,9 @@ def test_opt_in_folder_swapped_after_preflight_writes_nothing_outside(tmp_path, 
     outside.mkdir()
     real = A.record_opt_in
     def swapped(where, *args):
-        ledger = root / ".ao/ledger"
+        ledger = root / ".polyctl/ledger"
         if ledger.exists():
-            ledger.rename(root / ".ao/ledger-moved")
+            ledger.rename(root / ".polyctl/ledger-moved")
         ledger.symlink_to(outside, target_is_directory=True)
         return real(where, *args)
     monkeypatch.setattr(A, "record_opt_in", swapped)
@@ -103,7 +103,7 @@ def test_opt_in_folder_swapped_after_preflight_writes_nothing_outside(tmp_path, 
 def test_opt_in_refuses_leaf_link(project, tmp_path, leaf):
     _can_link(tmp_path)
     root = Path(project["root"])
-    directory = root / ".ao/ledger"
+    directory = root / ".polyctl/ledger"
     directory.mkdir(exist_ok=True)
     outside = tmp_path / "outside"
     (directory / leaf).symlink_to(outside)
@@ -128,10 +128,10 @@ def test_known_mcp_format_never_runs_vendor(project, monkeypatch):
     monkeypatch.setattr(A, "program_path", lambda *a, **kw: "/standin/vendor")
     monkeypatch.setattr(skillkit.subprocess, "run",
                         lambda *a, **kw: calls.append(a) or type("Result", (), {"returncode": 0})())
-    assert skillkit.register_mcp(project["root"], {"kiro"}, exe="/x/ao") == {"kiro": "registered"}
+    assert skillkit.register_mcp(project["root"], {"kiro"}, exe="/x/polyctl") == {"kiro": "registered"}
     assert calls == []
     path = Path(project["root"]) / ".kiro/settings/mcp.json"
-    assert json.loads(path.read_text(encoding="utf-8"))["mcpServers"]["ao"]["command"] == "/x/ao"
+    assert json.loads(path.read_text(encoding="utf-8"))["mcpServers"]["polyctl"]["command"] == "/x/polyctl"
 
 
 def test_unknown_mcp_format_refuses_and_names_command(tmp_path, monkeypatch, capsys):
@@ -140,7 +140,7 @@ def test_unknown_mcp_format_refuses_and_names_command(tmp_path, monkeypatch, cap
     adapter["mcp"] = dict(adapter["mcp"], file=".kiro/settings/mcp.unknown", format="unknown")
     monkeypatch.setattr(skillkit, "setup_adapters", lambda *a, **kw: [("kiro", adapter)])
     monkeypatch.setattr(A, "program_path", lambda *a, **kw: "/standin/kiro-cli")
-    monkeypatch.setattr(A, "ao_program", lambda: "/x/ao")
+    monkeypatch.setattr(A, "polyctl_program", lambda: "/x/polyctl")
     calls = []
     original = subprocess.run
     def run(argv, *args, **kwargs):
@@ -291,7 +291,7 @@ def test_windows_api_contract_and_lifetime_on_every_platform(tmp_path, monkeypat
 def test_opt_in_swap_after_folder_held_stays_in_held_folder(project, tmp_path, monkeypatch, when):
     _can_link(tmp_path)
     root = Path(project["root"])
-    ledger = root / ".ao/ledger"
+    ledger = root / ".polyctl/ledger"
     ledger.mkdir(exist_ok=True)
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -301,7 +301,7 @@ def test_opt_in_swap_after_folder_held_stays_in_held_folder(project, tmp_path, m
     def opened(path, flags, *args, **kwargs):
         fd = original(path, flags, *args, **kwargs)
         if not swapped and os.path.basename(path) == trigger:
-            ledger.rename(root / ".ao/ledger-moved")
+            ledger.rename(root / ".polyctl/ledger-moved")
             ledger.symlink_to(outside, target_is_directory=True)
             swapped.append(True)
         return fd
@@ -310,7 +310,7 @@ def test_opt_in_swap_after_folder_held_stays_in_held_folder(project, tmp_path, m
     monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {opened})
     A.record_opt_in(str(root), "review.same_family", "labeled", "Person")
     assert swapped and list(outside.iterdir()) == []
-    row = json.loads((root / ".ao/ledger-moved/opt-ins.jsonl").read_text(encoding="utf-8"))
+    row = json.loads((root / ".polyctl/ledger-moved/opt-ins.jsonl").read_text(encoding="utf-8"))
     assert row["ordinal"] == 1
 
 

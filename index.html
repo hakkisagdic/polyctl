@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>agent-orchestrator — your agents commit, every change is granted first or flagged</title>
-<meta name="description" content="Keep the coding agents you already use. ao runs your gates on the exact change an agent staged, has a model of another family review it, refuses any other git commit in its hook, and flags a commit made around it. Every decision goes into a ledger that shows tampering.">
+<title>polyctl — your agents commit, every change is granted first or flagged</title>
+<meta name="description" content="Keep the coding agents you already use. polyctl runs your gates on the exact change an agent staged, has a model of another family review it, refuses any other git commit in its hook, and flags a commit made around it. Every decision goes into a ledger that shows tampering.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>">
 <style>
 :root{
@@ -81,82 +81,82 @@ html[data-lang=tr] [lang-tr]{display:revert}
 </div>
 
 <header><div class="wrap">
-  <div class="eyebrow">agent-orchestrator · v0.6.0 · MIT</div>
+  <div class="eyebrow">polyctl · v0.6.0 · MIT</div>
   <h1><span lang-en>Your agents commit.<br>Every change is granted first, or flagged.</span
       ><span lang-tr>Ajanların commit atıyor.<br>Her değişiklik ya önce yetkilendirilir ya da işaretlenir.</span></h1>
   <p class="lede">
     <span lang-en>By default <strong>a model of another family reviews the exact change an
     agent staged</strong>, and a git hook refuses anything else at <code>git commit</code>.
     Keep the agents you already use — Claude Code, Codex, Kiro, Qoder, OpenCode and the
-    rest. ao sits above them: it runs <em>your</em> gates on that staged change, grants
+    rest. polyctl sits above them: it runs <em>your</em> gates on that staged change, grants
     commit authority for that one tree, and writes every decision to a ledger that shows
     tampering. A person can waive review, on the record; a commit no review or waiver
-    granted is flagged by <code>ao doctor</code> and the watchdog.</span>
+    granted is flagged by <code>polyctl doctor</code> and the watchdog.</span>
     <span lang-tr>Varsayılan olarak ajanın sahnelediği tam değişikliği <strong>başka bir
     model ailesinden bir gözden geçiren</strong> inceler; git hook'u da
     <code>git commit</code>'te ondan başkasını reddeder. Kullandığın ajanları bırak —
-    Claude Code, Codex, Kiro, Qoder, OpenCode ve gerisi. ao onların üstünde durur:
+    Claude Code, Codex, Kiro, Qoder, OpenCode ve gerisi. polyctl onların üstünde durur:
     o sahnelenen değişiklikte <em>senin</em> gate'lerini koşturur, tek bir ağaç için commit
     yetkisi verir ve her kararı, kurcalanmayı gösteren bir deftere yazar. Bir kişi review'ı kayda
     geçerek devre dışı bırakabilir; hiçbir review ya da muafiyetin vermediği commit'i
-    <code>ao doctor</code> ve watchdog işaretler.</span>
+    <code>polyctl doctor</code> ve watchdog işaretler.</span>
   </p>
 </div></header>
 
 <section><div class="wrap">
   <h2><span lang-en>Five minutes</span><span lang-tr>Beş dakika</span></h2>
-  <pre class="sh"><span class="c" lang-en># or: uv tool install ao-orchestrator</span
-><span class="c" lang-tr># ya da: uv tool install ao-orchestrator</span>
-pip install ao-orchestrator
+  <pre class="sh"><span class="c" lang-en># or: uv tool install polyctl</span
+><span class="c" lang-tr># ya da: uv tool install polyctl</span>
+pip install polyctl
 cd <span lang-en>your-repository</span><span lang-tr>deponun-yolu</span>
-ao init --profile agy-codex     <span class="c" lang-en># agy implements, another family reviews</span
+polyctl init --profile agy-codex     <span class="c" lang-en># agy implements, another family reviews</span
 ><span class="c" lang-tr># agy yazar, başka bir aile gözden geçirir</span>
-git add .ao-project .gitignore &amp;&amp; git commit -m "adopt ao"
-ao hooks install                <span class="c" lang-en># the hook refuses an ungranted git commit; ao flags --no-verify</span
-><span class="c" lang-tr># hook yetkisiz git commit'i reddeder; ao --no-verify'ı işaretler</span></pre>
+git add .polyctl-project .gitignore &amp;&amp; git commit -m "adopt polyctl"
+polyctl hooks install                <span class="c" lang-en># the hook refuses an ungranted git commit; polyctl flags --no-verify</span
+><span class="c" lang-tr># hook yetkisiz git commit'i reddeder; polyctl --no-verify'ı işaretler</span></pre>
   <p class="note">
-    <span lang-en>Then, for every change an agent stages: <code>ao verify</code>,
-    <code>ao review</code>, <code>ao commit-ok</code>, <code>ao commit</code>. Nothing to
+    <span lang-en>Then, for every change an agent stages: <code>polyctl verify</code>,
+    <code>polyctl review</code>, <code>polyctl commit-ok</code>, <code>polyctl commit</code>. Nothing to
     configure first and no dependencies by choice — Python's standard library only, 3.9
-    and up, because ao watches agents on machines it does not control.</span>
-    <span lang-tr>Sonra, ajanın sahnelediği her değişiklik için: <code>ao verify</code>,
-    <code>ao review</code>, <code>ao commit-ok</code>, <code>ao commit</code>. Başta yapılandırma yok; bağımlılık da yok, bu bir tercih: yalnız Python'un
-    standart kütüphanesi, 3.9 ve üstü; çünkü ao kendi denetlemediği makinelerdeki ajanları
+    and up, because polyctl watches agents on machines it does not control.</span>
+    <span lang-tr>Sonra, ajanın sahnelediği her değişiklik için: <code>polyctl verify</code>,
+    <code>polyctl review</code>, <code>polyctl commit-ok</code>, <code>polyctl commit</code>. Başta yapılandırma yok; bağımlılık da yok, bu bir tercih: yalnız Python'un
+    standart kütüphanesi, 3.9 ve üstü; çünkü polyctl kendi denetlemediği makinelerdeki ajanları
     izliyor.</span></p>
   <p class="note">
-    <span lang-en>Want to see the guarantee before adopting it? <code>ao demo</code> plays
-    one change through ao on a scratch project, and <code>ao prove</code> runs the
+    <span lang-en>Want to see the guarantee before adopting it? <code>polyctl demo</code> plays
+    one change through polyctl on a scratch project, and <code>polyctl prove</code> runs the
     guarantees on a throwaway candidate instead of describing them. On Windows
-    <code>bin/ao.ps1</code> runs <code>status</code>, <code>board</code> and
+    <code>bin/polyctl.ps1</code> runs <code>status</code>, <code>board</code> and
     <code>doctor</code> with nothing installed.</span>
-    <span lang-tr>Benimsemeden önce o güvenceyi görmek ister misin? <code>ao demo</code>
-    tek bir değişikliği, sıfırdan kurulup atılacak bir projede ao'nun içinden geçirir;
-    <code>ao prove</code> ise garantileri tarif etmek yerine yine böyle bir aday üzerinde koşturur. Windows'ta
-    <code>bin/ao.ps1</code> hiçbir şey kurulu olmadan <code>status</code>,
+    <span lang-tr>Benimsemeden önce o güvenceyi görmek ister misin? <code>polyctl demo</code>
+    tek bir değişikliği, sıfırdan kurulup atılacak bir projede polyctl'in içinden geçirir;
+    <code>polyctl prove</code> ise garantileri tarif etmek yerine yine böyle bir aday üzerinde koşturur. Windows'ta
+    <code>bin/polyctl.ps1</code> hiçbir şey kurulu olmadan <code>status</code>,
     <code>board</code> ve <code>doctor</code> çalıştırır.</span></p>
 
-<pre class="term" lang-en><span class="d">$</span> ao verify
+<pre class="term" lang-en><span class="d">$</span> polyctl verify
   <span class="g">PASS</span>  gates run on the staged tree <span class="d">· 412 passed, 0 failed · 6m 04s</span>
-<span class="d">$</span> ao review
+<span class="d">$</span> polyctl review
   <span class="d">route:</span> kiro <span class="d">→ its read-only agent</span> <span class="d">(family: kiro · implementer: antigravity)</span>
   <span class="g">APPROVED</span> <span class="d">0 blockers, 0 highs · 2 notes · the candidate's digest bound to the verdict</span>
-<span class="d">$</span> ao commit-ok
+<span class="d">$</span> polyctl commit-ok
   <span class="g">granted</span> <span class="d">for tree 8c1d2e4… — verify V-1792342, review adf8d371</span>
-<span class="d">$</span> ao commit -m "feat: count failed logins per account"
+<span class="d">$</span> polyctl commit -m "feat: count failed logins per account"
   <span class="g">committed</span> <span class="d">· trailers bind it to that grant · push was never granted</span>
 <span class="d">$</span> git commit -m "anything else"
-  <span class="r">refused</span> <span class="d">by ao's pre-commit hook: no grant for this staged tree</span></pre>
-<pre class="term" lang-tr><span class="d">$</span> ao verify
+  <span class="r">refused</span> <span class="d">by polyctl's pre-commit hook: no grant for this staged tree</span></pre>
+<pre class="term" lang-tr><span class="d">$</span> polyctl verify
   <span class="g">PASS</span>  gate'ler sahnelenen ağaçta koştu <span class="d">· 412 geçti, 0 kaldı · 6dk 04sn</span>
-<span class="d">$</span> ao review
+<span class="d">$</span> polyctl review
   <span class="d">rota:</span> kiro <span class="d">→ kendi salt-okunur ajanı</span> <span class="d">(aile: kiro · uygulayıcı: antigravity)</span>
   <span class="g">APPROVED</span> <span class="d">0 blocker, 0 high · 2 not · adayın özeti hükme bağlandı</span>
-<span class="d">$</span> ao commit-ok
+<span class="d">$</span> polyctl commit-ok
   <span class="g">yetki verildi</span> <span class="d">ağaç 8c1d2e4… — doğrulama V-1792342, review adf8d371</span>
-<span class="d">$</span> ao commit -m "feat: hesap başına başarısız girişleri say"
+<span class="d">$</span> polyctl commit -m "feat: hesap başına başarısız girişleri say"
   <span class="g">commit edildi</span> <span class="d">· trailer'lar onu bu yetkiye bağlar · push asla verilmedi</span>
 <span class="d">$</span> git commit -m "başka bir şey"
-  <span class="r">reddedildi</span> <span class="d">— ao pre-commit hook: bu sahnelenen ağaç için yetki yok</span></pre>
+  <span class="r">reddedildi</span> <span class="d">— polyctl pre-commit hook: bu sahnelenen ağaç için yetki yok</span></pre>
   <p class="cap"><span lang-en>an illustrative run: the four commands of one change, and a plain git commit refused</span
     ><span lang-tr>örnek bir koşum: bir değişikliğin dört komutu, ve reddedilen düz bir git commit</span></p>
 </div></section>
@@ -164,22 +164,22 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
 <section><div class="wrap">
   <h2><span lang-en>How a change lands</span><span lang-tr>Değişiklik nasıl iniyor</span></h2>
 <pre class="sh"><span lang-en>the agent edits and stages</span><span lang-tr>ajan yazar ve sahneye alır</span>
-  -&gt; <span class="k">ao verify</span><span lang-en>      your gates, run again by something with no stake in the result</span><span lang-tr>   senin gate'lerin, sonuçta çıkarı olmayan bir şeyce yeniden koşturulur</span>
-  -&gt; <span class="k">ao review</span><span lang-en>      another model family reads that candidate and the code around it</span><span lang-tr>  başka bir model ailesi o adayı ve çevresindeki kodu okur</span>
-  -&gt; <span class="k">ao commit-ok</span><span lang-en>   commit authority for that exact tree, granted from the evidence</span><span lang-tr> o tam ağaç için commit yetkisi, kanıttan verilerek</span>
-  -&gt; <span class="k">ao commit</span><span lang-en>      the commit carries trailers that bind it to the grant</span><span lang-tr>     commit, onu o yetkiye bağlayan trailer'lar taşır</span>
-<span lang-en>the pre-commit hook refuses any other git commit, and ao flags one made around it; </span><span lang-tr>pre-commit hook öteki her git commit'i reddeder, etrafından dolaşanı da ao işaretler; </span><span class="k">push</span><span lang-en> is never granted</span><span lang-tr> asla verilmez</span></pre>
+  -&gt; <span class="k">polyctl verify</span><span lang-en>      your gates, run again by something with no stake in the result</span><span lang-tr>   senin gate'lerin, sonuçta çıkarı olmayan bir şeyce yeniden koşturulur</span>
+  -&gt; <span class="k">polyctl review</span><span lang-en>      another model family reads that candidate and the code around it</span><span lang-tr>  başka bir model ailesi o adayı ve çevresindeki kodu okur</span>
+  -&gt; <span class="k">polyctl commit-ok</span><span lang-en>   commit authority for that exact tree, granted from the evidence</span><span lang-tr> o tam ağaç için commit yetkisi, kanıttan verilerek</span>
+  -&gt; <span class="k">polyctl commit</span><span lang-en>      the commit carries trailers that bind it to the grant</span><span lang-tr>     commit, onu o yetkiye bağlayan trailer'lar taşır</span>
+<span lang-en>the pre-commit hook refuses any other git commit, and polyctl flags one made around it; </span><span lang-tr>pre-commit hook öteki her git commit'i reddeder, etrafından dolaşanı da polyctl işaretler; </span><span class="k">push</span><span lang-en> is never granted</span><span lang-tr> asla verilmez</span></pre>
   <p class="note">
     <span lang-en>Each refusal names the condition it is missing, and a review is bound to
     the digest of the bytes it read: change the staged tree and the verdict no longer
-    applies. When no reviewer can be reached, ao writes a request bound to that same
+    applies. When no reviewer can be reached, polyctl writes a request bound to that same
     digest — you paste it into any session of another family, and a person files the
-    answer with <code>ao collect-review</code>.</span>
+    answer with <code>polyctl collect-review</code>.</span>
     <span lang-tr>Her ret eksik koşulu adıyla söyler; bir review okuduğu baytların
     özetiyle bağlanır: sahnelenen ağacı değiştirirsen hüküm artık geçerli değil. Hiçbir
-    gözden geçirene ulaşılamayınca ao aynı özetle bağlı bir istek yazar — onu başka bir
+    gözden geçirene ulaşılamayınca polyctl aynı özetle bağlı bir istek yazar — onu başka bir
     ailenin herhangi bir oturumuna yapıştırırsın, cevabı da bir kişi
-    <code>ao collect-review</code> ile işler.</span></p>
+    <code>polyctl collect-review</code> ile işler.</span></p>
 </div></section>
 
 <section><div class="wrap">
@@ -188,11 +188,11 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
     <div><h3><span lang-en>Reviews on its own terms</span><span lang-tr>Kendi kurallarıyla gözden geçirir</span></h3><p>
       <span lang-en>A model of another family than the one that wrote the change, by
       default — a model reviewing its own family's work shares its blind spots. And a
-      reviewer only reads: ao measures that per harness, and where no flag denies the
+      reviewer only reads: polyctl measures that per harness, and where no flag denies the
       tools it writes a read-only agent for that harness itself. A route that could write
       is refused where it starts.</span>
       <span lang-tr>Değişikliği yazandan farklı bir model ailesi, varsayılan olarak —
-      bir model kendi ailesinin işini gözden geçirince kör noktaları da ortak olur. Bir gözden geçiren yalnız okur: ao bunu harness bazında ölçüyor; hiçbir bayrağın araçları kapatmadığı bir harness içinse o harness'ın kendi salt-okunur ajanını yazıyor.
+      bir model kendi ailesinin işini gözden geçirince kör noktaları da ortak olur. Bir gözden geçiren yalnız okur: polyctl bunu harness bazında ölçüyor; hiçbir bayrağın araçları kapatmadığı bir harness içinse o harness'ın kendi salt-okunur ajanını yazıyor.
       Yazabilecek bir rota, başladığı yerde reddedilir.</span></p></div>
     <div><h3><span lang-en>Verifies</span><span lang-tr>Doğrular</span></h3><p>
       <span lang-en>Runs <em>your</em> gates and writes the numbers to a ledger. Not the
@@ -233,11 +233,11 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
       <span lang-tr>Önceden yetkilendirilmiş işin panosu: seni bekleyen dilim, nedeni yazılı olarak park edilir; kuyruk boşalınca mimar onu doldursun diye uyandırılır. Okunamayan
       bir tur, bitmiş sayılmaz.</span></p></div>
     <div><h3><span lang-en>Catches up</span><span lang-tr>Kovuşturur</span></h3><p>
-      <span lang-en>A review you waive is recorded, not swallowed: <code>ao catchup</code>
+      <span lang-en>A review you waive is recorded, not swallowed: <code>polyctl catchup</code>
       has a reviewer of another family read the landed range later, and
-      <code>ao doctor</code> names a commit whose content no review or waiver granted.</span>
-      <span lang-tr>Muaf tuttuğun review kaydedilir, yutulmaz: <code>ao catchup</code>, inen aralığı sonra başka bir aileden bir gözden geçirene okutur;
-      <code>ao doctor</code> da içeriği hiçbir review ya da muafiyetin vermediği commit'i
+      <code>polyctl doctor</code> names a commit whose content no review or waiver granted.</span>
+      <span lang-tr>Muaf tuttuğun review kaydedilir, yutulmaz: <code>polyctl catchup</code>, inen aralığı sonra başka bir aileden bir gözden geçirene okutur;
+      <code>polyctl doctor</code> da içeriği hiçbir review ya da muafiyetin vermediği commit'i
       adıyla söyler.</span></p></div>
     <div><h3><span lang-en>Reaches you</span><span lang-tr>Sana ulaşır</span></h3><p>
       <span lang-en>Alerts carry an audience: a human hears only what a human can fix.
@@ -263,20 +263,20 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
     process, drives the loop, and adopting it means restarting your work inside it.
     This one owns the <strong>authority</strong> instead — what is finished, what is
     good, what may land — and leaves the agent exactly where it is. And it can be shown
-    its own work: <code>ao gain</code> reads ao's ledgers and says what it measured,
+    its own work: <code>polyctl gain</code> reads polyctl's ledgers and says what it measured,
     slices landed, what reviews said, what a turn cost.</span>
     <span lang-tr>Piyasadaki diğer orkestratörler <strong>ajanın sahibidir</strong>:
     süreci onlar başlatır, döngüyü onlar sürer, benimsemek de işi onların içinde yeniden
     başlatmak demek. Bu ise <strong>yetkinin</strong> sahibidir — ne bitti, ne iyi, ne
     inebilir — ajanı tam olduğu yerde bırakır. Bir de kendi işini gösterebiliyor:
-    <code>ao gain</code> ao'nun defterlerini okur ve ne ölçtüğünü söyler — inen dilimler,
+    <code>polyctl gain</code> polyctl'in defterlerini okur ve ne ölçtüğünü söyler — inen dilimler,
     review'ların dediği, bir turun maliyeti.</span></p>
 </div></section>
 
 <section><div class="wrap">
   <h2><span lang-en>The panel</span><span lang-tr>Panel</span></h2>
 <pre class="term" lang-en><span class="a">══════════════════════════════════════════════════════════════════</span>
-  <b>ACME-API</b><span class="d">   agent-orchestrator   18 Oct 14:44:44</span>
+  <b>ACME-API</b><span class="d">   polyctl   18 Oct 14:44:44</span>
 <span class="a">══════════════════════════════════════════════════════════════════</span>
 
 <span class="g">● WORKING</span>  <span class="d">kiro · last write 0m 32s ago</span>
@@ -317,7 +317,7 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
         <span class="d">│</span>      and its test come next.
 <span class="d">  every 15s · Ctrl+C to exit</span></pre>
 <pre class="term" lang-tr><span class="a">══════════════════════════════════════════════════════════════════</span>
-  <b>ACME-API</b><span class="d">   agent-orchestrator   18 Eki 14:44:44</span>
+  <b>ACME-API</b><span class="d">   polyctl   18 Eki 14:44:44</span>
 <span class="a">══════════════════════════════════════════════════════════════════</span>
 
 <span class="g">● ÇALIŞIYOR</span>  <span class="d">kiro · son yazma 0dk 32sn önce</span>
@@ -357,10 +357,10 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
    <span class="d">14:41</span> <span class="a">AJAN </span>  Sayacı hesap anahtarına taşıyorum; sırada göç betiği
         <span class="d">│</span>      ve testi var.
 <span class="d">  her 15sn · çıkmak için Ctrl+C</span></pre>
-  <p class="cap"><span lang-en><code>ao watch</code>, on a sample project — the fields come
-    from the agent's own store and ao's ledgers</span
-    ><span lang-tr><code>ao watch</code>, örnek bir projede — alanlar ajanın kendi
-    deposundan ve ao'nun defterlerinden geliyor</span></p>
+  <p class="cap"><span lang-en><code>polyctl watch</code>, on a sample project — the fields come
+    from the agent's own store and polyctl's ledgers</span
+    ><span lang-tr><code>polyctl watch</code>, örnek bir projede — alanlar ajanın kendi
+    deposundan ve polyctl'in defterlerinden geliyor</span></p>
 </div></section>
 
 <section><div class="wrap">
@@ -402,16 +402,16 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
 <section><div class="wrap">
   <h2><span lang-en>Agent support</span><span lang-tr>Ajan desteği</span></h2>
   <p class="note" style="margin-top:-12px">
-    <span lang-en>Each adapter declares how ao observes its harness and how much of that
-    declaration has been measured. ao resolves and reads the agent's own session store for
+    <span lang-en>Each adapter declares how polyctl observes its harness and how much of that
+    declaration has been measured. polyctl resolves and reads the agent's own session store for
     <code>kiro</code>, <code>claude-code</code>, <code>opencode</code> and
     <code>qoder</code>; for <code>antigravity</code>, <code>warp</code> and
     <code>cursor-agent</code> (<code>call-return</code>), the call returns a structured
-    record that ao keeps itself; <code>codex</code>, <code>command-code</code>,
+    record that polyctl keeps itself; <code>codex</code>, <code>command-code</code>,
     <code>aider</code>, <code>droid</code>, <code>grok</code>, <code>hermes</code>,
     <code>kilocode</code>, <code>kimi</code>, <code>omp</code>, <code>pi</code>,
     <code>qwen</code> and <code>trae</code> declare a transcript shape with no session store
-    ao resolves yet; <code>amazon-q</code>, <code>amp</code>, <code>copilot</code>,
+    polyctl resolves yet; <code>amazon-q</code>, <code>amp</code>, <code>copilot</code>,
     <code>deepseek</code>, <code>gemini</code> and <code>reasonix</code> leave the
     transcript <code>unknown</code>; <code>openai-api</code>, <code>pr-agent</code> and
     <code>ollama</code> are tool reviewers or a model backend with no session store; and
@@ -423,15 +423,15 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
     (<code>documented</code>) is written from published docs only, and the
     <code>untested</code> rows are written from documented interfaces and have not been
     run.</span>
-    <span lang-tr>Her adaptör, ao'nun o harness'ı nasıl gözlemlediğini ve bu bildirimin ne
-    kadarının ölçüldüğünü söyler. ao, <code>kiro</code>, <code>claude-code</code>,
+    <span lang-tr>Her adaptör, polyctl'in o harness'ı nasıl gözlemlediğini ve bu bildirimin ne
+    kadarının ölçüldüğünü söyler. polyctl, <code>kiro</code>, <code>claude-code</code>,
     <code>opencode</code> ve <code>qoder</code> için ajanın kendi oturum deposunu çözüp
     okur; <code>antigravity</code>, <code>warp</code> ve <code>cursor-agent</code>
     (<code>call-return</code>) için çağrının döndürdüğü yapılandırılmış kaydı kendisi
     tutar; <code>codex</code>, <code>command-code</code>, <code>aider</code>,
     <code>droid</code>, <code>grok</code>, <code>hermes</code>, <code>kilocode</code>,
     <code>kimi</code>, <code>omp</code>, <code>pi</code>, <code>qwen</code> ve
-    <code>trae</code>, ao'nun henüz çözmediği bir oturum deposuyla yalnız transcript
+    <code>trae</code>, polyctl'in henüz çözmediği bir oturum deposuyla yalnız transcript
     biçimini bildirir; <code>amazon-q</code>, <code>amp</code>, <code>copilot</code>,
     <code>deepseek</code>, <code>gemini</code> ve <code>reasonix</code> transcript'i
     <code>unknown</code> bırakır; <code>openai-api</code>, <code>pr-agent</code> ve
@@ -467,10 +467,10 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
       <span lang-tr>şema hazır, ilk koşumu bekliyor</span></span></td></tr>
   </table>
   <p class="note" style="margin-top:20px">
-    <span lang-en><code>ao adapters</code> shows this table against what is actually
+    <span lang-en><code>polyctl adapters</code> shows this table against what is actually
     installed on your machine, and — with keyflip — whether an account exists even when
     the CLI does not. Adding one is a JSON file.</span>
-    <span lang-tr><code>ao adapters</code> bu tabloyu makinende gerçekten kurulu olana
+    <span lang-tr><code>polyctl adapters</code> bu tabloyu makinende gerçekten kurulu olana
     karşı gösterir; keyflip ile, CLI kurulu değilse bile hesap var mı diye de bakar. Yeni
     eklemek bir JSON dosyası.</span></p>
 </div></section>
@@ -483,14 +483,14 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
     watchdog that started a second turn on one session and left a rename half-applied;
     fifteen agent processes accumulated in one repository; a timestamp bug that made
     live evidence look three hours stale. None of it was designed in advance —
-    <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/lessons.md">the
+    <a href="https://github.com/hakkisagdic/polyctl/blob/main/docs/lessons.md">the
     lessons file</a> is the list.</span>
     <span lang-tr>Haftalarca tam olarak bu döngüyle geliştirilen 30 epic'lik
     dayanıklı-iş-akışı ürününden çıkarıldı. İçindeki her koruma önce bir şey ters
     gittiği için var: tek oturumda ikinci tur başlatıp yeniden adlandırmayı yarım
     bırakan bir watchdog; tek depoda biriken on beş ajan süreci; canlı kanıtı üç saat
     bayat gösteren bir saat hatası. Hiçbiri önceden tasarlanmadı — liste
-    <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/lessons.md">dersler dosyasında</a>.</span></p>
+    <a href="https://github.com/hakkisagdic/polyctl/blob/main/docs/lessons.md">dersler dosyasında</a>.</span></p>
   <h3 style="margin-top:36px"><span lang-en>What is not built</span><span lang-tr>Neler kurulmadı</span></h3>
   <p class="note">
     <span lang-en>The suite runs on Linux, macOS and Windows with Python 3.9 and 3.12, and
@@ -504,29 +504,29 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
     arası paralel <em>yürütme</em> — görünüm var, birden çok uygulayıcıyı aynı anda
     koşturmak makine geneli gate kilidine bağlı ama hiç gerçek koşumda denenmedi.</span></p>
   <p class="note">
-    <span lang-en>What ao's own ledgers say about the guarantee on its own repository is
-    published too: <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/evidence.md">evidence</a>.</span>
-    <span lang-tr>ao'nun kendi defterlerinin kendi deposundaki güvence hakkında söylediği
-    de yayında: <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/evidence.md">kanıt</a>.</span></p>
+    <span lang-en>What polyctl's own ledgers say about the guarantee on its own repository is
+    published too: <a href="https://github.com/hakkisagdic/polyctl/blob/main/docs/evidence.md">evidence</a>.</span>
+    <span lang-tr>polyctl'in kendi defterlerinin kendi deposundaki güvence hakkında söylediği
+    de yayında: <a href="https://github.com/hakkisagdic/polyctl/blob/main/docs/evidence.md">kanıt</a>.</span></p>
 </div></section>
 
 <footer><div class="wrap">
-  <a href="https://github.com/hakkisagdic/agent-orchestrator">GitHub</a> ·
-  <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/getting-started.md"><span lang-en>Getting started</span><span lang-tr>Başlarken</span></a> ·
-  <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/commands.md" lang-en>Commands</a><a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/commands.tr.md" lang-tr>Komutlar</a> ·
-  <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/safety.md"><span lang-en>Safety</span><span lang-tr>Güvenlik</span></a> ·
-  <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/threat-model.md"><span lang-en>Threat model</span><span lang-tr>Tehdit modeli</span></a> ·
-  <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/lessons.md"><span lang-en>Lessons</span><span lang-tr>Dersler</span></a> ·
+  <a href="https://github.com/hakkisagdic/polyctl">GitHub</a> ·
+  <a href="https://github.com/hakkisagdic/polyctl/blob/main/docs/getting-started.md"><span lang-en>Getting started</span><span lang-tr>Başlarken</span></a> ·
+  <a href="https://github.com/hakkisagdic/polyctl/blob/main/docs/commands.md" lang-en>Commands</a><a href="https://github.com/hakkisagdic/polyctl/blob/main/docs/commands.tr.md" lang-tr>Komutlar</a> ·
+  <a href="https://github.com/hakkisagdic/polyctl/blob/main/docs/safety.md"><span lang-en>Safety</span><span lang-tr>Güvenlik</span></a> ·
+  <a href="https://github.com/hakkisagdic/polyctl/blob/main/docs/threat-model.md"><span lang-en>Threat model</span><span lang-tr>Tehdit modeli</span></a> ·
+  <a href="https://github.com/hakkisagdic/polyctl/blob/main/docs/lessons.md"><span lang-en>Lessons</span><span lang-tr>Dersler</span></a> ·
   <a href="https://github.com/hakkisagdic/keyflip">keyflip</a> ·
   MIT · v0.6.0
 </div></footer>
 
 <script>
 var HEAD={
-  en:['agent-orchestrator — your agents commit, every change is granted first or flagged',
-      'Keep the coding agents you already use. ao runs your gates on the exact change an agent staged, has a model of another family review it, refuses any other git commit in its hook, and flags a commit made around it. Every decision goes into a ledger that shows tampering.'],
-  tr:['agent-orchestrator — ajanların commit atıyor, her değişiklik ya önce yetkilendirilir ya da işaretlenir',
-      'Zaten kullandığın kod ajanlarıyla devam et. ao, bir ajanın sahneye aldığı tam değişiklik üzerinde senin gate\'lerini koşturur, onu başka bir model ailesine gözden geçirtir, hook\'unda başka her git commit\'i reddeder ve etrafından dolaşan commit\'i işaretler. Her karar, kurcalamayı gösteren bir deftere yazılır.']};
+  en:['polyctl — your agents commit, every change is granted first or flagged',
+      'Keep the coding agents you already use. polyctl runs your gates on the exact change an agent staged, has a model of another family review it, refuses any other git commit in its hook, and flags a commit made around it. Every decision goes into a ledger that shows tampering.'],
+  tr:['polyctl — ajanların commit atıyor, her değişiklik ya önce yetkilendirilir ya da işaretlenir',
+      'Zaten kullandığın kod ajanlarıyla devam et. polyctl, bir ajanın sahneye aldığı tam değişiklik üzerinde senin gate\'lerini koşturur, onu başka bir model ailesine gözden geçirtir, hook\'unda başka her git commit\'i reddeder ve etrafından dolaşan commit\'i işaretler. Her karar, kurcalamayı gösteren bir deftere yazılır.']};
 function setLang(l){
   document.documentElement.setAttribute('data-lang', l);
   document.documentElement.setAttribute('lang', l);
@@ -534,10 +534,10 @@ function setLang(l){
   document.querySelector('meta[name=description]').setAttribute('content', HEAD[l][1]);
   document.getElementById('b-en').setAttribute('aria-pressed', l==='en');
   document.getElementById('b-tr').setAttribute('aria-pressed', l==='tr');
-  try{ localStorage.setItem('ao-lang', l); }catch(e){}
+  try{ localStorage.setItem('polyctl-lang', l); }catch(e){}
 }
 try{
-  var saved = localStorage.getItem('ao-lang');
+  var saved = localStorage.getItem('polyctl-lang');
   if(saved) setLang(saved);
   else if((navigator.language||'').toLowerCase().startsWith('tr')) setLang('tr');
 }catch(e){}

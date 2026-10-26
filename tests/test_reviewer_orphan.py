@@ -3,7 +3,7 @@
 A review's run was stopped by hand and its reviewer worked on for nobody: the reviewer leads a session of
 its own, so that a timeout can stop it with everything it started, and for the same reason nothing sent to
 the run reached it. The run now stops its reviewer on the signals that stop it, a run killed outright
-leaves its reviewer named in its state, and `ao review cancel` stops the one or the other.
+leaves its reviewer named in its state, and `polyctl review cancel` stops the one or the other.
 """
 import json
 import os
@@ -16,17 +16,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, procs
+from polyctl import cli, lib as A, procs
 from tests.test_review_chain import _repo_with_change
 
-# A reviewer that, when AO_TEST_PID names a file, writes its pid there and works for two minutes; else it
+# A reviewer that, when POLYCTL_TEST_PID names a file, writes its pid there and works for two minutes; else it
 # approves at once.
 REVIEWER = """
 import os, time
-if os.environ.get("AO_TEST_PID"):
-    with open(os.environ["AO_TEST_PID"] + ".part", "w") as fh:
+if os.environ.get("POLYCTL_TEST_PID"):
+    with open(os.environ["POLYCTL_TEST_PID"] + ".part", "w") as fh:
         fh.write(str(os.getpid()))
-    os.replace(os.environ["AO_TEST_PID"] + ".part", os.environ["AO_TEST_PID"])
+    os.replace(os.environ["POLYCTL_TEST_PID"] + ".part", os.environ["POLYCTL_TEST_PID"])
     deadline = time.time() + 120
     while time.time() < deadline:
         time.sleep(0.05)
@@ -48,7 +48,7 @@ def _plain(capsys):
 
 def _with_reviewer(project):
     reviewer = {"id": "r1", "family": "x", "argv": [sys.executable, "-c", REVIEWER, "{prompt}"]}
-    path = os.path.join(project["root"], ".ao", "config.json")
+    path = os.path.join(project["root"], ".polyctl", "config.json")
     with open(path, encoding="utf-8") as fh:
         config = json.load(fh)
     config["reviewer"] = reviewer
@@ -68,7 +68,7 @@ def _until(condition, seconds=120.0):
 
 def _log(root, rid):
     try:
-        with open(os.path.join(root, ".ao", "reviews", f"{rid}.log"), encoding="utf-8") as fh:
+        with open(os.path.join(root, ".polyctl", "reviews", f"{rid}.log"), encoding="utf-8") as fh:
             return fh.read()
     except OSError:
         return "(no log)"
@@ -77,14 +77,14 @@ def _log(root, rid):
 def _reviewer_at_work(project, tmp_path, monkeypatch, capsys):
     """Submit the staged candidate with its run detached, as ever, and wait for its reviewer to work.
 
-    The run is an ao of its own, which finds its home in HOME: it is given the home this test's ao
+    The run is a polyctl of its own, which finds its home in HOME: it is given the home this test's polyctl
     reads, so both keep the helper registry in the same place.
     """
     root = project["root"]
     _repo_with_change(root)
     cfg = _with_reviewer(project)
     pid_file = tmp_path / "reviewer.pid"
-    monkeypatch.setenv("AO_TEST_PID", str(pid_file))
+    monkeypatch.setenv("POLYCTL_TEST_PID", str(pid_file))
     monkeypatch.setenv("HOME", A.HOME)
     assert cli.cmd_review(cfg, _args(action="submit")) == 0
     rid = _plain(capsys).split()[0]
@@ -149,10 +149,10 @@ def test_a_run_killed_outright_leaves_its_reviewer_named_and_review_cancel_stops
         assert cli.cmd_reviews(cfg, SimpleNamespace()) == 0
         shown = _plain(capsys)
         assert re.search(rf"{rid}\s+lost\s", shown)
-        assert f"its reviewer, pid {reviewer}, runs on without it: `ao review cancel {rid}` stops it" in shown
+        assert f"its reviewer, pid {reviewer}, runs on without it: `polyctl review cancel {rid}` stops it" in shown
 
         assert cli.cmd_review(cfg, _args(action="cancel", rid=rid)) == 0
-        reason = f"cancelled by `ao review cancel`: its runner was already gone; its reviewer, pid {reviewer}, was stopped"
+        reason = f"cancelled by `polyctl review cancel`: its runner was already gone; its reviewer, pid {reviewer}, was stopped"
         assert _plain(capsys).strip() == f"{rid} cancelled: {reason}"
         assert _until(lambda: not A._pid_alive(reviewer))
         state = cli._review_state(root, rid)
@@ -201,7 +201,7 @@ def test_a_pid_that_is_no_longer_the_run_or_the_reviewer_is_left_alone(project, 
 
         assert cli.cmd_review(project, _args(action="cancel", rid="R-1")) == 0
 
-        assert _plain(capsys).strip() == "R-1 cancelled: cancelled by `ao review cancel`: its runner was already gone"
+        assert _plain(capsys).strip() == "R-1 cancelled: cancelled by `polyctl review cancel`: its runner was already gone"
         assert other.poll() is None
         assert cli._review_state(root, "R-1")["state"] == "failed"
     finally:
@@ -232,15 +232,15 @@ def test_a_signal_after_the_run_recorded_its_end_leaves_that_end(project, monkey
 
 @POSIX
 def test_a_review_in_the_foreground_stopped_by_a_signal_stops_its_reviewer(project, tmp_path):
-    """REVIEWER-ORPHAN-3: only a submitted review's detached run stopped its reviewer on SIGTERM. `ao review` and
-    `ao catchup` in the foreground, stopped so, left their reviewer - which leads a session of its own - working
+    """REVIEWER-ORPHAN-3: only a submitted review's detached run stopped its reviewer on SIGTERM. `polyctl review` and
+    `polyctl catchup` in the foreground, stopped so, left their reviewer - which leads a session of its own - working
     for nobody, and a hosted reviewer spent its credits on it."""
     root = project["root"]
     _repo_with_change(root)
     _with_reviewer(project)
     pid_file = tmp_path / "reviewer.pid"
-    env = dict(os.environ, AO_TEST_PID=str(pid_file), HOME=A.HOME)
-    run = subprocess.Popen([sys.executable, "-m", "ao", "-C", root, "review", "--boundary", "b"], env=env,
+    env = dict(os.environ, POLYCTL_TEST_PID=str(pid_file), HOME=A.HOME)
+    run = subprocess.Popen([sys.executable, "-m", "polyctl", "-C", root, "review", "--boundary", "b"], env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     reviewer = None
     try:
@@ -266,8 +266,8 @@ def _signalled_while_starting(started, real):
     return start
 
 
-def test_a_signal_that_comes_while_the_reviewer_starts_stops_it_once_ao_holds_it(project, monkeypatch):
-    """REVIEWER-ORPHAN-4: a stop raised inside the reviewer's start, after its child was made, escaped before ao
+def test_a_signal_that_comes_while_the_reviewer_starts_stops_it_once_polyctl_holds_it(project, monkeypatch):
+    """REVIEWER-ORPHAN-4: a stop raised inside the reviewer's start, after its child was made, escaped before polyctl
     held the child, and the reviewer - leading a session of its own - worked on for nobody."""
     started, before = [], signal.getsignal(signal.SIGTERM)
     monkeypatch.setattr(cli.subprocess, "Popen", _signalled_while_starting(started, cli.subprocess.Popen))
@@ -281,9 +281,9 @@ def test_a_signal_that_comes_while_the_reviewer_starts_stops_it_once_ao_holds_it
     assert signal.getsignal(signal.SIGTERM) is before
 
 
-def test_a_signal_that_comes_while_an_acp_reviewer_starts_stops_it_once_ao_holds_it(project, monkeypatch):
-    """REVIEWER-ORPHAN-4: the same, for a reviewer ao reaches through ACP."""
-    from ao import acp
+def test_a_signal_that_comes_while_an_acp_reviewer_starts_stops_it_once_polyctl_holds_it(project, monkeypatch):
+    """REVIEWER-ORPHAN-4: the same, for a reviewer polyctl reaches through ACP."""
+    from polyctl import acp
     started, before = [], signal.getsignal(signal.SIGTERM)
     monkeypatch.setattr(acp, "Session", _signalled_while_starting(started, acp.Session))
 
@@ -297,9 +297,9 @@ def test_a_signal_that_comes_while_an_acp_reviewer_starts_stops_it_once_ao_holds
 
 
 def test_an_acp_session_that_fails_to_start_after_its_agent_did_stops_it_and_holds_no_stop(project, monkeypatch):
-    """REVIEWER-ORPHAN-5: a session whose reader could not start raised past ao with its agent running, and the
+    """REVIEWER-ORPHAN-5: a session whose reader could not start raised past polyctl with its agent running, and the
     signal handlers, still holding, would have let every later stop go."""
-    from ao import acp
+    from polyctl import acp
     started, real = [], acp.subprocess.Popen
     monkeypatch.setattr(acp.subprocess, "Popen", lambda *a, **kw: started.append(real(*a, **kw)) or started[-1])
 
@@ -342,7 +342,7 @@ def test_a_start_ended_by_what_is_no_error_puts_the_handlers_back(project, monke
 
 def test_a_session_whose_own_state_cannot_be_made_starts_no_agent(project, monkeypatch):
     """REVIEWER-ORPHAN-6: the session's queue was made after its agent started, outside the guard that stops it."""
-    from ao import acp
+    from polyctl import acp
     started, real = [], acp.subprocess.Popen
     monkeypatch.setattr(acp.subprocess, "Popen", lambda *a, **kw: started.append(real(*a, **kw)) or started[-1])
 

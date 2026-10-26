@@ -5,7 +5,7 @@ returned READY, where the docstring said no item a problem touches is. A multi-w
 left its words as the ids an item waited for. And the doctor said nothing when the board could not be
 read as a graph at all.
 """
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_ready_graph import _board
 
 EMPTY = "# Board\n\n## running\n\n## blocked\n\n## queued\n{queued}\n## verified\n\n## done\n{done}"
@@ -36,7 +36,7 @@ def test_a_remark_in_needs_names_no_id_however_many_words_it_has(project):
 
 
 def test_the_doctor_says_when_the_board_cannot_be_read_as_a_graph(project, monkeypatch, tmp_path):
-    from ao import email, telegram
+    from polyctl import email, telegram
     monkeypatch.setattr(email, "CONF", str(tmp_path / "no-email.json"))
     monkeypatch.setattr(telegram, "CONF", str(tmp_path / "no-telegram.json"))
 

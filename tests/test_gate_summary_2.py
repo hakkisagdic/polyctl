@@ -4,7 +4,7 @@ The retrospective review of GATE-SUMMARY found gate_counts taking a node `# pass
 any pytest line, wherever it stood: a test that printed `# pass 900` and `# fail 0` above pytest's own
 closing line satisfied a gate's min_tests with 900.
 """
-from ao import lib as A
+from polyctl import lib as A
 
 
 def test_a_node_pair_printed_above_pytests_closing_line_is_not_the_result():

@@ -20,10 +20,10 @@ is equivalent to a continuing one.
 ## Catch-up
 
 ```bash
-ao since last          # everything since this orchestrator last looked
-ao since 2h            # or a window: 30m, 2h, 1d, today, yesterday, 2026-09-17
-ao since HEAD~5        # or since a commit, named by any git ref
-ao since 1d --no-mark  # a look that does not reset "last"
+polyctl since last          # everything since this orchestrator last looked
+polyctl since 2h            # or a window: 30m, 2h, 1d, today, yesterday, 2026-09-17
+polyctl since HEAD~5        # or since a commit, named by any git ref
+polyctl since 1d --no-mark  # a look that does not reset "last"
 ```
 
 Output is a digest, not a log dump:
@@ -59,7 +59,7 @@ nothing — tell you what to *do*.
 ## Briefing a fresh session
 
 ```bash
-ao handoff --no-send
+polyctl handoff --no-send
 ```
 
 Writes into the mailbox, and prints, what a successor needs from the board, the repository
@@ -74,18 +74,18 @@ which a Turkish note heads `## Devralan ne yapabilir`; either heading is found i
 A note is named by the minute it was written in; a second handoff in that minute is written beside
 the first, `-2` after its kind, never over it.
 
-*In ao since slice LEADS-SECRETS: the minute and the roles were the whole name, so a second handoff in
+*In polyctl since slice LEADS-SECRETS: the minute and the roles were the whole name, so a second handoff in
 the same minute was written over the first, and a message store, which takes a name in once, never
 took the second. `tests/test_leads_secrets.py`.*
 
-Paste it into a new session, or let an MCP client read the same state through `ao_status`,
-`ao_board` and `ao_decisions` — see [`mcp.md`](mcp.md). Either way the recovery is seconds,
+Paste it into a new session, or let an MCP client read the same state through `polyctl_status`,
+`polyctl_board` and `polyctl_decisions` — see [`mcp.md`](mcp.md). Either way the recovery is seconds,
 not an archaeology session.
 
 ## Restart checklist
 
-No single command performs it, and knowing it matters more than a command would. `ao doctor`,
-`ao mail list`, `ao doctor --consistency`, `ao since last` and `ao status` answer its steps in
+No single command performs it, and knowing it matters more than a command would. `polyctl doctor`,
+`polyctl mail list`, `polyctl doctor --consistency`, `polyctl since last` and `polyctl status` answer its steps in
 order:
 
 1. Re-arm watchers — they are always dead after a restart.
@@ -97,46 +97,46 @@ order:
 
 Step 5 is not paranoia. A remembered verdict is a verdict that was true at some point, and
 the whole reason this system exists is to stop treating "it was true earlier" as evidence.
-- `ao writers` — how many live turns are in the tree. Expect 0 or 1. Orphans (no
+- `polyctl writers` — how many live turns are in the tree. Expect 0 or 1. Orphans (no
   terminal, dead group leader) are listed separately and are not writers;
-  `ao writers --clean` stops them. A single-writer rule that counts processes
+  `polyctl writers --clean` stops them. A single-writer rule that counts processes
   instead of running this once refused to write for hours over three corpses.
-- `ao doctor` — the `architect bin` row shows which `claude` a wake will run and
+- `polyctl doctor` — the `architect bin` row shows which `claude` a wake will run and
   its version; `last wake` shows whether the previous wake failed and on what.
   A wake that dies with "does not support this model" was running a stale copy;
-  ao now resolves the newest one, but the stale copy is still worth removing.
+  polyctl now resolves the newest one, but the stale copy is still worth removing.
 
 
 ## The governance survives the disk
 
 On 2026-09-07 the whole control plane of a project - authority, the board, the backlog, every
 decision - existed on one laptop; the code was safe on a remote and the decisions that
-authorised it were not. `ao backup` writes the governance to a destination the project names:
+authorised it were not. `polyctl backup` writes the governance to a destination the project names:
 
 ```bash
-ao backup --to ~/Backups/ao         # a directory: <project>/<stamp>/ with a manifest of digests
-ao backup --to ref                  # refs/ao/backup/latest, a commit made without the index
-ao backup --to remote:governance    # that ref pushed, only if the host says the remote is private
+polyctl backup --to ~/Backups/polyctl         # a directory: <project>/<stamp>/ with a manifest of digests
+polyctl backup --to ref                  # refs/polyctl/backup/latest, a commit made without the index
+polyctl backup --to remote:governance    # that ref pushed, only if the host says the remote is private
 ```
 
 It covers config, authority, board, backlog, gates and sources, decisions and parked work,
 every ledger with its sealed archives, the mailbox, and the review artefacts a grant rests on;
 locks and temporary files are not governance. Each backup is recorded in
-`.ao/ledger/backups.jsonl`, and `ao doctor` says how old the newest one is, or that there is
+`.polyctl/ledger/backups.jsonl`, and `polyctl doctor` says how old the newest one is, or that there is
 none. A remote is refused unless the host confirms the repository is private, because a push
 to a public product remote would publish the coordination history.
 
-`ao restore <directory>` puts the files back, restoring only those whose bytes match the digest
+`polyctl restore <directory>` puts the files back, restoring only those whose bytes match the digest
 they were backed up with, and whose path stays inside the checkout, and naming the rest; then
-it checks that the authority chain and the board validate. `ao restore <directory> --by <name> --ask`
+it checks that the authority chain and the board validate. `polyctl restore <directory> --by <name> --ask`
 at a terminal shows the backup manifest digest and each gate ledger's row count and last row
 digest, asks `y/N`, and on a `yes` records this machine's checkpoint for each restored ledger
 whose chain validates and appends a restore attestation row (`by`, login, `interactive`,
-manifest digest, attested lengths) to `.ao/ledger/restores.jsonl`, which `ao doctor` reports;
+manifest digest, attested lengths) to `.polyctl/ledger/restores.jsonl`, which `polyctl doctor` reports;
 without `--by` and `--ask` (or without a terminal, or on a `no`), each restored gate ledger
 stays unattested until a person attests it. A backup that restores nothing, or no
-`.ao/config.json`, restores no control plane, and the restore fails. When the authority chain
-cannot be read, `ao backup` keeps every review artefact rather than only those a grant names,
+`.polyctl/config.json`, restores no control plane, and the restore fails. When the authority chain
+cannot be read, `polyctl backup` keeps every review artefact rather than only those a grant names,
 and says so.
 
 ## What is deliberately not recovered
@@ -161,7 +161,7 @@ with their exact reply syntax, what is next in the queue, how many credits remai
 and when they reset:
 
 ```bash
-ao handoff --reason "…"      # also runs automatically on exhaustion, hourly at most
+polyctl handoff --reason "…"      # also runs automatically on exhaustion, hourly at most
 ```
 
 It lands in the mailbox and on the phone. Twice in one day here the state that

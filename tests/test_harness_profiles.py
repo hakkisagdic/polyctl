@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 
 def _args(**overrides):
@@ -27,7 +27,7 @@ def test_a_profile_composes_its_blocks_from_the_adapters_it_names(project):
         options = A.load_adapter(roles["architect"])["options"]
         tools = options["allowed_tools"][0]
         assert cfg["architect"]["argv"].count(tools) == 1 and cfg["architect"]["argv"][-1] == options["architect_tools"]
-    assert cli.PROJECT_INIT_COMMAND == f"ao init --profile {A.default_profile()}"
+    assert cli.PROJECT_INIT_COMMAND == f"polyctl init --profile {A.default_profile()}"
 
 
 def test_an_unnamed_implementer_is_named_by_its_adapter_and_an_absent_one_by_the_default_profile(project):

@@ -1,12 +1,12 @@
 """The A2A server and the A2A bridge hold to what a loopback service and a careful client hold to (A2A-HARDEN).
 
-The bug hunter's first run over src/ao, on 2026-10-12, named five leads in a2a.py and a2a_mcp.py, all real. The
+The bug hunter's first run over src/polyctl, on 2026-10-12, named five leads in a2a.py and a2a_mcp.py, all real. The
 server answered one connection at a time and read a body's declared length with no limit in time or size, so one
 client that stalled held every other; a request that was valid JSON but no object, or whose params were none,
 ended with no answer. The bridge followed a redirect with every header of the request, an agent's Authorization
 among them, to wherever it pointed; it sent a message again in the other dialect, under a new id, after a timeout
 that left unknown whether the agent had taken it; and a line on its standard input that was a JSON array ended the
-bridge. The server also answered a request named for any host, which `ao watch --web` refuses: a page from another
+bridge. The server also answered a request named for any host, which `polyctl watch --web` refuses: a page from another
 site can point its own name at 127.0.0.1 and read the board through a person's browser.
 """
 import http.client
@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from ao import a2a, a2a_mcp, lib as A
+from polyctl import a2a, a2a_mcp, lib as A
 
 
 @pytest.fixture
@@ -190,7 +190,7 @@ def test_a_line_that_is_no_object_is_answered_and_the_bridge_goes_on(project):
     lines = "[1, 2]\n" + json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}) + "\n"
     env = A.self_child_env(dict(os.environ))
 
-    done = subprocess.run([sys.executable, "-m", "ao", "-C", project["root"], "a2a-mcp", "serve"],
+    done = subprocess.run([sys.executable, "-m", "polyctl", "-C", project["root"], "a2a-mcp", "serve"],
                           input=lines.encode("utf-8"), capture_output=True, env=env, timeout=60)
 
     replies = [json.loads(line) for line in done.stdout.decode("utf-8").splitlines() if line.strip()]

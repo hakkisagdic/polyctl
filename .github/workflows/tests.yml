@@ -73,7 +73,7 @@ jobs:
   trailers:
     # Each commit a push lands on main names the grant it was made under and has the tree that grant
     # names (COMMIT-TRAILER). Commits older than the first one carrying the trailers are history from
-    # before ao wrote them. A ruleset that requires this check is the owner's to set, never ao's.
+    # before polyctl wrote them. A ruleset that requires this check is the owner's to set, never polyctl's.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: commit trailers
     runs-on: ubuntu-latest
@@ -95,7 +95,7 @@ jobs:
         run: |
           range="$BEFORE..$AFTER"
           git cat-file -e "$BEFORE^{commit}" 2>/dev/null || range="$AFTER"
-          PYTHONPATH=src python -m ao commit-check --range "$range" --since-first-trailer
+          PYTHONPATH=src python -m polyctl commit-check --range "$range" --since-first-trailer
 
   weekly:
     if: github.event_name == 'schedule'

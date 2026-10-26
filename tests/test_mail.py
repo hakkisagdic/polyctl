@@ -2,8 +2,8 @@ import json
 import os
 import time
 
-from ao import lib as A
-from ao import mcp
+from polyctl import lib as A
+from polyctl import mcp
 
 
 def test_write_mail_adds_envelope_and_ledger(project):
@@ -15,7 +15,7 @@ def test_write_mail_adds_envelope_and_ledger(project):
     rows = A.mail_log(root)
     assert rows[-1]["event"] == "written" and rows[-1]["summary"] == "x"
     body = open(os.path.join(root, "agent-mail", name), encoding="utf-8").read()
-    assert body.startswith("---\nao: 1\n") and "# x" in body
+    assert body.startswith("---\npolyctl: 1\n") and "# x" in body
 
 
 def test_consumed_mail_is_reconciled(project):
@@ -29,10 +29,10 @@ def test_consumed_mail_is_reconciled(project):
 
 def test_repeated_report_folds_into_one_file(project):
     root = project["root"]
-    r1 = mcp.call("ao_report", {"kind": "blocked", "summary": "queue empty", "needs": "next slice"}, project, False)
+    r1 = mcp.call("polyctl_report", {"kind": "blocked", "summary": "queue empty", "needs": "next slice"}, project, False)
     first = os.path.join(root, "agent-mail", r1["written"])
     os.utime(first, (1_700_000_000, 1_700_000_000))
-    r2 = mcp.call("ao_report", {"kind": "blocked", "summary": "queue empty", "needs": "next slice"}, project, False)
+    r2 = mcp.call("polyctl_report", {"kind": "blocked", "summary": "queue empty", "needs": "next slice"}, project, False)
     assert r2["written"] == r1["written"] and r2["repeated"] == 2
     assert len(os.listdir(os.path.join(root, "agent-mail"))) == 1
     assert os.path.getmtime(first) == 1_700_000_000           # age preserved
@@ -66,7 +66,7 @@ def test_configured_names_are_honoured(project):
     cfg["implementer"] = dict(cfg["implementer"], name="dev")
     cfg["architect"] = dict(cfg["architect"], name="lead")
     root = cfg["root"]
-    r = mcp.call("ao_report", {"kind": "status", "summary": "hi"}, cfg, False)
+    r = mcp.call("polyctl_report", {"kind": "status", "summary": "hi"}, cfg, False)
     assert "-dev-to-lead-STATUS-" in r["written"]
     assert A.implementer_inbox(root, cfg) == []
     open(os.path.join(root, "agent-mail", "20260905-1800-lead-to-dev-DECISION-x.md"), "w", encoding="utf-8").write("# x\n")

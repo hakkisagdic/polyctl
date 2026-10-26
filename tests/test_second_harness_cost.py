@@ -21,7 +21,7 @@ import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_harness_guard import _docstrings
 from tests.test_transcript_shape import ORDINARY, ROOT, _steps
 
@@ -99,7 +99,7 @@ def _store(root, now):
         {"type": "last-prompt", "sessionId": "s1"},
         _prompt(now - 420, "review the candidate"),
         *_response(now - 410, "msg-4", "tool_use", R4, _text("asking for the review"),
-                   _call("call-4", "Bash", command="ao review --boundary b", description="review")),
+                   _call("call-4", "Bash", command="polyctl review --boundary b", description="review")),
         _result(now - 405, "call-4", "review requested", is_error=False),
         *_response(now - 400, "msg-5", "end_turn", R5, _text("the review is requested")),
         _prompt(now - 300, "why does the parser test fail"),
@@ -143,7 +143,7 @@ def test_turns_and_their_classes_come_from_prompts_responses_and_the_tool_calls_
             for turn in costs["turns"]] == [("product", _spent(R1, R2, R3), 2, 1, 1),
                                             ("ceremony", _spent(R4, R5), 1, 0, 0),
                                             ("analysis", _spent(R6, R7), 2, 0, 0)]
-    assert costs["ao_commands"]["review"] == 1 and costs["total"] == _spent(R1, R2, R3, R4, R5, R6, R7)
+    assert costs["polyctl_commands"]["review"] == 1 and costs["total"] == _spent(R1, R2, R3, R4, R5, R6, R7)
 
 
 def test_a_response_written_as_several_records_is_counted_once(project, monkeypatch, tmp_path):
@@ -166,8 +166,8 @@ def test_usage_read_per_response_without_the_path_to_its_id_is_not_read(project,
     declared = {"id": "nested-fixture", "name": "A harness that nests its records", "verified": "untested",
                 "contract": 1, "send": {"argv": ["nested-fixture", "{prompt}"]}, "billing": shipped["billing"],
                 "transcript": shipped["transcript"], "telemetry": dict(shipped["telemetry"], cost=cost)}
-    os.makedirs(os.path.join(project["root"], ".ao", "adapters"), exist_ok=True)
-    with open(os.path.join(project["root"], ".ao", "adapters", "nested-fixture.json"), "w", encoding="utf-8") as fh:
+    os.makedirs(os.path.join(project["root"], ".polyctl", "adapters"), exist_ok=True)
+    with open(os.path.join(project["root"], ".polyctl", "adapters", "nested-fixture.json"), "w", encoding="utf-8") as fh:
         json.dump(declared, fh)
     cfg, transcript = _world(project, monkeypatch, tmp_path, adapter="nested-fixture")
 
@@ -228,7 +228,7 @@ def test_its_tokens_are_not_set_as_a_share_of_an_account_it_does_not_bill(projec
 
     out = capsys.readouterr().out
     assert "implementer spend by turn class" in out and "token; whole transcript" in out
-    assert f"the account: {HARNESS} declares none ao can read" in out and "ao's own share" not in out
+    assert f"the account: {HARNESS} declares none polyctl can read" in out and "polyctl's own share" not in out
 
 
 # ── the core names nothing the nesting declares ──
@@ -236,7 +236,7 @@ def test_its_tokens_are_not_set_as_a_share_of_an_account_it_does_not_bill(projec
 def _nesting_words():
     """Every path step and value a shipped adapter declares in `blocks`, `match`, `turn` and the cost's `response`."""
     words = set()
-    for path in sorted((ROOT / "src" / "ao" / "adapters").glob("*.json")):
+    for path in sorted((ROOT / "src" / "polyctl" / "adapters").glob("*.json")):
         adapter = json.loads(path.read_text(encoding="utf-8"))
         transcript = adapter.get("transcript") if isinstance(adapter.get("transcript"), dict) else {}
         telemetry = adapter.get("telemetry") if isinstance(adapter.get("telemetry"), dict) else {}
@@ -258,9 +258,9 @@ def _nesting_words():
 def _protocol_vocabulary(tree, path):
     """Node ids of the words the ACP client names the protocol's stop reasons by (ACP-REVIEWER).
 
-    `STOP_REASONS` in ao's ACP client is the protocol's own enumeration of why a prompt turn stops. Two of
+    `STOP_REASONS` in polyctl's ACP client is the protocol's own enumeration of why a prompt turn stops. Two of
     its words are ones a harness writes in its transcript too, by coincidence of the protocol's design, and
-    ao reads them from an agent speaking ACP, never from a harness's store: they are not the nesting's.
+    polyctl reads them from an agent speaking ACP, never from a harness's store: they are not the nesting's.
     """
     if path.name != "acp.py":
         return set()
@@ -276,7 +276,7 @@ def test_no_core_module_names_a_field_or_value_the_nesting_declares():
                       + r")(?![A-Za-z0-9_])")
 
     found = []
-    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
+    for path in sorted((ROOT / "src" / "polyctl").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         docs = _docstrings(tree) | _protocol_vocabulary(tree, path)
         found += [f"{path.name}:{node.lineno} {node.value[:80]!r}" for node in ast.walk(tree)

@@ -3,7 +3,7 @@
 The authority model changed several times in a few days, and each hole was found
 by someone attacking it. These are the attacks enumerated instead of rediscovered.
 Every test takes the implementer's side: it holds a real grant, or reaches for
-one, and then does the one thing the attack names. Where ao can only detect rather
+one, and then does the one thing the attack names. Where polyctl can only detect rather
 than prevent - the index race - the test says so and proves the detection.
 """
 import os
@@ -13,7 +13,7 @@ import subprocess
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_commit_authority import _approved_reviewer
 from tests.conftest import review_off
 
@@ -73,7 +73,7 @@ def test_attack_01_stage_swap(project, capsys):
 
 
 def test_attack_02_index_race(project, capsys, monkeypatch):
-    """Git wrote the tree after the hook returned (#64): prevented, since ao commit writes the granted tree itself and
+    """Git wrote the tree after the hook returned (#64): prevented, since polyctl commit writes the granted tree itself and
     runs no hook (LEADS-GATE)."""
     for name in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
         monkeypatch.setenv(name, "t")
@@ -129,7 +129,7 @@ def test_attack_04_retro_review_as_authority(project, capsys):
 
 def test_attack_05_waiver_replay(project, capsys):
     root = project["root"]
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     text = open(board, encoding="utf-8").read()
     open(board, "w", encoding="utf-8").write(text.replace("## running\n", "## running\n- [B7] slice\n"))
     waiver = A.waive(root, "review", "B7", "reviewer at quota", by="alice (owner)")
@@ -154,10 +154,10 @@ def test_attack_06_coordination_path_smuggling(project, capsys):
 
 
 def test_attack_07_hook_removal_fails_closed(project, capsys):
-    """The hook is ao commit-check; removing the state it reads must refuse, not skip (#90)."""
+    """The hook is polyctl commit-check; removing the state it reads must refuse, not skip (#90)."""
     cfg = _granted(project, capsys)
     root = cfg["root"]
-    shutil.rmtree(os.path.join(root, ".ao"))
+    shutil.rmtree(os.path.join(root, ".polyctl"))
 
     code, out = _commit_check(A.load_config(root), capsys)
     assert code == 1 and "COMMIT REFUSED" in out
@@ -168,7 +168,7 @@ def test_attack_07_hook_removal_fails_closed(project, capsys):
 
 def test_attack_08_ledger_truncation(project, capsys):
     cfg = _granted(project, capsys)
-    ledger = os.path.join(cfg["root"], ".ao", "ledger", "authority.jsonl")
+    ledger = os.path.join(cfg["root"], ".polyctl", "ledger", "authority.jsonl")
     open(ledger, "w", encoding="utf-8").write("")
 
     code, out = _commit_check(cfg, capsys)

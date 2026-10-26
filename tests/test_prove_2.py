@@ -1,13 +1,13 @@
 """What the retrospective review of PROVE found that still held (PROVE-2).
 
 A step of the throwaway slice that raised - staging its file, loading its config, or verify, review
-or commit-ok themselves - ended `ao prove` in a traceback, where each check that fails says what
+or commit-ok themselves - ended `polyctl prove` in a traceback, where each check that fails says what
 would fix it. And a `merge.link_paths` entry that could not be linked was dropped without a word, so
 a gate that failed for want of it was reported as the one-line change failing.
 """
 import os
 
-from ao import cli, settings as S
+from polyctl import cli, settings as S
 
 
 def test_a_step_that_raises_is_a_check_that_failed_with_what_would_fix_it(project, monkeypatch):

@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 from tests.test_slice_lifecycle import BOARD, _board, _moves, _review, _slice, _where
 
 
@@ -24,7 +24,7 @@ def test_append_uses_the_heading_line_not_text_before_it(project, state, decoy):
         edit.write()
 
     assert _where(root, "NEW")[0] == state
-    assert open(os.path.join(root, ".ao", "board.md"), encoding="utf-8").read() == before.replace(
+    assert open(os.path.join(root, ".polyctl", "board.md"), encoding="utf-8").read() == before.replace(
         f"\n## {state}\n", f"\n## {state}\n- [NEW] new · acceptance: it works\n")
     (move,) = _moves(root)
     assert (move["slice"], move["from"], move["to"]) == ("NEW", None, state)
@@ -40,7 +40,7 @@ def test_append_refuses_a_missing_heading_without_changing_or_recording_anything
             edit.append("queued", "- [NEW] new")
         assert not edit.changed and not edit.moves
         assert edit.write() is False
-    assert open(os.path.join(root, ".ao", "board.md"), encoding="utf-8").read() == before
+    assert open(os.path.join(root, ".polyctl", "board.md"), encoding="utf-8").read() == before
     assert not os.path.exists(A.slice_ledger_path(root))
 
 
@@ -60,7 +60,7 @@ def test_append_and_move_share_the_readers_heading_rules_at_end_of_file(project,
 def test_board_add_says_how_to_repair_a_missing_section(project, monkeypatch, capsys):
     root = project["root"]
     _board(root, "# Board\n## running\n### queued\n")
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     assert cli.main(["-C", root, "board", "add", "NEW", "new", "--acceptance", "it works"]) == 1
     said = capsys.readouterr().err
     assert "no ## queued heading" in said and "run it again" in said

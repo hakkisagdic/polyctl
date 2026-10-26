@@ -9,8 +9,8 @@ Today a model and an effort are chosen for a role when it is assigned
 ([`profiles.md`](profiles.md)):
 
 ```bash
-ao init --implementer kiro --model <model> --effort high   # written to .ao/config.json
-ao role set reviewer claude-code --model <model>           # the reviewer, composed from its adapter
+polyctl init --implementer kiro --model <model> --effort high   # written to .polyctl/config.json
+polyctl role set reviewer claude-code --model <model>           # the reviewer, composed from its adapter
 ```
 
 An effort the adapter does not list in its `effort_values` is refused for a reviewer and left
@@ -18,14 +18,14 @@ out of the implementer's nudge, with a note.
 
 Not built yet: reading or changing them while a project runs, and a one-turn override.
 
-<!-- not built: ao has no model, effort or run command -->
+<!-- not built: polyctl has no model, effort or run command -->
 ```bash
-ao model                          # what the implementer is running now
-ao model list                     # models the adapter's CLI reports
-ao model set gpt-5.6-sol          # for subsequent turns
-ao effort set max                 # low | medium | high | xhigh | max (adapter-clamped)
+polyctl model                          # what the implementer is running now
+polyctl model list                     # models the adapter's CLI reports
+polyctl model set gpt-5.6-sol          # for subsequent turns
+polyctl effort set max                 # low | medium | high | xhigh | max (adapter-clamped)
 
-ao run --model <m> --effort <e> "<prompt>"   # one turn only, no persistent change
+polyctl run --model <m> --effort <e> "<prompt>"   # one turn only, no persistent change
 ```
 
 In the design, values are clamped to the adapter's `effort_values`, so a profile written
@@ -34,12 +34,12 @@ for a CLI with five levels still works against one that has three.
 ## Per-slice policy
 
 Not built yet: a policy file mapping slice kinds to a model and effort, so routine work stops
-burning the expensive configuration. ao reads no such file; a model and an effort are chosen
+burning the expensive configuration. polyctl reads no such file; a model and an effort are chosen
 per role.
 
-<!-- not built: ao reads no policy file; a model and an effort are chosen per role -->
+<!-- not built: polyctl reads no policy file; a model and an effort are chosen per role -->
 ```yaml
-# .ao/policy.yml
+# .polyctl/policy.yml
 default:        { model: gpt-5.6-sol,  effort: high }
 architecture:   { model: gpt-5.6-sol,  effort: max }     # contracts, security boundaries
 implementation: { model: gpt-5.6-sol,  effort: high }
@@ -67,12 +67,12 @@ the one that wrote the code catches failure modes a self-review shares and misse
 | Gemini / Cursor / Copilot / Q | `--model` | — |
 | Amp | — (chosen internally) | — |
 
-Where a CLI has no effort flag, the adapter sets `effort: null` and `ao` reports that the
+Where a CLI has no effort flag, the adapter sets `effort: null` and `polyctl` reports that the
 lever is unavailable rather than silently ignoring your setting.
 
 ## Cost awareness
 
-agent-orchestrator does not do cost accounting — that is
+polyctl does not do cost accounting — that is
 [keyflip's](keyflip.md) job. What it does is make the *decision* explicit and reviewable:
-each role's model and effort are written into `.ao/config.json`, in the repository, so "why
+each role's model and effort are written into `.polyctl/config.json`, in the repository, so "why
 is this slice running at max effort" has an answer in version control.

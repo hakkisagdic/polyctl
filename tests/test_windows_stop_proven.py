@@ -1,16 +1,16 @@
 """What a stop leaves running is named, never taken as stopped (WINDOWS-STOP-PROVEN).
 
-`ao hold` on Windows stopped each turn with `taskkill /T /F` and said every tree was stopped, whatever
+`polyctl hold` on Windows stopped each turn with `taskkill /T /F` and said every tree was stopped, whatever
 taskkill did: it is refused a process another user or an elevated prompt started, and it finds a
 process's children by the parent each names, so a child whose parent had already exited - a turn's
 wrapper ending as it was stopped - was left running. The watchdog's reaper then started a turn beside
-the one it could not stop, `ao review cancel` recorded a reviewer stopped that worked on, and a harness
+the one it could not stop, `polyctl review cancel` recorded a reviewer stopped that worked on, and a harness
 probe, a codebase provider, a lane's post-create command and a filter hook each said they stopped what
 they started.
 
 Each stop now names every process of the tree, as the table read it just before, to taskkill, asks
-each of them afterwards whether it runs, and returns what does. `ao hold` reads the table again, names
-what still runs and exits 1; the reaper stands down and tells a person (`reap-survived`); `ao review
+each of them afterwards whether it runs, and returns what does. `polyctl hold` reads the table again, names
+what still runs and exits 1; the reaper stands down and tells a person (`reap-survived`); `polyctl review
 cancel` records nothing over a runner that runs on and says which reviewer it could not stop; the others
 say what still runs. A process older than the parent it names belongs to an earlier process that had
 that pid, and is no part of the tree. Windows is made here on every platform: its system directory, its
@@ -26,8 +26,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import acp, cli, lib as A, procs
-from ao import watchdog as W
+from polyctl import acp, cli, lib as A, procs
+from polyctl import watchdog as W
 from tests.scenarios import World
 from tests.test_acp_probe import _adapter, _probe, agent  # noqa: F401  (agent is a fixture used here)
 
@@ -142,10 +142,10 @@ def test_a_forced_stop_elsewhere_returns_what_of_its_tree_still_runs_and_a_reque
     assert sent == [(4242, signal.SIGTERM), (4242, signal.SIGKILL)]
 
 
-# ---- ao hold -----------------------------------------------------------------------------------------------
+# ---- polyctl hold -----------------------------------------------------------------------------------------------
 
 def _hold_as_windows(project, monkeypatch, running, refused=()):
-    """`ao hold` as Windows runs it, on the turns in `running`: taskkill stops each of them but those `refused`,
+    """`polyctl hold` as Windows runs it, on the turns in `running`: taskkill stops each of them but those `refused`,
     which still run after it. Returns the exit status."""
     A.project_key(project["root"])                     # registered first, as every test that locks under "nt"
 
@@ -175,7 +175,7 @@ def test_a_hold_names_the_turn_taskkill_left_running_and_exits_1(project, monkey
     out = _plain(capsys)
     assert "HELD — 1 process tree(s) stopped by force (Windows)." in out
     assert ("1 process(es) still run in this tree after the hold: [4343]. The hold stands and the watchdog starts "
-            f"nothing beside them; {BY_HAND_ON_WINDOWS} - `ao hold status` shows what still runs") in out
+            f"nothing beside them; {BY_HAND_ON_WINDOWS} - `polyctl hold status` shows what still runs") in out
     assert A.hold_state(project["root"])["stopped"] == [4242, 4343]
 
 
@@ -214,7 +214,7 @@ def test_a_hold_names_what_its_orphan_sweep_left_running(project, monkeypatch, c
     assert "clearing 1 orphaned process(es) left by ended turns: [300]" in out
     assert "hold set — no agent turn was running" in out
     assert (f"1 process(es) still run in this tree after the hold: [301]. The hold stands and the watchdog starts "
-            f"nothing beside them; {cli._stop_by_hand()} - `ao hold status` shows what still runs") in out
+            f"nothing beside them; {cli._stop_by_hand()} - `polyctl hold status` shows what still runs") in out
 
 
 def test_writers_clean_says_what_its_sweep_left_running(project, monkeypatch, capsys):
@@ -259,7 +259,7 @@ def test_the_reaper_starts_no_turn_beside_one_it_could_not_stop_and_tells_a_pers
                                                                         "human")]
 
 
-# ---- ao review cancel and the reviewers ---------------------------------------------------------------------
+# ---- polyctl review cancel and the reviewers ---------------------------------------------------------------------
 
 def _running_review(root, **fields):
     cli._write_review_state(root, dict({"id": "R-1", "state": "running", "submitted_at": int(time.time()) - 600,
@@ -279,7 +279,7 @@ def test_review_cancel_records_nothing_over_a_runner_that_still_runs(project, mo
     assert cli.cmd_review_cancel(project, SimpleNamespace(rid="R-1")) == 1
 
     assert _plain(capsys).strip() == ("R-1 is not cancelled: its runner, pid 4242, still runs after it was stopped, "
-                                      f"with [4242]; {cli._stop_by_hand()}, then `ao review cancel R-1` again")
+                                      f"with [4242]; {cli._stop_by_hand()}, then `polyctl review cancel R-1` again")
     assert cli._review_state(root, "R-1")["state"] == "running"
 
 
@@ -296,7 +296,7 @@ def test_review_cancel_says_which_reviewer_it_could_not_stop_and_keeps_its_place
 
     assert cli.cmd_review_cancel(project, SimpleNamespace(rid="R-1")) == 1
 
-    reason = ("cancelled by `ao review cancel`: its runner was already gone; its reviewer, pid 4343, still runs: it "
+    reason = ("cancelled by `polyctl review cancel`: its runner was already gone; its reviewer, pid 4343, still runs: it "
               "could not be stopped")
     assert _plain(capsys).splitlines() == [
         f"R-1 cancelled: {reason}",
@@ -375,7 +375,7 @@ def test_a_probe_that_failed_and_left_nothing_running_says_only_why_it_failed(pr
     assert "still run" not in said and acp.ProbeError("x").still_running == ()
 
 
-# ---- what ao starts and stops on its own: a provider, a lane's command, a filter hook -------------------------
+# ---- what polyctl starts and stops on its own: a provider, a lane's command, a filter hook -------------------------
 
 def test_a_codebase_provider_stopped_on_its_timeout_says_what_of_it_still_runs(tmp_path, monkeypatch):
     stop = A.kill_turn

@@ -1,4 +1,4 @@
-"""A reviewer ao runs as a tool over the staged candidate, on its own provider (#86).
+"""A reviewer polyctl runs as a tool over the staged candidate, on its own provider (#86).
 
 The tool here is a fake written by the test, standard library only, that behaves the
 way the shipped pr-agent adapter says pr-agent does in plain-diff mode: it reads the
@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, language, lib as A
+from polyctl import cli, language, lib as A
 from tests.test_language_prompts import _newest_review
 from tests.test_review_chain import _args, _repo_with_change
 from tests.test_reviewer_identity import _commit_ok
@@ -94,7 +94,7 @@ def _seen(record):
 _only_review = _newest_review
 
 
-def test_ao_hands_the_tool_the_exact_staged_candidate_and_the_evidence_names_it(project, tmp_path, monkeypatch):
+def test_polyctl_hands_the_tool_the_exact_staged_candidate_and_the_evidence_names_it(project, tmp_path, monkeypatch):
     root = project["root"]
     _repo_with_change(root)
     staged = A.index_candidate(root)
@@ -116,7 +116,7 @@ def test_ao_hands_the_tool_the_exact_staged_candidate_and_the_evidence_names_it(
                                     "adapter": "pr-agent", "model": MODEL}
     assert evidence["verdict"] == "APPROVED" and A.reviews(root, "semantic-review")[0][1] == "APPROVED"
     assert f"- tool: `pr-agent`  model: `{MODEL}`  handed: `{digest}`" in body
-    # ao's own prompt, the candidate in it, as the question; the answer read is the one after it.
+    # polyctl's own prompt, the candidate in it, as the question; the answer read is the one after it.
     assert seen["command"] == "ask" and language.text(project, "prompt.review-candidate") in seen["question"]
     assert "+x = 2" in seen["question"] and "SEEN: " + digest in body
     assert not seen["repository_above"] and seen["env"]["GIT_DIR"] is None
@@ -140,7 +140,7 @@ def test_a_tool_route_that_runs_another_program_than_its_adapter_declares_review
 
 
 def test_the_pr_agent_extra_is_bounded_to_the_release_its_adapter_was_measured_against():
-    """REVIEWER-TOOL-2: an unbounded pin let a pr-agent whose settings moved answer while ao recorded its pinned model."""
+    """REVIEWER-TOOL-2: an unbounded pin let a pr-agent whose settings moved answer while polyctl recorded its pinned model."""
     with open(os.path.join(os.path.dirname(__file__), os.pardir, "pyproject.toml"), encoding="utf-8") as fh:
         (requirement,) = [line for line in fh.read().splitlines() if line.startswith("pr-agent = [")]
     assert ">=0.45.0,<0.46;" in requirement
@@ -177,7 +177,7 @@ def test_a_tool_reviewers_approval_is_evidence_commit_ok_grants_on(project, tmp_
     assert A.latest_authority_decision(root)["reviewer"] == "tool-reviewer"
 
 
-def test_the_tool_runs_on_the_model_ao_pins_and_takes_no_setting_from_the_environment(project, tmp_path,
+def test_the_tool_runs_on_the_model_polyctl_pins_and_takes_no_setting_from_the_environment(project, tmp_path,
                                                                                     monkeypatch):
     root = project["root"]
     _repo_with_change(root)
@@ -204,11 +204,11 @@ def test_the_tool_runs_on_the_model_ao_pins_and_takes_no_setting_from_the_enviro
 
 
 def test_an_absent_tool_is_unavailable_and_says_what_would_install_it(project, tmp_path, monkeypatch):
-    from ao import email, telegram
+    from polyctl import email, telegram
     root = project["root"]
     _repo_with_change(root)
     route, _ = _tool(tmp_path, monkeypatch)
-    absent = ["ao-test-absent-review-tool"] + route["argv"][2:]
+    absent = ["polyctl-test-absent-review-tool"] + route["argv"][2:]
     _declare(monkeypatch, absent)                              # the adapter's own command, not on this machine
     route = dict(route, argv=absent)
     monkeypatch.setattr(cli, "_tool_beside_interpreter", lambda name: None)
@@ -234,7 +234,7 @@ def test_the_architects_route_and_window_are_not_what_a_tool_review_spends(proje
     architect = {"name": "fable", "argv": [sys.executable, "-c", f"open({str(woke)!r}, 'w').write('ran')",
                                            "{prompt}"]}
     route, record = _tool(tmp_path, monkeypatch)
-    with open(os.environ["AO_SETTINGS"], "w", encoding="utf-8") as fh:
+    with open(os.environ["POLYCTL_SETTINGS"], "w", encoding="utf-8") as fh:
         json.dump({"keyflip": {"rotation": "on"}}, fh)
     windows, rotations, rotate = [], [], A.rotate_if_exhausted
     monkeypatch.setattr(A, "provider_window", lambda name: windows.append(name))
@@ -264,7 +264,7 @@ def test_a_tool_reviewer_is_composed_from_its_adapter_and_names_a_family(project
     with pytest.raises(ValueError, match="with --model"):
         A.compose_reviewer("pr-agent")
 
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in project.items() if key != "root"}, fh)
     args = SimpleNamespace(action="set", role="reviewer", actor="pr-agent", model=MODEL, effort=None, family=None,
                            hotfix=False)

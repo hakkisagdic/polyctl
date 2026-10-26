@@ -5,11 +5,11 @@ What the person who publishes a release runs, in order, one command at a time.
 does; this page is the list to tick.
 
 Each step says who takes it. A step marked *person* is one only a person takes: publishing and
-pushing - ao never grants a push, and PyPI never lets a published version number be used again -
+pushing - polyctl never grants a push, and PyPI never lets a published version number be used again -
 and starting the hosted test runs, which run on the maintainer's word. An agent may prepare every
 other step, as a candidate that lands through verify, review and commit-ok like any slice.
 
-*In ao since slice RELEASE-NOTES: this checklist, and [CHANGELOG.md](../CHANGELOG.md), whose
+*In polyctl since slice RELEASE-NOTES: this checklist, and [CHANGELOG.md](../CHANGELOG.md), whose
 Unreleased section is the draft of the next release's notes (backlog #12).*
 
 The commands below read the version from one variable:
@@ -21,37 +21,37 @@ V=0.5.0
 ## 1. The notes say what ships (anyone)
 
 Every commit since the last tag has its line under Unreleased in CHANGELOG.md, and the README's
-command rows and adapter table, in both languages, match `ao --help` and `ao adapters`. No review is
-still owed for what ships: `ao catchup --plan` lists each open review waiver and writes nothing, and
+command rows and adapter table, in both languages, match `polyctl --help` and `polyctl adapters`. No review is
+still owed for what ships: `polyctl catchup --plan` lists each open review waiver and writes nothing, and
 releasing over one is the owner's decision, not the checklist's.
 
 The documentation checks in `tests/test_docs_names.py` count a path only when it reaches
 path construction, a file open, a write or printed output. An unused string or tuple is no
-evidence that ao names it. A block showing a JSON file must contain exactly one JSON value;
+evidence that polyctl names it. A block showing a JSON file must contain exactly one JSON value;
 JSONL examples may contain several. These checks prevent an unused constant or an unchecked
 second value from making an incorrect example pass (TRIAGE-2-LOW).
 
 ```bash
 git log --oneline "$(git describe --tags --abbrev=0)"..HEAD
-ao catchup --plan
+polyctl catchup --plan
 ```
 
-## 2. Bump the version (anyone prepares; it lands through ao)
+## 2. Bump the version (anyone prepares; it lands through polyctl)
 
-The version is written once, as `__version__` in `src/ao/__init__.py`: `pyproject.toml` and
-`ao --version` read it, and the release workflow refuses a tag that differs from it. In
+The version is written once, as `__version__` in `src/polyctl/__init__.py`: `pyproject.toml` and
+`polyctl --version` read it, and the release workflow refuses a tag that differs from it. In
 CHANGELOG.md, rename `## [Unreleased]` to `## [<version>] - <date>`, open an empty
 `## [Unreleased]` above it, point the `[Unreleased]` link at `v<version>...HEAD` and add a
 `[<version>]` link from the previous tag. The clone must still run with nothing installed.
 
 ```bash
-sed -i.bak "s/^__version__ = .*/__version__ = \"$V\"/" src/ao/__init__.py && rm src/ao/__init__.py.bak
-PYTHONPATH=src python3 -m ao --version
-./bin/ao adapters
-ao verify
-ao review
-ao commit-ok
-ao commit -m "release: v$V"
+sed -i.bak "s/^__version__ = .*/__version__ = \"$V\"/" src/polyctl/__init__.py && rm src/polyctl/__init__.py.bak
+PYTHONPATH=src python3 -m polyctl --version
+./bin/polyctl adapters
+polyctl verify
+polyctl review
+polyctl commit-ok
+polyctl commit -m "release: v$V"
 ```
 
 ## 3. Push main (person)
@@ -82,7 +82,7 @@ from it. Tag the commit the runs in step 4 tested, annotated as every earlier ta
 `git push --follow-tags` sends annotated tags only, so push the tag by its name.
 
 ```bash
-git tag -a "v$V" -m "ao $V - <the release in one line>" origin/main
+git tag -a "v$V" -m "polyctl $V - <the release in one line>" origin/main
 git push origin "v$V"
 ```
 
@@ -101,24 +101,24 @@ one-time pending publisher, set in a browser by the account owner
 
 ```bash
 gh run list --workflow release --limit 1
-D=$(mktemp -d) && python3 -m venv "$D" && "$D/bin/pip" install "ao-orchestrator==$V" && "$D/bin/ao" --version
+D=$(mktemp -d) && python3 -m venv "$D" && "$D/bin/pip" install "polyctl==$V" && "$D/bin/polyctl" --version
 ```
 
 ## 7. Homebrew formula (anyone prepares; person pushes)
 
-In `packaging/homebrew/agent-orchestrator.rb`, set `url` to the `v$V` tarball and `sha256` to the
-digest below, which the release run also printed, and land it through ao with a message like the
+In `packaging/homebrew/polyctl.rb`, set `url` to the `v$V` tarball and `sha256` to the
+digest below, which the release run also printed, and land it through polyctl with a message like the
 `brew: 0.4.0` commit's. A person pushes main, copies the formula into the tap repository as
-`Formula/agent-orchestrator.rb` and pushes that, then checks the install; a machine without it
-installs with `brew tap hakkisagdic/tap && brew install agent-orchestrator`.
+`Formula/polyctl.rb` and pushes that, then checks the install; a machine without it
+installs with `brew tap hakkisagdic/tap && brew install polyctl`.
 
 ```bash
-curl -sL "https://github.com/hakkisagdic/agent-orchestrator/archive/refs/tags/v$V.tar.gz" | shasum -a 256
-ao verify && ao review && ao commit-ok && ao commit -m "brew: $V"
+curl -sL "https://github.com/hakkisagdic/polyctl/archive/refs/tags/v$V.tar.gz" | shasum -a 256
+polyctl verify && polyctl review && polyctl commit-ok && polyctl commit -m "brew: $V"
 git push origin main
-cp packaging/homebrew/agent-orchestrator.rb "$TAP/Formula/agent-orchestrator.rb"
-git -C "$TAP" commit -am "agent-orchestrator $V" && git -C "$TAP" push
-brew update && brew upgrade agent-orchestrator && brew test agent-orchestrator
+cp packaging/homebrew/polyctl.rb "$TAP/Formula/polyctl.rb"
+git -C "$TAP" commit -am "polyctl $V" && git -C "$TAP" push
+brew update && brew upgrade polyctl && brew test polyctl
 ```
 
 `$TAP` is a clone of the tap repository, `homebrew-tap` under the same account.

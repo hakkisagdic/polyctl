@@ -2,12 +2,12 @@
 (LOOPBACK-BIND).
 
 HTTPServer names itself with socket.getfqdn(), a reverse lookup that waits on a resolver slow to answer;
-on a hosted macOS runner `ao watch --web` did not listen within the ten seconds its tests give it. Both
+on a hosted macOS runner `polyctl watch --web` did not listen within the ten seconds its tests give it. Both
 servers are named by their address, and the lookup here fails the test if it is made at all.
 """
 import socket
 
-from ao import a2a, web
+from polyctl import a2a, web
 
 
 def _no_lookup(monkeypatch):

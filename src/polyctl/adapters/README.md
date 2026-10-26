@@ -1,0 +1,101 @@
+# Adapters
+
+One JSON file per agent CLI. Everything vendor-specific lives here; the orchestrator core
+knows nothing about any provider. See [`../docs/adapters.md`](../docs/adapters.md) for the
+interface, the two observation modes and the support matrix.
+
+## Status of what is here
+
+| File | Status | Verified against |
+|---|---|---|
+| `kiro.json` | **full** | kiro-cli / Kiro IDE 1.0.411 — reference adapter, multi-week production use |
+| `antigravity.json` | **full** | agy 1.1.19, measured again on 1.3.0 — call-return mode, token accounting verified; reviews as an agent that only reads |
+| `claude-code.json` | **full** | Claude Code |
+| `opencode.json` | partial | storage path verified, flags from docs; reviews as an agent that only reads, measured on 1.18.27 |
+| `codex.json` | partial | codex-cli 0.160.0 — the reviewer's command measured; the session store not |
+| everything else | untested | written from documented interfaces |
+
+`untested` means exactly that: the file encodes a documented interface that nobody has run
+against a live install. Flags drift between releases. Treat those adapters as a starting
+point, not a promise.
+
+`rewriters/` holds no adapter. Each file there says how a command rewriter - a program a
+harness's hook runs an agent's shell commands through, such as rtk - rewrites the commands a
+grant names, measured on one of its releases, so every grant polyctl composes also admits the
+rewritten form (docs/adapters.md, "A grant admits what a command rewriter makes of the
+commands it names").
+
+## Contributing one
+
+The most valuable contribution to this project is moving a row from `untested` to `full`.
+It takes about fifteen minutes.
+
+**1. Verify the command surface.**
+
+```bash
+<cli> --help
+```
+
+Record the exact non-interactive form. Note whether flags take attached values
+(`--print='x'`) or separated ones (`-p 'x'`) — this is not cosmetic. A CLI using Go-style
+flags will silently swallow a separated prompt, exit 0, and store nothing. That failure
+looks identical to an agent deciding to do nothing, and it cost us an afternoon.
+
+**2. Find out how it reports a turn.**
+
+```bash
+<cli> --output-format json --print='say OK'
+```
+
+If you get a structured record back, it is a **call-return** adapter — usually with a
+session id and token usage included, which is better than any transcript. Record the field
+names in `result_record` and `telemetry`.
+
+**3. If not, find the transcript.**
+
+```bash
+cd /tmp && mkdir probe && cd probe
+<cli> <non-interactive form> 'MYPROBE12345 write this word only'
+grep -rl "MYPROBE12345" ~/.<tool> ~/.config ~/.local/share ~/Library/Application\ Support 2>/dev/null
+```
+
+Beware false positives: some tools record your *shell history*, so the marker can appear
+in a completely unrelated store because your command text contained it. Confirm by looking
+at the surrounding record, not just the filename.
+
+**4. Work out busy detection.** A status field in session metadata, the write age of the
+transcript, or — for call-return adapters — nothing at all, because the call is
+synchronous.
+
+**5. Fill in the file** using `kiro.json` as the model, set `verified` honestly, and open a
+pull request. Include the CLI version you tested against.
+
+## Rules
+
+- **argv arrays, never shell strings.** Prompts contain quotes, newlines and backticks;
+  there must be no string for them to escape out of.
+- **Encode the exact flag form.** Never improvise separated/attached syntax at call time.
+- **Read-only observation.** Never write to a vendor's session store. For SQLite-backed
+  agents, open read-only — a second writer corrupts the agent's own state.
+- **Record where credentials live, never their values.**
+- **`verified` is a claim about you, not the tool.** Set it to what you actually ran.
+- **Name it in `vendors.json`.** Every shipped adapter is named by one vendor there, and a vendor
+  with no adapter says why; a test fails when the list and the files disagree (#89). If the
+  command it runs is not `send.argv[0]`, declare it in `detect.binaries`.
+- **Declare what the harness reads from a project.** `project_config` lists the files and folders it
+  reads from the folder it starts in as its configuration - hooks, plugins, MCP servers, agents,
+  settings - and `directives.steering_files` the instruction files. polyctl withholds every adapter's
+  names from the tree a reviewer reads, wherever they are, and unpacks that tree into a folder of
+  its own: a harness started where the candidate's tree was ran the candidate's hooks, plugins and
+  MCP servers (REVIEW-TREE-3). A test fails when an adapter that can review a tree declares none.
+  The same names are what polyctl watches in a working tree: a change to one that no person has seen is
+  named by `polyctl verify`, `polyctl doctor` and the watchdog, and holds every wake, refill, nudge, hunt and
+  lane there until a person reads it with `polyctl harness seen` (HARNESS-CONFIG). A harness that makes
+  worktrees inside one of those folders declares where in `worktree_dirs` (`.claude/worktrees`):
+  a worktree of the repository is skipped there and only there, so one made at `.claude` itself
+  is read as configuration; and a link git tracks at one of the names is read through to what it
+  leads to, so its target cannot change unseen.
+- **Declare how an unattended turn looks.** `detect.headless` lists the arguments of the
+  non-interactive form (`-p`, `--print`, a subcommand such as `exec`). `polyctl hold` and the
+  watchdog's reap stop only a process holding one its own harness declares, and a test fails
+  when a command the adapter's `send` or `resume` runs holds none.

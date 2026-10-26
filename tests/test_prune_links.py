@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 
 def _git(root, *args):
@@ -21,9 +21,9 @@ def _git(root, *args):
 def _commit_merge_gates(root):
     # Merge-check reads the resulting tree's definitions (C6), so cleanup tests need
     # gates in their fixture's commit to reach the worktree and lock lifecycle.
-    (Path(root) / ".ao" / "gates.json").write_text(json.dumps({
+    (Path(root) / ".polyctl" / "gates.json").write_text(json.dumps({
         "gates": {"check": {"run": "unused"}}, "profiles": {"full": ["check"]}}), encoding="utf-8")
-    _git(root, "add", ".ao/gates.json")
+    _git(root, "add", ".polyctl/gates.json")
     _git(root, "commit", "-qm", "declare merge gates")
 
 
@@ -85,7 +85,7 @@ def test_slice_cleanup_refuses_links_without_touching_outside(project, tmp_path,
             A.prune_worktree(root, {"path": str(tree), "branch": ""}, apply=True)
         assert str(path) in str(refusal.value)
         assert "remove the link or junction" in str(refusal.value)
-        assert "ao prunes no worktree while it is there" in str(refusal.value)
+        assert "polyctl prunes no worktree while it is there" in str(refusal.value)
         assert {p.name: p.read_bytes() for p in outside.iterdir()} == before
         assert not any(args[0] == "worktree" for args in calls)
         if present:
@@ -132,7 +132,7 @@ def test_unreadable_administration_runs_no_cleanup(project, tmp_path, monkeypatc
     monkeypatch.setattr(os, "scandir", unreadable_scan)
     monkeypatch.setattr(os, "lstat", unreadable_lstat)
     monkeypatch.setattr(A, "_git_output", record)
-    with pytest.raises(A.WorktreeCleanupRefused, match="ao prunes no worktree while it cannot be read"):
+    with pytest.raises(A.WorktreeCleanupRefused, match="polyctl prunes no worktree while it cannot be read"):
         A._git_worktree_cleanup(root, operation, *([] if operation == "prune" else ["--force", "unused"]))
     assert not any(args[0] == "worktree" for args in calls)
 
@@ -177,7 +177,7 @@ def test_a_link_in_the_common_directory_is_refused_from_a_linked_checkout(projec
     _git(root, "worktree", "add", "--detach", str(caller), "HEAD")
     path, outside = _poison(root, tmp_path, "entry", "symlink")
     try:
-        with pytest.raises(A.WorktreeCleanupRefused, match="ao prunes no worktree while it is there"):
+        with pytest.raises(A.WorktreeCleanupRefused, match="polyctl prunes no worktree while it is there"):
             A._git_worktree_cleanup(str(caller), "prune")
         assert (outside / "valuable").read_bytes() == b"keep these bytes"
     finally:
@@ -210,7 +210,7 @@ def test_failed_lane_start_reports_the_cleanup_refusal(project, tmp_path):
     try:
         failure = A._drop_lane_branch(root, "lane/test", base)
         assert "the branch lane/test stays" in failure
-        assert str(path) in failure and "ao prunes no worktree" in failure
+        assert str(path) in failure and "polyctl prunes no worktree" in failure
         assert _git(root, "rev-parse", "lane/test") == base
         assert (outside / "valuable").read_bytes() == b"keep these bytes"
     finally:
@@ -230,8 +230,8 @@ def test_prove_reports_cleanup_refusal_as_a_failed_check(project, tmp_path, monk
     try:
         ok, failed, fix, _ = cli._prove_throwaway(project)
         assert not ok and "worktree cleanup failed" in failed
-        assert str(paths[0]) in failed and "ao prunes no worktree" in failed
-        assert fix and list(tmp_path.glob("ao-prove-*/tree/.git"))
+        assert str(paths[0]) in failed and "polyctl prunes no worktree" in failed
+        assert fix and list(tmp_path.glob("polyctl-prove-*/tree/.git"))
         assert (tmp_path / "outside" / "valuable").read_bytes() == b"keep these bytes"
     finally:
         for path in paths:
@@ -255,9 +255,9 @@ def test_merge_check_reports_cleanup_refusal_and_releases_its_lock(project, tmp_
             branch="HEAD", into="HEAD", profile="full", wait=0)) == 1
         out = capsys.readouterr().out
         assert "worktree cleanup failed" in out and str(paths[0]) in out
-        assert "ao prunes no worktree" in out and released == [True]
+        assert "polyctl prunes no worktree" in out and released == [True]
         assert not A.merge_checks(root)[-1]["passed"]
-        assert list(tmp_path.glob("ao-merge-check-*/result/.git"))
+        assert list(tmp_path.glob("polyctl-merge-check-*/result/.git"))
         assert (tmp_path / "outside" / "valuable").read_bytes() == b"keep these bytes"
     finally:
         for path in paths:
@@ -273,7 +273,7 @@ def _fail_git_cleanup(monkeypatch, tmp_path, operation):
         if args[:2] == ("worktree", operation):
             if operation == "remove":
                 return output(root, "worktree", "remove", "--force", str(tmp_path / "not-a-worktree"))
-            return output(root, "worktree", "prune", "--ao-test-invalid-option")
+            return output(root, "worktree", "prune", "--polyctl-test-invalid-option")
         return output(root, *args, **kwargs)
 
     monkeypatch.setattr(A, "_git_output", fail)
@@ -295,7 +295,7 @@ def test_merge_check_keeps_a_pass_when_git_cleanup_fails(project, tmp_path, monk
 
     assert A.merge_checks(root)[-1]["passed"]
     assert released == [True] and calls == ["remove", "prune"]
-    assert not list(tmp_path.glob("ao-merge-check-*"))
+    assert not list(tmp_path.glob("polyctl-merge-check-*"))
     assert "worktree cleanup incomplete" in capsys.readouterr().out
 
 
@@ -308,7 +308,7 @@ def test_prove_keeps_a_pass_when_git_cleanup_fails(project, tmp_path, monkeypatc
     assert cli._prove_throwaway(project)[:3] == (True, None, None)
 
     assert calls == ["remove", "prune"]
-    assert not list(tmp_path.glob("ao-prove-*"))
+    assert not list(tmp_path.glob("polyctl-prove-*"))
     assert "worktree cleanup incomplete" in capsys.readouterr().out
 
 
@@ -337,7 +337,7 @@ def test_a_differently_cased_worktrees_link_is_refused(project, tmp_path, monkey
 
     monkeypatch.setattr(A, "_git_output", record)
     try:
-        with pytest.raises(A.WorktreeCleanupRefused, match="ao prunes no worktree while it is there"):
+        with pytest.raises(A.WorktreeCleanupRefused, match="polyctl prunes no worktree while it is there"):
             A._git_worktree_cleanup(root, operation, *([] if operation == "prune" else ["--force", "unused"]))
         assert calls == [("rev-parse", "--git-common-dir")]
         assert (outside / "valuable").read_bytes() == b"keep these bytes"
@@ -402,8 +402,8 @@ def test_a_failed_add_that_made_nothing_does_not_run_cleanup(project, tmp_path, 
         assert not result[0] and "could not be made" in result[1]
     assert not calls
     assert "worktree cleanup" not in capsys.readouterr().out
-    assert not list(tmp_path.glob("ao-merge-check-*"))
-    assert not list(tmp_path.glob("ao-prove-*"))
+    assert not list(tmp_path.glob("polyctl-merge-check-*"))
+    assert not list(tmp_path.glob("polyctl-prove-*"))
 
 
 @pytest.mark.parametrize("state", ["removed", "refused", "add-failed", "skipped"])
@@ -426,13 +426,13 @@ def test_prove_says_whether_its_worktree_is_gone_or_remains(project, tmp_path, m
         summary = capsys.readouterr().out.splitlines()[-1]
         assert "nothing was committed" in summary
         if state == "refused":
-            trees = list(tmp_path.glob("ao-prove-*/tree"))
+            trees = list(tmp_path.glob("polyctl-prove-*/tree"))
             assert len(trees) == 1
             assert f"the throwaway worktree remains at {trees[0]}" in summary
             assert "worktree is gone" not in summary
         elif state == "removed":
             assert "the throwaway worktree is gone" in summary
-            assert not list(tmp_path.glob("ao-prove-*"))
+            assert not list(tmp_path.glob("polyctl-prove-*"))
         else:
             assert "no throwaway worktree was made" in summary
             assert "worktree is gone" not in summary

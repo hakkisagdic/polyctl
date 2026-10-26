@@ -1,14 +1,14 @@
 """A count is never below the findings the reviewer listed (REVIEW-FINDINGS-COUNT).
 
-A reviewer declares four counts and lists its findings, and ao decided by the counts alone: an answer
+A reviewer declares four counts and lists its findings, and polyctl decided by the counts alone: an answer
 that counted HIGH 0 above a listed HIGH finding was recorded as an approval. The findings are now
-counted too, wherever they stand and under no heading in particular, and each count ao decides by is
-the larger of the two, so the list can only make a verdict stricter. A verdict line or count ao cannot
+counted too, wherever they stand and under no heading in particular, and each count polyctl decides by is
+the larger of the two, so the list can only make a verdict stricter. A verdict line or count polyctl cannot
 read still makes the answer INVALID: nothing here reads a looser answer than before.
 """
 import os
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_review_chain import _args, _fake, _repo_with_change
 
 CLEAN = ["VERDICT: APPROVED", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0"]
@@ -93,7 +93,7 @@ def test_a_declared_count_stands_where_its_findings_are_written_in_another_shape
     assert "a count is never below" not in body
 
 
-def test_a_verdict_line_ao_cannot_read_is_still_invalid_whatever_the_findings(project):
+def test_a_verdict_line_polyctl_cannot_read_is_still_invalid_whatever_the_findings(project):
     root = project["root"]
     _repo_with_change(root)
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": _fake(

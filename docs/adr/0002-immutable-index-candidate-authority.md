@@ -33,7 +33,7 @@ Bind every authority stage to the same candidate:
   then rejects index mutation during review;
 - grant revalidates matching verification and independent review evidence before
   durably recording the candidate and scope; and
-- `ao commit-check`, including the optional pre-commit hook boundary, revalidates the
+- `polyctl commit-check`, including the optional pre-commit hook boundary, revalidates the
   live active index against that grant immediately before Git proceeds.
 
 ## Consequences
@@ -58,7 +58,7 @@ but does not mutate the index or worktree.
 
 - This authority model requires a valid Git repository and index; it is not a generic
   filesystem transaction mechanism.
-- The pre-commit enforcement boundary is optional. AO detects index mutation whenever
+- The pre-commit enforcement boundary is optional. polyctl detects index mutation whenever
   it revalidates, but cannot prevent a final mutation after the last check when the hook
   is not installed or another commit path bypasses it.
 - Candidate isolation detects worktree drift at measurement boundaries; it does not
@@ -68,8 +68,8 @@ but does not mutate the index or worktree.
 
 ## References/Supersession
 
-- Implementation: candidate and evidence logic in [`src/ao/lib.py`](../../src/ao/lib.py)
-  and command boundaries in [`src/ao/cli.py`](../../src/ao/cli.py)
+- Implementation: candidate and evidence logic in [`src/polyctl/lib.py`](../../src/polyctl/lib.py)
+  and command boundaries in [`src/polyctl/cli.py`](../../src/polyctl/cli.py)
 - Evidence: [`tests/test_candidate_authority.py`](../../tests/test_candidate_authority.py),
   [`tests/test_commit_authority.py`](../../tests/test_commit_authority.py), and
   [`tests/test_review_scope.py`](../../tests/test_review_scope.py)

@@ -2,14 +2,14 @@
 
 A message whose body could not be read, or whose written time in the mail ledger was no number, was
 dropped from the unseen messages, so a decision request so read never climbed the ladder. And which
-time ages a message was shown only for mail written by hand: one ao writes is aged from the ledger.
+time ages a message was shown only for mail written by hand: one polyctl writes is aged from the ledger.
 """
 import os
 import time
 
 import pytest
 
-from ao import lib as A
+from polyctl import lib as A
 from tests.test_unread_age import REQUEST
 
 BODY = "# which store keeps the ledger?\n\n## KARAR GEREKLİ\n"
@@ -33,7 +33,7 @@ def test_a_message_whose_ledger_time_is_no_number_is_aged_by_its_file(project):
     assert message["class"] == "needs-decision" and 85 * 60 < message["age"] < 95 * 60
 
 
-def test_a_message_ao_wrote_is_aged_from_the_ledger_whatever_its_file_says(project):
+def test_a_message_polyctl_wrote_is_aged_from_the_ledger_whatever_its_file_says(project):
     A.write_mail(project["root"], project, REQUEST, BODY)
     old = time.time() - 300 * 60
     os.utime(os.path.join(project["root"], "agent-mail", REQUEST), (old, old))

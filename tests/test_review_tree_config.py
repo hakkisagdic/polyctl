@@ -5,14 +5,14 @@ Claude Code ran a SessionStart hook from the tree's .claude/settings.json before
 the PreInvocation, PreToolUse and Stop hooks of its .agents/hooks.json, and OpenCode 1.18.27 loaded a plugin from
 .opencode/plugin and started an MCP server from opencode.json - each though the reviewer's own tools only read. So an
 implementer could run commands of its choice as the person, outside its own sandbox, by staging them. The tree now goes
-into a folder of its own, `candidate/`, so the root a harness reads its project from holds only what ao writes; and the
+into a folder of its own, `candidate/`, so the root a harness reads its project from holds only what polyctl writes; and the
 files and folders any adapter declares its harness reads from a project are not unpacked at all, wherever they are.
 """
 import os
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.standin import program
 from tests.test_review_tree import _tree_of
 
@@ -76,7 +76,7 @@ def test_a_project_config_that_could_name_a_place_outside_a_project_is_refused()
         assert any("project_config" in problem for problem in problems), bad
 
 
-def test_the_names_come_from_the_adapters_ao_ships_and_steering_files_count(monkeypatch):
+def test_the_names_come_from_the_adapters_polyctl_ships_and_steering_files_count(monkeypatch):
     """What a reviewer is handed is the package's to say: a project's own adapters, which an agent can write, add
     nothing; and an adapter's project steering files are withheld with its configuration, its home's are not."""
     shipped = {"a": {"project_config": [".a"], "directives": {"steering_files": ["A.md", "~/.a/A.md"]}}}

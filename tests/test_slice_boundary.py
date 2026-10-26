@@ -4,7 +4,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 APPROVED = ("VERDICT: APPROVED", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0")
 
@@ -23,7 +23,7 @@ def _write(root, path, text):
 
 def _board(root, *lines, state="queued"):
     body = "# Board\n\n## running\n\n## blocked\n\n## queued\n\n## verified\n\n## done\n"
-    _write(root, ".ao/board.md", body.replace(f"## {state}\n", f"## {state}\n" + "".join(f"{l}\n" for l in lines)))
+    _write(root, ".polyctl/board.md", body.replace(f"## {state}\n", f"## {state}\n" + "".join(f"{l}\n" for l in lines)))
 
 
 def test_an_acceptance_needing_a_file_outside_the_declared_paths_is_named_at_registration(project, capsys):

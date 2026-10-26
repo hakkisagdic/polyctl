@@ -27,8 +27,8 @@ The reader **deletes** the message once it has been fully processed or explicitl
 rejected. A deleted file is the acknowledgement — there is no separate ack channel and
 no state to keep in sync.
 
-*In ao since slice LEADS-OPEN: `ao mail ack` under `AO_ROLE=implementer` or
-`AO_ROLE=architect` accepts only mail addressed to that role, using the inbox's
+*In polyctl since slice LEADS-OPEN: `polyctl mail ack` under `POLYCTL_ROLE=implementer` or
+`POLYCTL_ROLE=architect` accepts only mail addressed to that role, using the inbox's
 address check. If any name matched by a glob belongs to another reader, nothing
 in that glob is acknowledged. An unknown or non-mail role is refused; a person
 with no role set can acknowledge either inbox. This applies to deletion and to
@@ -90,39 +90,39 @@ REPORT
 - Completed: <what actually happened>
 - Files: <changed files | none>
 - Validation: <exact checks and exact results>
-- Verification: <ao verify id> <passed | FAILED>, each gate's exit code and the runner's closing line, as ao records them
+- Verification: <polyctl verify id> <passed | FAILED>, each gate's exit code and the runner's closing line, as polyctl records them
 - Git: <local commit sha | not committed>, <pushed | not pushed>
 - Blockers: <none | what stops the next step>
 ```
 
-`ao_report` adds the Verification line itself, from the ledger. A report whose words claim green -
+`polyctl_report` adds the Verification line itself, from the ledger. A report whose words claim green -
 "159 passed", "all tests pass" - while the newest verification failed is marked `## INCONSISTENT`,
 and the watchdog raises it as an `inconsistent-report` anomaly: the exit code decides, never the prose.
 
 ## Markers
 
-Some words in a message are read by ao as well as by its reader: a heading that makes a message
+Some words in a message are read by polyctl as well as by its reader: a heading that makes a message
 urgent, a word in its file name. A project writes them in its `language`, English unless it set
-`tr` ([configuration.md](configuration.md)), and ao reads both languages' markers in every project,
+`tr` ([configuration.md](configuration.md)), and polyctl reads both languages' markers in every project,
 whatever it chose, so mail written before a project changed its language, or by an agent following
-an older playbook, is still found, surfaced and escalated. The files `ao init` writes name the
+an older playbook, is still found, surfaced and escalated. The files `polyctl init` writes name the
 markers in the project's language.
 
 | Marker | English | Turkish | Written by | What reading it does |
 |---|---|---|---|---|
-| urgent heading | `## URGENT` | `## ACİL` | `ao note --urgent`, `ao decide --urgent`, a phone message | printed by `ao lock` and `ao verify`, attached to every `ao_*` response; `ao commit-ok` refuses until it is acknowledged |
+| urgent heading | `## URGENT` | `## ACİL` | `polyctl note --urgent`, `polyctl decide --urgent`, a phone message | printed by `polyctl lock` and `polyctl verify`, attached to every `polyctl_*` response; `polyctl commit-ok` refuses until it is acknowledged |
 | stop heading | `## STOP` | `## DUR` | a person or an agent | as the urgent heading |
-| decision heading | `## DECISION REQUIRED` | `## KARAR GEREKLİ` | `ao_report` with `kind: "blocked"` | the watchdog escalates the report on its next cycle; unseen, it climbs the alarm ladder as a message that needs a decision |
+| decision heading | `## DECISION REQUIRED` | `## KARAR GEREKLİ` | `polyctl_report` with `kind: "blocked"` | the watchdog escalates the report on its next cycle; unseen, it climbs the alarm ladder as a message that needs a decision |
 | urgent note's kind | `-URGENT-` | `-ACIL-` | with the urgent heading | the kind in the file name |
-| handoff's kind | `-HANDOFF.md` | `-DEVIR.md` | `ao handoff` | the kind in the file name |
-| what a successor can do | `## What a successor can do` | `## Devralan ne yapabilir` | `ao handoff` | the phone is sent the note above it |
-| a decision's free-text option | `Other (free text)` | `Başka (serbest metin)` | `ao ask`, `ao_ask` | an option labeled so is answered in words, `x <text>` |
-| a folded report's repeats | `Repeat: N` | `Tekrar: N` | `ao_report`, when the same report is standing | the count is read back and raised |
-| kinds of message | `DECISION`, `REPORT` | `KARAR`, `RAPOR` | agents; `ao note` writes `DECISION` in both | a decision asks for one; a report only informs |
+| handoff's kind | `-HANDOFF.md` | `-DEVIR.md` | `polyctl handoff` | the kind in the file name |
+| what a successor can do | `## What a successor can do` | `## Devralan ne yapabilir` | `polyctl handoff` | the phone is sent the note above it |
+| a decision's free-text option | `Other (free text)` | `Başka (serbest metin)` | `polyctl ask`, `polyctl_ask` | an option labeled so is answered in words, `x <text>` |
+| a folded report's repeats | `Repeat: N` | `Tekrar: N` | `polyctl_report`, when the same report is standing | the count is read back and raised |
+| kinds of message | `DECISION`, `REPORT` | `KARAR`, `RAPOR` | agents; `polyctl note` writes `DECISION` in both | a decision asks for one; a report only informs |
 
 A report's blockers line is read the same way: `Blockers: none` and `Engel: yok` say there are none.
 
-*In ao since slice TR-MARKER-FOLD: a heading is found however it is cased. Python lowers the capital
+*In polyctl since slice TR-MARKER-FOLD: a heading is found however it is cased. Python lowers the capital
 İ to an i and a combining dot, so a reader that lowered a message found `## KARAR GEREKLİ` but not
 `## ACİL`: the watchdog filed such a report as one waiting rather than a decision asked for, and went
 on nudging an implementer that waited on it. Every reader now lowers a message with the capital İ as
@@ -130,17 +130,17 @@ a plain i first.*
 
 ## Verdicts
 
-Verdicts: `APPROVED`, `NEEDS_CHANGES` (a reviewer's), `UNAVAILABLE`, `INVALID` (ao's: no review took place, or the answer broke the schema). Review status: `pending`, `complete`, `invalid`, `unavailable`.
+Verdicts: `APPROVED`, `NEEDS_CHANGES` (a reviewer's), `UNAVAILABLE`, `INVALID` (polyctl's: no review took place, or the answer broke the schema). Review status: `pending`, `complete`, `invalid`, `unavailable`.
 
-These are closed sets owned by `src/ao/verdicts.py`. A verdict line holding anything else - `APPROVE`, `LGTM`, two verdicts - reads as `INVALID`, which is neither a round nor an approval. Only `APPROVED` with no BLOCKER or HIGH can authorise a commit.
+These are closed sets owned by `src/polyctl/verdicts.py`. A verdict line holding anything else - `APPROVE`, `LGTM`, two verdicts - reads as `INVALID`, which is neither a round nor an approval. Only `APPROVED` with no BLOCKER or HIGH can authorise a commit.
 
-A reviewer is asked for this schema in the project's `language`: its findings under `## Findings` and what lies outside the candidate under `## Notes`, or `## Bulgular` and `## Notlar` in a project that chose Turkish. ao reads the verdict line, the four count lines and each `- [SEVERITY] file:line` finding, spelled the same in both, and of the headings only whether a line stands under the notes, in either language, so an answer carrying either language's headings is the same review.
+A reviewer is asked for this schema in the project's `language`: its findings under `## Findings` and what lies outside the candidate under `## Notes`, or `## Bulgular` and `## Notlar` in a project that chose Turkish. polyctl reads the verdict line, the four count lines and each `- [SEVERITY] file:line` finding, spelled the same in both, and of the headings only whether a line stands under the notes, in either language, so an answer carrying either language's headings is the same review.
 
-*In ao since slice REVIEW-FINDINGS-COUNT: each count ao decides by is the larger of the count the reviewer declared and the findings it listed at that severity. A finding is a `- [SEVERITY] …` line at the start of its line, outside an indented or fenced block and outside the notes, which cannot change the verdict whatever they carry. An answer that counted HIGH 0 above a listed HIGH finding was an approval; it is NEEDS_CHANGES now, and the artefact's `- adjudicated:` line says which count its list raised. A count can only rise: the declared one still decides where the findings are written in a shape ao does not read, and a verdict line or count ao cannot read still makes the answer INVALID.*
+*In polyctl since slice REVIEW-FINDINGS-COUNT: each count polyctl decides by is the larger of the count the reviewer declared and the findings it listed at that severity. A finding is a `- [SEVERITY] …` line at the start of its line, outside an indented or fenced block and outside the notes, which cannot change the verdict whatever they carry. An answer that counted HIGH 0 above a listed HIGH finding was an approval; it is NEEDS_CHANGES now, and the artefact's `- adjudicated:` line says which count its list raised. A count can only rise: the declared one still decides where the findings are written in a shape polyctl does not read, and a verdict line or count polyctl cannot read still makes the answer INVALID.*
 
-*In ao since slice REVIEW-REASK: an answer whose verdict line or counts do not stand once each at the start of a line is asked for once more before it is INVALID. The same reviewer is handed the same prompt with a note naming the lines it missed - `VERDICT: …`, or a count such as `HIGH: <n>` written twice - in the project's language, and the second answer is read exactly as the first was. A second answer that cannot be read either, or does not come, leaves the review INVALID as before, and the artefact says the reviewer was asked twice; a read one carries a `- re-asked:` line. A section is asked again on its own, and a tool route, which answers into a file, is not asked again.*
+*In polyctl since slice REVIEW-REASK: an answer whose verdict line or counts do not stand once each at the start of a line is asked for once more before it is INVALID. The same reviewer is handed the same prompt with a note naming the lines it missed - `VERDICT: …`, or a count such as `HIGH: <n>` written twice - in the project's language, and the second answer is read exactly as the first was. A second answer that cannot be read either, or does not come, leaves the review INVALID as before, and the artefact says the reviewer was asked twice; a read one carries a `- re-asked:` line. A section is asked again on its own, and a tool route, which answers into a file, is not asked again.*
 
-When the boundary lists criteria, the answer carries one more kind of line, spelled the same in both languages: `CRITERION <n>: MET` or `CRITERION <n>: NOT MET`, followed by the evidence. A criterion's verdict is `met` or `not met`, a closed set in `src/ao/verdicts.py` like the others; a criterion no line judged has none, and only `met` lets `ao commit-ok` grant ([pipeline.md](pipeline.md), §2c).
+When the boundary lists criteria, the answer carries one more kind of line, spelled the same in both languages: `CRITERION <n>: MET` or `CRITERION <n>: NOT MET`, followed by the evidence. A criterion's verdict is `met` or `not met`, a closed set in `src/polyctl/verdicts.py` like the others; a criterion no line judged has none, and only `met` lets `polyctl commit-ok` grant ([pipeline.md](pipeline.md), §2c).
 
 ## Trust boundary
 
@@ -209,16 +209,16 @@ decision behind for anyone reading the history afterwards.
 ## Before the same price is paid twice
 
 Everything worth remembering is already on disk: questions and their answers, architect
-decisions, waivers, review findings with their verdicts, and `docs/lessons.md`. `ao recall`
+decisions, waivers, review findings with their verdicts, and `docs/lessons.md`. `polyctl recall`
 reads it back, across every project registered on the machine:
 
 ```bash
-ao recall path boundary conflict model.ts
+polyctl recall path boundary conflict model.ts
 ```
 
 Each result names its project, date, kind and outcome, and the file and row it came from,
 so an answer can be checked against its source. It is plain words over those files: no
-index, no service, no network. Opening a decision runs the same search - `ao ask` prints a
+index, no service, no network. Opening a decision runs the same search - `polyctl ask` prints a
 near match ("asked or decided before") and the phone message carries it - so a question
 answered last week in another project reaches the human with that answer beside it,
 rather than being answered from scratch.
@@ -253,11 +253,11 @@ Stopping for a question is not stopping the queue. The playbook writes down what
 implementer settles alone while the architect is away (the next READY item, how to split
 a slice, whether a finding is in scope, when to park), what it never settles however
 long nobody answers (landing without review, its own authority), and what it does when
-blocked: ask, park the slice with `ao slice block "…"` - the move is recorded, and the
+blocked: ask, park the slice with `polyctl slice block "…"` - the move is recorded, and the
 reason becomes its `needs:` - and take the next READY item. The watchdog
 keeps to it: an open decision stands the implementer down only when nothing is READY;
 otherwise the nudge names the question that waits and the item to take instead. The
-questions accumulate for the architect to answer in one pass, and `ao doctor` says how
+questions accumulate for the architect to answer in one pass, and `polyctl doctor` says how
 long it has been away and how many wait.
 
 ## Channel choice: mail carries scope, steering carries rules
@@ -294,51 +294,51 @@ transient confusion does, and it is the cheapest fix available for a loop.
 
 ## Changing the rules: an agent proposes, a person decides
 
-The rules an agent works under - the playbook, a steering or rule file, `.ao/authority.md`, a
+The rules an agent works under - the playbook, a steering or rule file, `.polyctl/authority.md`, a
 gate - are the one text it must never rewrite because it judges them wrong. An agent that edits
 the rule it is held to has decided its own authority, and nobody else did; and a rule that
 really is wrong still has to reach the person who can change it. A slice whose scope names the
 change is scope, as any slice is. Otherwise an agent proposes the change:
 
 ```bash
-ao propose "Run the full gates before review when a slice touches the ledger" \
+polyctl propose "Run the full gates before review when a slice touches the ledger" \
   --why "two slices passed quick, were approved, and failed full after landing" \
-  --rule-file .ao/gates.json
-ao proposals                     # what waits for a person
-ao answer D-1789560000 a         # a person decides: a) accept, b) reject, x <their own words>
-ao proposals --all               # every proposal, with its answer
+  --rule-file .polyctl/gates.json
+polyctl proposals                     # what waits for a person
+polyctl answer D-1789560000 a         # a person decides: a) accept, b) reject, x <their own words>
+polyctl proposals --all               # every proposal, with its answer
 ```
 
-`ao propose`, or `ao_propose` over MCP, records the proposal as a row of the decision ledger,
-`.ao/ledger/decisions.jsonl`, chained as `ao decide` chains its rows. The row holds who proposed
+`polyctl propose`, or `polyctl_propose` over MCP, records the proposal as a row of the decision ledger,
+`.polyctl/ledger/decisions.jsonl`, chained as `polyctl decide` chains its rows. The row holds who proposed
 it, the change, why, the rule file with the digest of its bytes then, and the evidence: the
-outcomes of the project's last ten landed slices, as `ao stats` measures them. Who is what ao can
-establish, as a waived grant records its author: the role of a turn ao started, with the actor
-holding it and its adapter, or a caller ao did not start, by the CLI or MCP. `--why` is required,
+outcomes of the project's last ten landed slices, as `polyctl stats` measures them. Who is what polyctl can
+establish, as a waived grant records its author: the role of a turn polyctl started, with the actor
+holding it and its adapter, or a caller polyctl did not start, by the CLI or MCP. `--why` is required,
 and a rule file must be one of the project's own files. With the row goes a question in
-`.ao/decisions/`, sent to the phone when one is set up, and answered as every question is:
-`ao answer` in a terminal, or a tap on the phone.
+`.polyctl/decisions/`, sent to the phone when one is set up, and answered as every question is:
+`polyctl answer` in a terminal, or a tap on the phone.
 
 The question waits in a state of its own, `proposed`, not `open`: it parks no slice, so no nudge
 stands down for it, it climbs no alarm ladder and wakes no architect, and a handoff does not list
-it among what unblocks the work. `ao decisions` shows it; `ao proposals` lists the open ones, and
+it among what unblocks the work. `polyctl decisions` shows it; `polyctl proposals` lists the open ones, and
 with `--all` each decided one with its answer, who gave it, and whether the rule file changed
 since it was proposed. The same change proposed again while one stands open is not recorded twice.
 
-A person decides it. `ao answer` refuses a proposal's question from a turn ao started, for either
-role, and `ao decide --answers` refuses it before recording or mailing anything: both would be an
-agent deciding the rules it works under. What ao cannot see stays a limit, as with every person's
+A person decides it. `polyctl answer` refuses a proposal's question from a turn polyctl started, for either
+role, and `polyctl decide --answers` refuses it before recording or mailing anything: both would be an
+agent deciding the rules it works under. What polyctl cannot see stays a limit, as with every person's
 act: an agent in a session a person opened, answering at a terminal, looks like that person.
 
-Nothing writes a rule file: not `ao propose`, and not an accepted answer. Accepting records the
+Nothing writes a rule file: not `polyctl propose`, and not an accepted answer. Accepting records the
 decision; the change itself is an edit a person makes, or has made, where the rule lives.
 
-*In ao since slice RULE-PROPOSALS: `ao propose`, `ao proposals` and the `ao_propose` MCP tool. A
+*In polyctl since slice RULE-PROPOSALS: `polyctl propose`, `polyctl proposals` and the `polyctl_propose` MCP tool. A
 proposal is a chained row of the decision ledger and a question in the state `proposed`, which a
-person accepts or rejects through `ao answer` or the phone; neither the command nor the answer
+person accepts or rejects through `polyctl answer` or the phone; neither the command nor the answer
 writes a rule file.*
 
-*In ao since slice RULE-PROPOSALS-2: the evidence a proposal is decided beside names each rate's denominator - the landed slices, how many of them were reviewed, and which rates are of which - and a review ledger that cannot be read is said unread, where it was shown as no slice having landed. A decision given at a terminal records the login it ran under and whether a terminal was attached, as every other act ao attributes to a person does, and `ao proposals --all` shows both.*
+*In polyctl since slice RULE-PROPOSALS-2: the evidence a proposal is decided beside names each rate's denominator - the landed slices, how many of them were reviewed, and which rates are of which - and a review ledger that cannot be read is said unread, where it was shown as no slice having landed. A decision given at a terminal records the login it ran under and whether a terminal was attached, as every other act polyctl attributes to a person does, and `polyctl proposals --all` shows both.*
 
 ## Waking the architect
 
@@ -347,7 +347,7 @@ an anomaly report, and both would sit there — the human saw it, the architect 
 not, and nothing moved until someone forwarded it by hand. Three reports queued
 that way in one afternoon.
 
-So `.ao/config.json` names an architect the watchdog can start:
+So `.polyctl/config.json` names an architect the watchdog can start:
 
 ```json
 {"architect": {
@@ -355,7 +355,7 @@ So `.ao/config.json` names an architect the watchdog can start:
   "cwd": "/path/to/the/architect's/working/directory",
   "session": "auto",
   "argv": ["claude", "--resume", "{session}", "-p", "{prompt}", "--permission-mode", "dontAsk",
-           "--allowedTools", "Read,Grep,Glob,Edit(/.ao/board.md),Bash(ao status:*),…"]}}
+           "--allowedTools", "Read,Grep,Glob,Edit(/.polyctl/board.md),Bash(polyctl status:*),…"]}}
 ```
 
 Three decisions in that block are load-bearing.
@@ -376,9 +376,9 @@ and a wake that cannot tell whose a session is refuses and says why
 ([profiles.md](profiles.md#how-auto-finds-a-session)).
 
 **Scoped tools.** An unattended architect with unrestricted Bash is what goes
-wrong at 3am. It may inspect, run the `ao` commands its routine names, and edit
+wrong at 3am. It may inspect, run the `polyctl` commands its routine names, and edit
 the coordination files; it may not run arbitrary commands or write product code,
-it runs in the permission mode ao pins rather than one a person's settings
+it runs in the permission mode polyctl pins rather than one a person's settings
 default to, and nothing anywhere grants push ([safety.md](safety.md#5-trust-flags-are-a-decision-not-a-default)).
 
 The two-writer hazard that cost this project a night does not apply: Claude Code

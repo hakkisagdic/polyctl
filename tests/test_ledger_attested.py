@@ -1,11 +1,11 @@
-"""Every gate ledger counts only rows this machine's checkpoint store records ao committing (LEDGER-ATTESTED).
+"""Every gate ledger counts only rows this machine's checkpoint store records polyctl committing (LEDGER-ATTESTED).
 
 An implementer can write any file in the working tree. A self-consistent row appended by hand - an APPROVED review,
 a waiver, a grant, a passing verification, an architect decision, or a plan re-admission - links cleanly to the
 row before it, or starts at `previous: null` in a new file. `read_chained_jsonl` and `read_chained_history` now
 return only the attested prefix (`storage._attested_length`), `append_chained_jsonl` refuses a ledger holding
 foreign rows past that prefix, an interrupted append whose write-ahead digest matches the checkpoint intent is
-taken back on the next append, and `ao doctor` names `<ledger>-unattested` and `<ledger>-unreadable` across one
+taken back on the next append, and `polyctl doctor` names `<ledger>-unattested` and `<ledger>-unreadable` across one
 loop over the gate ledgers.
 """
 import hashlib
@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 from tests.conftest import review_off
 
 GIT = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
@@ -65,7 +65,7 @@ def _forge_chained_row(path, chain, record):
 
 
 def _running_slice(root, slice_id="B7", notes=""):
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     text = open(board, encoding="utf-8").read()
     suffix = f" · {notes}" if notes else ""
     with open(board, "w", encoding="utf-8") as fh:
@@ -132,8 +132,8 @@ def test_a_forged_approved_review_row_authorizes_nothing_and_doctor_names_it(pro
     assert cli.cmd_commit(project, SimpleNamespace(message="land", file=None)) == 1
     problems = dict(cli.doctor_problems(project))
     assert "1 row(s)" in problems["reviews-unattested"]
-    assert "the first 1 row(s) are ao's own and stay" in problems["reviews-unattested"]
-    with pytest.raises(storage.LedgerCorruption, match="does not record ao appending"):
+    assert "the first 1 row(s) are polyctl's own and stay" in problems["reviews-unattested"]
+    with pytest.raises(storage.LedgerCorruption, match="does not record polyctl appending"):
         A.record_review(root, "later.md", b"VERDICT: APPROVED\n", evidence, "APPROVED")
 
 
@@ -172,8 +172,8 @@ def test_a_forged_waiver_row_is_not_found_and_doctor_names_it(project, capsys):
     assert cli.cmd_commit(project, SimpleNamespace(message="land", file=None)) == 1
     problems = dict(cli.doctor_problems(project))
     assert "1 row(s)" in problems["waivers-unattested"]
-    assert "the first 2 row(s) are ao's own and stay" in problems["waivers-unattested"]
-    with pytest.raises(storage.LedgerCorruption, match="does not record ao appending"):
+    assert "the first 2 row(s) are polyctl's own and stay" in problems["waivers-unattested"]
+    with pytest.raises(storage.LedgerCorruption, match="does not record polyctl appending"):
         A.waive(root, "review", "B7", "real waiver", by="Ada")
 
 
@@ -186,7 +186,7 @@ def test_a_forged_grant_row_grants_nothing_and_doctor_names_it(project, capsys):
     A.record_authority(root, False, ["refused"], candidate["digest"], verification["id"], "C-refused",
                        candidate=candidate)
     _forge_chained_row(
-        os.path.join(root, ".ao", "ledger", "authority.jsonl"),
+        os.path.join(root, ".polyctl", "ledger", "authority.jsonl"),
         A.AUTHORITY_CHAIN,
         {
             "at": int(time.time()),
@@ -215,8 +215,8 @@ def test_a_forged_grant_row_grants_nothing_and_doctor_names_it(project, capsys):
     assert _git(root, "rev-parse", "HEAD") == head
     problems = dict(cli.doctor_problems(cfg))
     assert "1 row(s)" in problems["authority-unattested"]
-    assert "the first 1 row(s) are ao's own and stay" in problems["authority-unattested"]
-    with pytest.raises(storage.LedgerCorruption, match="does not record ao appending"):
+    assert "the first 1 row(s) are polyctl's own and stay" in problems["authority-unattested"]
+    with pytest.raises(storage.LedgerCorruption, match="does not record polyctl appending"):
         A.record_authority(root, True, [], candidate["digest"], verification["id"], "C-real", candidate=candidate)
 
 
@@ -226,7 +226,7 @@ def test_a_forged_verification_row_verifies_nothing_and_doctor_names_it(project,
     candidate = _stage(root)
     _verify(root, candidate, passed=False)
     _forge_chained_row(
-        os.path.join(root, ".ao", "ledger", "verifications.jsonl"),
+        os.path.join(root, ".polyctl", "ledger", "verifications.jsonl"),
         A.VERIFICATION_CHAIN,
         {
             "id": f"V-{time.time_ns()}",
@@ -247,8 +247,8 @@ def test_a_forged_verification_row_verifies_nothing_and_doctor_names_it(project,
     assert cli.cmd_commit(cfg, SimpleNamespace(message="land", file=None)) == 1
     problems = dict(cli.doctor_problems(cfg))
     assert "1 row(s)" in problems["verifications-unattested"]
-    assert "the first 1 row(s) are ao's own and stay" in problems["verifications-unattested"]
-    with pytest.raises(storage.LedgerCorruption, match="does not record ao appending"):
+    assert "the first 1 row(s) are polyctl's own and stay" in problems["verifications-unattested"]
+    with pytest.raises(storage.LedgerCorruption, match="does not record polyctl appending"):
         _verify(root, candidate, passed=True)
 
 
@@ -296,15 +296,15 @@ def test_a_forged_decision_row_resets_no_round_budget_and_doctor_names_it(projec
     assert A.rounds(root, "semantic-review") == 3
     problems = dict(cli.doctor_problems(project))
     assert "1 row(s)" in problems["decisions-unattested"]
-    assert "the first 1 row(s) are ao's own and stay" in problems["decisions-unattested"]
-    with pytest.raises(storage.LedgerCorruption, match="does not record ao appending"):
+    assert "the first 1 row(s) are polyctl's own and stay" in problems["decisions-unattested"]
+    with pytest.raises(storage.LedgerCorruption, match="does not record polyctl appending"):
         _decide(root, "real decision", scope="B7", at=now + 120)
 
 
 def test_a_forged_plan_readmission_row_clears_no_plan_drift_and_doctor_names_it(project, capsys):
     root = project["root"]
     cfg = review_off(project)
-    plan_file = os.path.join(root, ".ao", "plans", "B7.md")
+    plan_file = os.path.join(root, ".polyctl", "plans", "B7.md")
     os.makedirs(os.path.dirname(plan_file), exist_ok=True)
     with open(plan_file, "w", encoding="utf-8") as fh:
         fh.write("initial plan\n")
@@ -317,7 +317,7 @@ def test_a_forged_plan_readmission_row_clears_no_plan_drift_and_doctor_names_it(
     candidate = _stage(root)
     _verify(root, candidate)
     _forge_chained_row(
-        os.path.join(root, ".ao", "ledger", "plans.jsonl"),
+        os.path.join(root, ".polyctl", "ledger", "plans.jsonl"),
         A.PLAN_CHAIN,
         {"at": int(time.time()), "item": "B7", "digest": drifted,
          "event": "readmitted", "replaces": admitted},
@@ -330,8 +330,8 @@ def test_a_forged_plan_readmission_row_clears_no_plan_drift_and_doctor_names_it(
     assert "plan" in capsys.readouterr().out.lower()
     problems = dict(cli.doctor_problems(cfg))
     assert "1 row(s)" in problems["plans-unattested"]
-    assert "the first 1 row(s) are ao's own and stay" in problems["plans-unattested"]
-    with pytest.raises(storage.LedgerCorruption, match="does not record ao appending"):
+    assert "the first 1 row(s) are polyctl's own and stay" in problems["plans-unattested"]
+    with pytest.raises(storage.LedgerCorruption, match="does not record polyctl appending"):
         A.record_plan(root, "B7", drifted)
 
 
@@ -346,7 +346,7 @@ def test_ledgers_copied_in_with_no_checkpoint_entry_count_no_rows(project, tmp_p
     A.record_plan(root, "B7", "p1")
     for n in range(3):
         A.record_authority(root, True, [], candidate["digest"], "V-1", f"C-{n}", candidate=candidate)
-    storage.seal_chained_jsonl(os.path.join(root, ".ao", "ledger", "authority.jsonl"), A.AUTHORITY_CHAIN, keep=1)
+    storage.seal_chained_jsonl(os.path.join(root, ".polyctl", "ledger", "authority.jsonl"), A.AUTHORITY_CHAIN, keep=1)
 
     # Clear the machine's checkpoint store as if these ledgers were copied in from another machine.
     with open(storage.checkpoint_path(), "w", encoding="utf-8") as fh:
@@ -364,12 +364,12 @@ def test_ledgers_copied_in_with_no_checkpoint_entry_count_no_rows(project, tmp_p
     problems = dict(cli.doctor_problems(project))
     for name in ("authority", "verifications", "waivers", "reviews", "decisions", "plans"):
         assert f"{name}-unattested" in problems
-        assert "no row of it is ao's own; a person moves the file aside" in problems[f"{name}-unattested"]
+        assert "no row of it is polyctl's own; a person moves the file aside" in problems[f"{name}-unattested"]
 
 
 def test_crash_between_writing_a_row_and_recording_its_count_recovers_on_next_append(project, monkeypatch):
     root = project["root"]
-    path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     first = A.record_authority(root, False, ["refused"], "sha256:0", "V-0", "C-0")
 
     # Simulate a crash (process death) after the row is written and synced to disk, before _record_committed_length
@@ -409,7 +409,7 @@ def test_crash_between_writing_a_row_and_recording_its_count_recovers_on_next_ap
 
 def test_a_foreign_row_with_a_different_digest_than_the_recorded_intent_is_refused_not_cut(project):
     root = project["root"]
-    path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     first = A.record_authority(root, False, ["refused"], "sha256:0", "V-0", "C-0")
     # Record a write-ahead intent whose digest is a valid sha256 hex digest, but different from the foreign row's.
     intent_digest = "sha256:" + "a" * 64
@@ -424,7 +424,7 @@ def test_a_foreign_row_with_a_different_digest_than_the_recorded_intent_is_refus
     before = open(path, "rb").read()
 
     assert A.authority_rows(root) == [first]
-    with pytest.raises(storage.LedgerCorruption, match="the first 1 row\\(s\\) are ao's own and stay"):
+    with pytest.raises(storage.LedgerCorruption, match="the first 1 row\\(s\\) are polyctl's own and stay"):
         A.record_authority(root, True, [], "sha256:new", "V-2", "C-new")
     # The foreign row was refused, not cut.
     assert open(path, "rb").read() == before
@@ -443,7 +443,7 @@ def test_doctor_names_each_unreadable_gate_ledger_without_swallowing_it(project)
 
     for rel in ("authority.jsonl", "verifications.jsonl", "waivers.jsonl", "reviews.jsonl",
                 "decisions.jsonl", "plans.jsonl"):
-        with open(os.path.join(root, ".ao", "ledger", rel), "w", encoding="utf-8") as fh:
+        with open(os.path.join(root, ".polyctl", "ledger", rel), "w", encoding="utf-8") as fh:
             fh.write("{corrupt\n")
 
     problems = dict(cli.doctor_problems(project))
@@ -466,8 +466,8 @@ def test_aos_own_ledgers_keep_working_across_append_read_and_seal(project):
     _decide(root, "d1", scope="B7")
     A.record_plan(root, "B7", "p1")
 
-    auth_path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
-    ver_path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
+    auth_path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
+    ver_path = os.path.join(root, ".polyctl", "ledger", "verifications.jsonl")
     storage.seal_chained_jsonl(auth_path, A.AUTHORITY_CHAIN, keep=2)
     storage.seal_chained_jsonl(ver_path, A.VERIFICATION_CHAIN, keep=2, legacy_prefix=True)
 
@@ -513,15 +513,15 @@ def test_a_ledger_reached_through_a_path_whose_realpath_differs_looks_up_its_att
 
 
 def test_non_gate_chained_stores_with_no_checkpoint_entry_still_read_and_append(project):
-    """MEDIUM: one list of gate ledgers in storage is used by both the attested-prefix rule and `ao doctor`;
+    """MEDIUM: one list of gate ledgers in storage is used by both the attested-prefix rule and `polyctl doctor`;
     every other chained store (`mail-store`, `slices`, `repairs`, `merges`) reads and appends as before when
     this machine has no checkpoint entry for it."""
     root = project["root"]
     assert [name for name, *_ in storage.GATE_LEDGERS] == [
         "opt-ins", "authority", "verifications", "waivers", "reviews", "decisions", "plans"
     ]
-    slices_path = os.path.join(root, ".ao", "ledger", "slices.jsonl")
-    mail_path = os.path.join(root, ".ao", "ledger", "mail-store.jsonl")
+    slices_path = os.path.join(root, ".polyctl", "ledger", "slices.jsonl")
+    mail_path = os.path.join(root, ".polyctl", "ledger", "mail-store.jsonl")
     storage.append_chained_jsonl(slices_path, {"at": 1, "id": "S1", "from": "queued", "to": "running", "by": "human"},
                                  A.SLICE_CHAIN)
     storage.append_chained_jsonl(mail_path, {"at": 1, "event": "message", "id": "m1.md", "body": "hi"},
@@ -574,7 +574,7 @@ def test_refused_append_with_foreign_row_and_unterminated_tail_leaves_file_byte_
     """LOW: `_repair_partial_tail` must not cut an unterminated tail before the foreign-row check runs; a refused
     append leaves the file byte for byte as it was."""
     root = project["root"]
-    path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     A.record_authority(root, False, ["refused"], "sha256:0", "V-0", "C-0")
     _forge_chained_row(
         path,
@@ -586,6 +586,6 @@ def test_refused_append_with_foreign_row_and_unterminated_tail_leaves_file_byte_
         fh.write(b'{"unterminated": true')
     before = open(path, "rb").read()
 
-    with pytest.raises(storage.LedgerCorruption, match="does not record ao appending"):
+    with pytest.raises(storage.LedgerCorruption, match="does not record polyctl appending"):
         A.record_authority(root, True, [], "sha256:new", "V-2", "C-new")
     assert open(path, "rb").read() == before

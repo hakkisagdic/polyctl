@@ -2,12 +2,12 @@
 
 The adapter was first written from a running Qoder store whose send, resume, options and mcp
 blocks had never been run because no CLI was present. qodercli 1.1.59 was then run on
-2026-09-21, and those blocks now describe what the CLI does. This reads them back: the argv ao
+2026-09-21, and those blocks now describe what the CLI does. This reads them back: the argv polyctl
 builds its turns from, the grant it appends to a turn nobody attends, the model and session
 listings, the MCP registration, and the read-only route a composed reviewer takes - so a later
 edit that drops a measured flag or reopens a bypass is caught here rather than in a live turn.
 """
-from ao import allowlist as AL, lib as A
+from polyctl import allowlist as AL, lib as A
 
 
 def _after(argv, flag):
@@ -35,9 +35,9 @@ def test_qoder_maps_claude_codes_pinned_mode_and_tools_onto_its_own_flags():
     assert unattended[:3] == ["--permission-mode", "accept_edits", "--allowed-tools"]
     assert _after(unattended, "--permission-mode") == "accept_edits"
     granted = _after(unattended, "--allowed-tools").split(",")
-    assert granted[0] == "Bash(ao status:*)" and all(rule.startswith("Bash(") for rule in granted)
+    assert granted[0] == "Bash(polyctl status:*)" and all(rule.startswith("Bash(") for rule in granted)
     assert not {"Read", "Grep", "Glob", "Write", "Edit"} & set(granted)
-    assert "Bash(ao:*)" not in granted
+    assert "Bash(polyctl:*)" not in granted
 
 
 def test_qoders_implementer_grant_is_the_resume_with_the_unattended_scope_appended():
@@ -81,11 +81,11 @@ def test_qoder_pins_its_default_and_review_model_to_a_family_named_model_not_a_t
     assert "family" in models["_note"] and "tier" in models["_note"]
 
 
-def test_qoder_registers_ao_as_a_local_mcp_server_and_warns_off_the_runtime_key_file():
+def test_qoder_registers_polyctl_as_a_local_mcp_server_and_warns_off_the_runtime_key_file():
     mcp = A.load_adapter("qoder")["mcp"]
 
     assert mcp["file"] == ".mcp.json"
-    assert mcp["register"] == ["qodercli", "mcp", "add", "-s", "local", "ao", "{exe}", "{args}"]
+    assert mcp["register"] == ["qodercli", "mcp", "add", "-s", "local", "polyctl", "{exe}", "{args}"]
     assert "approval" in mcp["note"]
     assert "mcp-router.json" in mcp["warning"] and "key" in mcp["warning"]
 

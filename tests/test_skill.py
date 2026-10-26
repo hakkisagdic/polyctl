@@ -3,7 +3,7 @@ import os
 import re
 import shlex
 
-from ao import cli, skillkit
+from polyctl import cli, skillkit
 
 
 def _subcommands():
@@ -13,7 +13,7 @@ def _subcommands():
 
 def test_every_command_is_in_the_playbook():
     body = skillkit.playbook()[1]
-    missing = [c for c in _subcommands() if f"`ao {c}" not in body]
+    missing = [c for c in _subcommands() if f"`polyctl {c}" not in body]
     assert not missing, f"playbook lacks: {missing}"
 
 
@@ -23,19 +23,19 @@ def test_init_registers_mcp_and_writes_playbook(project, monkeypatch):
     monkeypatch.setattr(skillkit.shutil, "which", lambda n, *args, **kwargs: None)
     _, agents = skillkit.detect_agents(root)
     assert "claude-code" in agents
-    assert skillkit.install_playbook(root, agents)[".claude/skills/ao/SKILL.md"] == "wrote"
-    assert skillkit.register_mcp(root, agents, exe="/usr/local/bin/ao")["claude-code"] == "registered"
+    assert skillkit.install_playbook(root, agents)[".claude/skills/polyctl/SKILL.md"] == "wrote"
+    assert skillkit.register_mcp(root, agents, exe="/usr/local/bin/polyctl")["claude-code"] == "registered"
     cfg = json.load(open(os.path.join(root, ".mcp.json"), encoding="utf-8"))
     # The fixture's architect runs `claude` and is the only role on a harness reading .mcp.json (MCP-ROLES).
-    assert cfg["mcpServers"]["ao"]["args"] == ["-C", root, "mcp", "serve", "--role", "architect"]
+    assert cfg["mcpServers"]["polyctl"]["args"] == ["-C", root, "mcp", "serve", "--role", "architect"]
     # idempotent, and other servers survive
     cfg["mcpServers"]["other"] = {"command": "x"}
     json.dump(cfg, open(os.path.join(root, ".mcp.json"), "w", encoding="utf-8"))
-    assert skillkit.register_mcp(root, agents, exe="/usr/local/bin/ao")["claude-code"] == "kept"
+    assert skillkit.register_mcp(root, agents, exe="/usr/local/bin/polyctl")["claude-code"] == "kept"
     assert "other" in json.load(open(os.path.join(root, ".mcp.json"), encoding="utf-8"))["mcpServers"]
-    assert skillkit.install_playbook(root, agents)[".claude/skills/ao/SKILL.md"] == "kept"
-    skill = open(os.path.join(root, ".claude", "skills", "ao", "SKILL.md"), encoding="utf-8").read()
-    assert skill.startswith("---\nname: ao\n") and skillkit.MARK_START in skill
+    assert skillkit.install_playbook(root, agents)[".claude/skills/polyctl/SKILL.md"] == "kept"
+    skill = open(os.path.join(root, ".claude", "skills", "polyctl", "SKILL.md"), encoding="utf-8").read()
+    assert skill.startswith("---\nname: polyctl\n") and skillkit.MARK_START in skill
 
 
 def test_kiro_gets_steering_and_settings(project, monkeypatch):
@@ -44,10 +44,10 @@ def test_kiro_gets_steering_and_settings(project, monkeypatch):
     monkeypatch.setattr(skillkit.shutil, "which", lambda n, *args, **kwargs: None)
     _, agents = skillkit.detect_agents(root)
     out = skillkit.install_playbook(root, agents)
-    assert out[".kiro/steering/ao-playbook.md"] == "wrote"
-    assert open(os.path.join(root, ".kiro", "steering", "ao-playbook.md"), encoding="utf-8").read().startswith("---\ninclusion: always")
-    skillkit.register_mcp(root, agents, exe="/x/ao")
-    assert "ao" in json.load(open(os.path.join(root, ".kiro", "settings", "mcp.json"), encoding="utf-8"))["mcpServers"]
+    assert out[".kiro/steering/polyctl-playbook.md"] == "wrote"
+    assert open(os.path.join(root, ".kiro", "steering", "polyctl-playbook.md"), encoding="utf-8").read().startswith("---\ninclusion: always")
+    skillkit.register_mcp(root, agents, exe="/x/polyctl")
+    assert "polyctl" in json.load(open(os.path.join(root, ".kiro", "settings", "mcp.json"), encoding="utf-8"))["mcpServers"]
 
 
 def test_rule_files_are_not_written_unless_asked(project):
@@ -56,7 +56,7 @@ def test_rule_files_are_not_written_unless_asked(project):
     open(p, "w", encoding="utf-8").write("# Agents\n\nkeep me\n")
     out = skillkit.install_playbook(root, {"generic"})
     assert "AGENTS.md" not in out and open(p, encoding="utf-8").read() == "# Agents\n\nkeep me\n"
-    assert out[".ao/PLAYBOOK.md"] == "wrote"
+    assert out[".polyctl/PLAYBOOK.md"] == "wrote"
     out = skillkit.install_playbook(root, {"generic"}, rules=True)
     out = skillkit.install_playbook(root, {"generic"}, rules=True)
     text = open(p, encoding="utf-8").read()
@@ -69,7 +69,7 @@ def test_next_steps_tell_the_human_to_restart():
 
 
 def test_doctor_problems_see_a_dead_watchdog(project, monkeypatch, tmp_path):
-    from ao import lib as A, email, telegram
+    from polyctl import lib as A, email, telegram
     monkeypatch.setattr(email, "CONF", str(tmp_path / "no-email.json"))
     monkeypatch.setattr(telegram, "CONF", str(tmp_path / "no-telegram.json"))
     root = project["root"]
@@ -80,7 +80,7 @@ def test_doctor_problems_see_a_dead_watchdog(project, monkeypatch, tmp_path):
     assert "watchdog-dead" in keys and "no-channel" in keys
 
 
-def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch):
+def test_remove_undoes_init_and_only_removes_polyctl_owned_hooks(project, monkeypatch):
     from types import SimpleNamespace
     root = project["root"]
     os.makedirs(os.path.join(root, ".claude"))
@@ -91,9 +91,9 @@ def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch
     monkeypatch.setattr(cli, "_installed_jobs", lambda key: [])
     _, agents = skillkit.detect_agents(root)
     skillkit.install_playbook(root, agents)
-    skillkit.register_mcp(root, agents, exe="/x/ao")
-    # The entry register_mcp writes: an `ao` entry is taken only when it runs ao's server (UPDATE-UNINSTALL-2).
-    json.dump({"mcpServers": {"ao": {"command": "/x/ao", "args": ["-C", root, "mcp", "serve"]}, "other": {"command": "y"}}},
+    skillkit.register_mcp(root, agents, exe="/x/polyctl")
+    # The entry register_mcp writes: a `polyctl` entry is taken only when it runs polyctl's server (UPDATE-UNINSTALL-2).
+    json.dump({"mcpServers": {"polyctl": {"command": "/x/polyctl", "args": ["-C", root, "mcp", "serve"]}, "other": {"command": "y"}}},
               open(os.path.join(root, ".mcp.json"), "w", encoding="utf-8"))
 
     hooks = os.path.join(root, ".git", "hooks")
@@ -101,35 +101,35 @@ def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch
     pre_commit = os.path.join(hooks, "pre-commit")
     pre_push = os.path.join(hooks, "pre-push")
     open(pre_commit, "w", encoding="utf-8").write(
-        # Quoted as ao quoted it: a Windows path's backslashes are shell escapes.
-        cli.PRE_COMMIT_HOOK.format(ao="/x/ao", root=shlex.quote(root))
+        # Quoted as polyctl quoted it: a Windows path's backslashes are shell escapes.
+        cli.PRE_COMMIT_HOOK.format(polyctl="/x/polyctl", root=shlex.quote(root))
     )
     foreign = "#!/bin/sh\necho foreign\n"
     open(pre_push, "w", encoding="utf-8").write(foreign)
 
     cli.cmd_remove(project, SimpleNamespace(yes=False, allow_shared_hooks=False))
-    assert os.path.exists(os.path.join(root, ".ao"))
+    assert os.path.exists(os.path.join(root, ".polyctl"))
     assert os.path.exists(pre_commit)
     assert open(pre_push, encoding="utf-8").read() == foreign
 
     assert cli.cmd_remove(
         project, SimpleNamespace(yes=True, allow_shared_hooks=False)
     ) == 0
-    assert os.path.exists(os.path.join(root, ".ao"))
+    assert os.path.exists(os.path.join(root, ".polyctl"))
     assert not os.path.exists(os.path.join(root, cli.PROJECT_MARKER))
     real_run(["git", "add", "-u", "--", cli.PROJECT_MARKER], cwd=root, check=True)
-    # Git for Windows runs a hook whatever its mode, and this legacy one names an ao that is not there:
+    # Git for Windows runs a hook whatever its mode, and this legacy one names a polyctl that is not there:
     # the fixture's own commit runs no hook, as it runs none where the file is not executable (#71).
     real_run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--no-verify", "-qm",
-         "remove ao marker"],
+         "remove polyctl marker"],
         cwd=root,
         check=True,
     )
     assert cli.cmd_remove(
         project, SimpleNamespace(yes=True, allow_shared_hooks=False)
     ) == 0
-    assert not os.path.exists(os.path.join(root, ".ao")) and not os.path.exists(os.path.join(root, ".claude", "skills", "ao"))
+    assert not os.path.exists(os.path.join(root, ".polyctl")) and not os.path.exists(os.path.join(root, ".claude", "skills", "polyctl"))
     assert not os.path.exists(pre_commit)
     assert open(pre_push, encoding="utf-8").read() == foreign
     assert json.load(open(os.path.join(root, ".mcp.json"), encoding="utf-8"))["mcpServers"] == {"other": {"command": "y"}}
@@ -141,7 +141,7 @@ def test_doctor_reports_both_hook_states_with_safe_ownership_check(
     from types import SimpleNamespace
 
     root = project["root"]
-    paths = cli._ao_hook_paths(root)
+    paths = cli._polyctl_hook_paths(root)
     open(paths["pre-commit"], "wb").write(
         cli._render_local_hook("pre-commit", ".")
     )
@@ -160,7 +160,7 @@ def test_doctor_reports_both_hook_states_with_safe_ownership_check(
         re.M,
     )
     assert re.search(
-        r"^push hook\s+foreign / untracked  AO push-window hook unavailable$",
+        r"^push hook\s+foreign / untracked  polyctl push-window hook unavailable$",
         output,
         re.M,
     )

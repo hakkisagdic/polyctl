@@ -1,6 +1,6 @@
 # Eleven adapter claims, measured against the harnesses they name — 2026-10-16
 
-A measurement note, not an audit of ao. It records what was seen of the eleven claims the triage of
+A measurement note, not an audit of polyctl. It records what was seen of the eleven claims the triage of
 2026-10-12 set aside "to measure before anything changes" (`hunt-triage-2026-10-12.md`, the row that is
 backlog #119) — each claim an adapter makes *about a harness*, and each one measured here on 2026-10-16
 against that harness: the CLI itself where it runs on the machine, the project's own documentation where
@@ -71,7 +71,7 @@ Measured on macOS: the store stands on disk (`~/Library/Application Support/kiro
 21,942,272 bytes, mode 600), and the binary (Kiro CLI.app's `kiro-cli`, 2.27.1) loads its builder-id
 token "from the secret store" and names `data.sqlite3` among its strings — but it resolves the store's
 directory at runtime and embeds no other platform's template. The paths off macOS are therefore
-unverified, and a `token_store_note` now says so; ao reads this store read-only.
+unverified, and a `token_store_note` now says so; polyctl reads this store read-only.
 
 ### fbc104976ab5bb0e kiro: the 744-hour stop against the reset day
 
@@ -108,7 +108,7 @@ process exited 0 with no answer file. `CONFIG__PROPAGATE_TOOL_ERRORS=true` chang
 code nor the file: at 0.45 only `pr_reviewer`, `pr_code_suggestions` and `pr_description` read the
 setting, not the `ask` tool this adapter runs. Upstream main's `cli.py` ends `raise SystemExit(run())`
 and returns 1 under the setting — the claim is true of main, not of 0.45. The adapter's `notes` now
-carry both readings; ao's reviewer reads the answer channel, and the exit-code ambiguity is recorded
+carry both readings; polyctl's reviewer reads the answer channel, and the exit-code ambiguity is recorded
 for the adoption run that is still the owner's (#86).
 
 ### 15f50f8ae9a80dca journal: a lease expiry on the wall clock
@@ -141,14 +141,14 @@ Every value above that the tree now carries, by path:
 
 | path | what it holds |
 |------|---------------|
-| `src/ao/adapters/cloud-generic.json` | `result.fetch == ["git", "fetch", "origin", "refs/pull/{pr}/head"]`, and `fetch_note` with the fork reading |
-| `src/ao/adapters/gemini.json` | `resume.argv == ["gemini", "--resume", "{session}", "--prompt", "{prompt}"]`, and the reference reading in its note |
-| `src/ao/adapters/qoder.json` | `busy.idle_seconds == 900`, and the walk's numbers in the note |
-| `src/ao/adapters/codex.json` | `options.sandbox == ["--sandbox", "{mode}"]`, no `--sandbox` in any resume argv, and the 0.160.0 recheck in `sandbox_note` |
-| `src/ao/adapters/kiro.json` | three 744 h stops, "744 h = 31 days" in `stops_note`, and `token_store_note` |
-| `src/ao/adapters/pr-agent.json` | `CONFIG__MAX_MODEL_TOKENS=1000000` and `CONFIG__PROPAGATE_TOOL_ERRORS=true` pinned; `get_max_tokens`/32000 in the environment note; "exited 0 with no answer file" and `raise SystemExit(run())` in `notes`; the wheel named in `disclaimer` |
-| `src/ao/adapters/cursor-agent.json` | the re-read in `verified_source`; `detect.binaries == ["agent", "cursor-agent"]` |
-| `src/ao/journal.py` | the wall-clock rationale in `claim`'s docstring |
+| `src/polyctl/adapters/cloud-generic.json` | `result.fetch == ["git", "fetch", "origin", "refs/pull/{pr}/head"]`, and `fetch_note` with the fork reading |
+| `src/polyctl/adapters/gemini.json` | `resume.argv == ["gemini", "--resume", "{session}", "--prompt", "{prompt}"]`, and the reference reading in its note |
+| `src/polyctl/adapters/qoder.json` | `busy.idle_seconds == 900`, and the walk's numbers in the note |
+| `src/polyctl/adapters/codex.json` | `options.sandbox == ["--sandbox", "{mode}"]`, no `--sandbox` in any resume argv, and the 0.160.0 recheck in `sandbox_note` |
+| `src/polyctl/adapters/kiro.json` | three 744 h stops, "744 h = 31 days" in `stops_note`, and `token_store_note` |
+| `src/polyctl/adapters/pr-agent.json` | `CONFIG__MAX_MODEL_TOKENS=1000000` and `CONFIG__PROPAGATE_TOOL_ERRORS=true` pinned; `get_max_tokens`/32000 in the environment note; "exited 0 with no answer file" and `raise SystemExit(run())` in `notes`; the wheel named in `disclaimer` |
+| `src/polyctl/adapters/cursor-agent.json` | the re-read in `verified_source`; `detect.binaries == ["agent", "cursor-agent"]` |
+| `src/polyctl/journal.py` | the wall-clock rationale in `claim`'s docstring |
 | `tests/test_harness_measure.py` | nine tests pinning the above — three holding the fixes, five holding the kept readings, one holding that no `verified` level moved |
 
 The raw measurements behind the note (probe logs, the throwaway venv, the walker's output) were made on

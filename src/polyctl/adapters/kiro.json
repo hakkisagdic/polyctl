@@ -1,0 +1,332 @@
+{
+  "id": "kiro",
+  "name": "Kiro CLI",
+  "project_config": [".kiro", "AGENTS.md"],
+  "verified": "full",
+  "actor_name": "kiro",
+  "verified_version": "kiro-cli (Kiro CLI), IDE 1.0.411",
+  "notes": "Reference adapter. Every capability exercised in a multi-week production run.",
+  "send": {
+    "argv": [
+      "kiro-cli",
+      "chat",
+      "--no-interactive",
+      "{prompt}"
+    ],
+    "cwd_matters": true
+  },
+  "resume": {
+    "argv": [
+      "kiro-cli",
+      "chat",
+      "--resume-id",
+      "{session}",
+      "--no-interactive",
+      "{prompt}"
+    ],
+    "note": "Injects into the same store the IDE uses; the IDE panel may not render an externally started turn even though it runs correctly."
+  },
+  "list_sessions": {
+    "argv": [
+      "kiro-cli",
+      "chat",
+      "--list-sessions",
+      "--format",
+      "json"
+    ],
+    "all_workspaces_flag": "--all-cwds",
+    "returns": "[{cwd, sessions:[{sessionId, source, title, updatedAt, status}]}]"
+  },
+  "list_models": {
+    "argv": [
+      "kiro-cli",
+      "chat",
+      "--list-models",
+      "--format",
+      "json"
+    ]
+  },
+  "options": {
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "effort": [
+      "--effort",
+      "{effort}"
+    ],
+    "effort_values": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "agent_profile": [
+      "--agent",
+      "{agent}"
+    ],
+    "output_json": [
+      "--output-format",
+      "stream-json"
+    ],
+    "signed_out": {
+      "patterns": ["Opening browser\\.\\.\\.", "Auth portal timed out", "OAuth error"],
+      "signin": "kiro-cli login",
+      "note": "Measured on kiro-cli 2.27.1, 2026-10-07: with its sign-in expired, a review printed 'Opening browser... | Press (^) + C to cancel' on stdout and waited ten minutes for a person before 'error: OAuth error: Auth portal timed out' on stderr and exit 1. Only lines that are no JSON are read for it: the answer itself comes in stream-json lines, which may quote these words."
+    },
+    "answer_stream": {
+      "argv": ["--output-format", "stream-json"],
+      "note": "Measured on kiro-cli 2.27.1, 2026-10-05: the text output ran a turn's messages together where a tool call came between them ('I will read the file now.Done reading.'), and runFinished.finalText does too. stream-json writes each message chunk and each tool call as an ACP session update, {type: sessionUpdate, data: {sessionId, update}}, so a reader can break the text where a tool call fell.",
+      "transient": ["failed to generate a response", "(?i)\\brate.?limit", "(?i)throttl", "(?i)temporarily unavailable"],
+      "transient_note": "A run that ends on a runError whose message matches one of these is a passing failure of the provider, retried as a reviewer that exits 75 is. Measured on kiro-cli 2.27.1, 2026-10-05: a Sol review exited 1 after six minutes on `Internal error (code -32603): Kiro failed to generate a response`."
+    },
+    "pin": {
+      "reviewer": ["--output-format", "stream-json"],
+      "note": "A reviewer answers in session updates (answer_stream): read as text, a verdict written after a remark went on from the remark's last word, and the review was asked again and paid for twice."
+    },
+    "reviewer_agent": {
+      "argv": ["--agent", "{agent}"],
+      "acp": true,
+      "path": ".kiro/agents/{agent}.json",
+      "config": {
+        "name": "{agent}",
+        "description": "polyctl's reviewer: it reads, and has no tool that writes, runs a command or reaches a server",
+        "prompt": null,
+        "mcpServers": {},
+        "tools": ["read", "grep", "glob"],
+        "toolAliases": {},
+        "allowedTools": [],
+        "resources": [],
+        "toolsSettings": {},
+        "includeMcpJson": false,
+        "model": null
+      },
+      "note": "Measured on kiro-cli 2.27.1, 2026-10-05: with --no-interactive, a tool --trust-tools= leaves untrusted runs all the same - a `touch` made its file, and reviewers ran tests, built virtual environments under /tmp and installed packages. Run as this agent, with --output-format stream-json, it read the file it was asked to, had no tool to write with, and made nothing. polyctl writes it into the reviewer's own directory for each run, after the candidate's tree, under a name the tree cannot know."
+    },
+    "trust_none": [
+      "--trust-tools="
+    ],
+    "trust_some": [
+      "--trust-tools={tools}"
+    ],
+    "trust_all": [
+      "--trust-all-tools"
+    ],
+    "bypass": {
+      "--trust-all-tools": { "roles": ["implementer"],
+        "why": "Kept, as nothing narrower lets an unattended implementer run its gates from the command line: --trust-tools narrows by tool and not by command, so trusting the shell tool trusts every command, and a command allowlist (toolsSettings allowedCommands with denyByDefault) lives only in a custom agent file polyctl does not write. A 2.x turn left waiting for an approval hangs (kirodotdev/Kiro issue 7483); the 3.0 early release's permissions.yaml denies an ask when nobody attends, but its sessions do not resume 2.x's. polyctl commit and the commit hook hold commits (polyctl doctor: actor-grant:implementer). Read on 2026-09-17 from kiro.dev/docs/cli/headless, kiro.dev/docs/custom-agents/configuration-reference and kiro.dev/docs/cli/v3/permissions." }
+    }
+  },
+  "transcript": {
+    "kind": "jsonl",
+    "path": "~/.kiro/sessions/{workspace_hash}/{session}/messages.jsonl",
+    "workspace_hash": "opaque per-workspace directory; resolve via list_sessions cwd match",
+    "record": {
+      "time": "timestamp",
+      "kind": "payload.type",
+      "text_keys": [
+        "text",
+        "content",
+        "message"
+      ]
+    },
+    "kinds": [
+      "user",
+      "assistant",
+      "tool_call",
+      "tool_result",
+      "session_metadata",
+      "usage_summary",
+      "session_event",
+      "turn_start",
+      "turn_end",
+      "sub_agent_start",
+      "sub_agent_complete",
+      "session_start",
+      "tombstone"
+    ],
+    "messages": { "prompt": ["user"], "reply": ["assistant"] },
+    "turn": { "start": ["turn_start"], "end": ["turn_end"],
+              "bookkeeping": ["session_metadata", "usage_summary", "session_event", "session_start", "tombstone"] },
+    "tool_call": { "type": "tool_call", "name": "toolName", "args": "args",
+                   "path_keys": ["path", "targetFile", "destinationPath"],
+                   "write_tools": ["fs_write", "fs_append", "str_replace", "delete_file", "semantic_rename",
+                                   "smart_relocate"], "write_words": ["write"] },
+    "tail_bytes": 900000
+  },
+  "sessions": {
+    "kind": "workspace-meta",
+    "dir": "~/.kiro/sessions",
+    "meta": "session.json",
+    "transcript": "messages.jsonl",
+    "workspaces": "workspacePaths",
+    "title": "title",
+    "status": "status"
+  },
+  "busy": {
+    "meta": "~/.kiro/sessions/{workspace_hash}/{session}/session.json",
+    "status_field": "status",
+    "running_values": [
+      "in_progress"
+    ],
+    "description_field": "description",
+    "mtime_file": "messages.jsonl",
+    "idle_seconds": 240,
+    "note": "status can remain in_progress across an idle gap; the mtime check is the reliable half."
+  },
+  "acp": { "argv": ["kiro-cli", "acp"], "measured": "kiro-cli 2.24.1 answered initialize, 2026-09-28" },
+  "detect": {
+    "dirs": [".kiro"],
+    "binaries": ["kiro-cli"],
+    "processes": ["kiro-cli"],
+    "headless": ["--no-interactive"]
+  },
+  "mcp": {
+    "file": ".kiro/settings/mcp.json",
+    "extra": { "env": {} },
+    "register": ["kiro-cli", "mcp", "add", "--name", "polyctl", "--scope", "workspace", "--command", "{exe}", "--args", "{args}"],
+    "register_note": "run only when the CLI is installed and the file does not exist yet; otherwise the entry is merged"
+  },
+  "directives": {
+    "steering_dir": ".kiro/steering",
+    "playbook": { "path": ".kiro/steering/polyctl-playbook.md", "header": "---\ninclusion: always\n---\n\n" },
+    "coordination": ".kiro/steering/polyctl-coordination.md",
+    "polyctl_files": [".kiro/steering/polyctl-coordination.md", ".kiro/steering/polyctl-playbook.md",
+                 ".kiro/steering/polyctl-single-writer.md", ".kiro/steering/polyctl-machine.md"],
+    "steering_format": "markdown with `inclusion: always` frontmatter",
+    "steering_inclusion": {
+      "field": "inclusion",
+      "default": "always",
+      "honoured": ["always"],
+      "unhonoured": "Kiro CLI 2.x, which this adapter runs, supports no inclusion mode and loads every steering file in every session; fileMatch, manual and auto hold in the IDE, and the first two in the 3.0 early release",
+      "skill_header": "---\ninclusion: manual\n---\n\n",
+      "note": "Modes: always, the default; fileMatch with fileMatchPattern, one pattern or a list; manual, included by #name in chat; auto, with name and description. Workspace steering is .kiro/steering and global steering ~/.kiro/steering; AGENTS.md is always loaded; a custom agent loads steering only through its resources. The steering page says Kiro CLI supports no inclusion mode and loads every steering file, while its capability table marks always, fileMatch and manual for the CLI: the 3.0 early release (kiro-cli --v3, beside 2.x) adds that front matter, and leaves auto to the engine. send and resume run 2.x, the newest CLI in the changelog being 2.21.4 of 2026-09-11. Read from kiro.dev/docs/steering, kiro.dev/docs/cli/v3 and kiro.dev/changelog/cli on 2026-09-17."
+    },
+    "agents_dir": ".kiro/agents",
+    "agent_format": {
+      "extension": ".json",
+      "commands": {
+        "hooks": "hooks are never imported: each runs a command when its trigger fires",
+        "mcpServers": "an MCP server is a command the CLI starts: never imported",
+        "includeMcpJson": "it loads every MCP server in ~/.kiro/settings/mcp.json and .kiro/settings/mcp.json, each a command the CLI starts: never imported",
+        "useLegacyMcpJson": "it loads the MCP servers of the legacy configuration, each a command the CLI starts: never imported"
+      },
+      "grants": {
+        "allowedTools": "the tools it uses without asking",
+        "toolsSettings": "the paths and commands its tools may use without asking",
+        "permissions": "the rules that allow or deny what its tools may do"
+      },
+      "context": { "field": "resources", "empty": "a custom agent loads no steering and no skills unless its resources name them" },
+      "loads": {
+        "prompt": "a file:// prompt is a file the agent loads as its instructions"
+      },
+      "note": "Workspace agents are .kiro/agents/<name>.json and global ones ~/.kiro/agents, the workspace's winning by name; name defaults to the file name and prompt is inline or a file:// URI. Fields: name, description, prompt, model, tools, toolAliases, allowedTools, toolsSettings, resources (file://, skill://, knowledgeBase), mcpServers, useLegacyMcpJson or includeMcpJson, hooks (agentSpawn, userPromptSubmit, preToolUse, postToolUse, stop), keyboardShortcut, welcomeMessage. The IDE ignores an agent's hooks. The 3.0 early release (kiro-cli --v3) reads a universal format that 2.x reads too (/upgrade-agent writes it), replaces toolsSettings with permissions, reads Markdown agents with YAML front matter as the IDE does, and moves hooks to .kiro/hooks. Read from kiro.dev/docs/custom-agents/configuration-reference and kiro.dev/docs/cli/v3 on 2026-09-17."
+    },
+    "hook_files": {
+      ".kiro.hook": "an IDE hook in the 0.x format (when, then), which Kiro CLI does not read"
+    },
+    "hooks_dir": ".kiro/hooks",
+    "hooks_format": "{\"version\":\"v1\",\"hooks\":[{name,trigger,action:{type:\"agent\"|\"command\",prompt|command}}]}",
+    "triggers": [
+      "SessionStart",
+      "Stop",
+      "PostFileSave",
+      "PostFileCreate",
+      "PostFileDelete",
+      "PreToolUse",
+      "PostToolUse",
+      "UserPromptSubmit",
+      "PreTaskExec",
+      "PostTaskExec"
+    ],
+    "warning": "File triggers fire only for changes made by the agent itself. A message dropped by an external process will NOT fire PostFileCreate — use SessionStart plus steering instead."
+  },
+  "telemetry": {
+    "context": {
+      "from": "transcript",
+      "type": "session_metadata",
+      "match": {
+        "key": "contextUsage"
+      },
+      "field": "value.usagePercentage",
+      "verified": true
+    },
+    "cost": {
+      "from": "transcript",
+      "type": "usage_summary",
+      "field": "promptTurnSummaries[].usage",
+      "unit": "credit",
+      "tools": "promptTurnSummaries[].usedTools",
+      "verified": true
+    },
+    "quota": {
+      "from": "command",
+      "argv": [
+        "keyflip",
+        "usage",
+        "--providers"
+      ],
+      "cache_seconds": 300
+    },
+    "balance": {
+      "from": "none",
+      "note": "Plan balance is not written to disk. Never estimated; use keyflip for real quota windows."
+    },
+    "failure": {
+      "from": "transcript",
+      "type": "tool_result",
+      "field": "success",
+      "failed_when": false,
+      "text": "content",
+      "verified": true,
+      "note": "Structural verdict on every tool result. Never text-match for 'error' or 'failed' — the agent's own search patterns and passing test names contain both."
+    }
+  },
+  "billing": {
+    "unit": "credit",
+    "reset_day": 1,
+    "source": "api",
+    "api": {
+      "endpoint": "https://codewhisperer.us-east-1.amazonaws.com/",
+      "target": "AmazonCodeWhispererService.GetUsageLimits",
+      "content_type": "application/x-amz-json-1.0",
+      "auth": "Bearer <access_token> from the CLI's own store",
+      "token_store": "~/Library/Application Support/kiro-cli/data.sqlite3, auth_kv where key='kirocli:odic:token', field access_token",
+      "token_store_note": "Measured on macOS, 2026-10-16: the path stands on disk (21,942,272 bytes, mode 600), and the CLI binary (Kiro CLI.app's kiro-cli, 2.27.1) loads its builder-id token 'from the secret store' and names data.sqlite3 among its strings - but it resolves the store's directory at runtime and embeds no other platform's template, so the paths off macOS are unverified; polyctl reads this store read-only.",
+      "request": {
+        "profileArn": "from `kiro-cli whoami`"
+      },
+      "driver": "usage-limits",
+      "token": { "sqlite": "~/Library/Application Support/kiro-cli/data.sqlite3", "table": "auth_kv",
+                 "key": "kirocli:odic:token", "field": "access_token", "expires": "expires_at" },
+      "profile": { "argv": ["kiro-cli", "whoami"], "prefix": "arn:aws:codewhisperer" },
+      "body": { "profileArn": "{profile}" },
+      "resource": "CREDIT",
+      "login": ["kiro-cli", "login"],
+      "response": "usageBreakdownList[resourceType=CREDIT].currentUsageWithPrecision and .usageLimitWithPrecision; plus subscriptionInfo, overageConfiguration, nextDateReset, daysUntilReset",
+      "verified": true
+    },
+    "api_key_note": "A ksk_ API key is NOT a bearer token for this endpoint — it is rejected with AccessDeniedException on codewhisperer and 'Invalid token' on management.kiro.dev. It authenticates the CLI via KIRO_API_KEY. The CLI's cached OIDC access token is what works here.",
+    "fallback": {
+      "source": "transcript",
+      "reading": "sum",
+      "transcripts": "~/.kiro/sessions/*/*/messages.jsonl",
+      "note": "Each usage_summary closes one turn and carries that turn's whole cost, so the records add up. Measured on one machine's store, July to September 2026: 455 records and never two for one turn, no request id shared by two consecutive records, and the older records that carry no request ids never two for one turn either. The peak-per-turn reading declared here before took a drop between two records for a new turn and read 79% of the sum; each session's last record alone reads under 1% of it.",
+      "accuracy": "a floor: sessions on other machines are invisible. The 69% of the account figure recorded here was measured under the peak-per-turn reading; the sum has not been measured against the account."
+    }
+  },
+  "quota": {
+    "stops": [
+      { "words": "reached your overage limit[^\\n]*", "hours": 744 },
+      { "words": "reached your monthly usage limit[^\\n]*", "hours": 744 },
+      { "words": "ServiceQuotaExceededException[^\\n]*", "hours": 744 }
+    ],
+    "stops_note": "The words a turn ends on when the account's credits stop it: the error a headless run prints as it exits, and the displayError the session store keeps (a session_metadata record, value.errorType OverageLimitReachedError or UsageLimitReachedError). Read on one machine's session store: 32 overage stops, You've reached your overage limit. (Request ID: <id>), and 7 monthly ones, You've reached your monthly usage limit. Please return next month to continue building. (Request ID: <id>); a nudge that hit the overage limit printed a ServiceQuotaExceededException line before it. Neither names a reset: the credits come back at the month's reset (billing.reset_day) or when a person raises the overage limit. The hours above are the longest such wait - an unchecked 744 h = 31 days, the longest run from one reset_day to the next (e.g. 1 January to 1 February), so a parked slice is never held past a reset it could act on and the watchdog retries in between (watchdog.quota_retry_hours, 5 h default, when no reset is named). The store keeps the stop in a record that is neither a prompt nor a reply, which the transcript reading does not read; the nudge that dies on it is read."
+  },
+  "models": {
+    "default": null,
+    "review": null,
+    "_note": "Kiro picks its own model; --model passes one through when set"
+  }
+}

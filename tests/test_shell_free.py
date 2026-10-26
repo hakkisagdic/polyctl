@@ -1,12 +1,12 @@
 """No command reaches a shell unless it has to (SHELL-FREE).
 
 A dry watchdog cycle still started a shell for keyflip's budget and read its prose; the
-provider window, the tool list, the turn roots, `ao writers`, the process fallbacks and
+provider window, the tool list, the turn roots, `polyctl writers`, the process fallbacks and
 the launchd jobs each started one too. A shell costs a process on every call and reads
 its command as shell text: a project directory named with a space or a `;` reached
 launchctl as other words, or ran. Each asks its program by argument vector now and must
 read what the shell read. The guard below keeps it so: a call that hands a command line
-to a shell is refused anywhere under src/ao but the places listed with their reasons.
+to a shell is refused anywhere under src/polyctl but the places listed with their reasons.
 """
 import ast
 import calendar
@@ -21,7 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, procs, settings as S, watchdog as W
+from polyctl import cli, lib as A, procs, settings as S, watchdog as W
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -31,17 +31,17 @@ SHELL_HELPERS = {"sh", "_sh_run"}
 SHELL_FUNCTIONS = {("os", "system"), ("os", "popen"), ("subprocess", "getoutput"), ("subprocess", "getstatusoutput")}
 # (file, the function the call is in, what starts the shell): why it keeps its shell.
 ALLOWED = {
-    ("src/ao/lib.py", "sh", "_sh_run()"):
+    ("src/polyctl/lib.py", "sh", "_sh_run()"):
         "sh() is the shell helper; it answers through _sh_run",
-    ("src/ao/lib.py", "_sh_run", "shell=True"):
-        "the shell helper itself, the one place ao's own code hands a command line to a shell",
-    ("src/ao/parts/lib_transcript.py", "_quota_output", "_sh_run()"):
+    ("src/polyctl/lib.py", "_sh_run", "shell=True"):
+        "the shell helper itself, the one place polyctl's own code hands a command line to a shell",
+    ("src/polyctl/parts/lib_transcript.py", "_quota_output", "_sh_run()"):
         "an adapter declares its quota command as words a shell ran: one a shell would change, a program "
         "found nowhere, and every command on Windows still run through the shell",
-    # `ao verify` and `ao merge-check` run a gate through one function since LEADS-GATE.
-    ("src/ao/parts/cli_authority.py", "_run_gate", "shell=True"):
-        "a gate's `run` in .ao/gates.json is a shell command line the project declares, run in the project by "
-        "`ao verify` and in the merge result by `ao merge-check`",
+    # `polyctl verify` and `polyctl merge-check` run a gate through one function since LEADS-GATE.
+    ("src/polyctl/parts/cli_authority.py", "_run_gate", "shell=True"):
+        "a gate's `run` in .polyctl/gates.json is a shell command line the project declares, run in the project by "
+        "`polyctl verify` and in the merge result by `polyctl merge-check`",
 }
 
 
@@ -76,7 +76,7 @@ def _shell_calls(path, rel):
 
 
 def test_no_command_reaches_a_shell_outside_the_places_that_must_keep_one():
-    found = [call for path in sorted((ROOT / "src" / "ao").rglob("*.py"))
+    found = [call for path in sorted((ROOT / "src" / "polyctl").rglob("*.py"))
              for call in _shell_calls(path, path.relative_to(ROOT).as_posix())]
 
     assert sorted(found) == sorted(ALLOWED)
@@ -107,7 +107,7 @@ def test_a_program_is_found_and_run_without_a_shell_as_sh_ran_it(monkeypatch):
 
     assert A._run_program([sys.executable, "-c", code]) == ("out \n''", 3)
     assert A._run_program([sys.executable, "-c", code], stderr=subprocess.STDOUT)[0] == "out \nerr\n''"
-    assert A._run_program(["ao-shell-free-absent-probe", "--version"]) == ("", None)
+    assert A._run_program(["polyctl-shell-free-absent-probe", "--version"]) == ("", None)
     assert A._run_program([sys.executable, "-c", "import time; time.sleep(5)"], timeout=0.5) == ("", None)
 
     # An npm install on Windows leaves an extensionless POSIX script beside the .cmd.
@@ -189,7 +189,7 @@ def test_the_budget_reading_keeps_the_accounts_and_each_breach(project, monkeypa
     monkeypatch.setattr(A, "_run_program", lambda argv, cwd=None, **kwargs: BUDGETS["one of two accounts over its budget"])
 
     assert A.quota_budget({}) == {"accounts": ["home", "work"], "breached": [breach]}
-    kept = json.loads((pathlib.Path(A.HOME) / ".ao" / "quota.json").read_text(encoding="utf-8"))
+    kept = json.loads((pathlib.Path(A.HOME) / ".polyctl" / "quota.json").read_text(encoding="utf-8"))
     assert kept["keyflip budget status --json"]["lines"] == ["home", "work"]
     assert kept["keyflip budget status --json"]["breached"] == [breach]
 
@@ -197,7 +197,7 @@ def test_the_budget_reading_keeps_the_accounts_and_each_breach(project, monkeypa
 PROBE = r"""
 import json, os, subprocess, sys
 sys.path.insert(0, os.path.join(sys.argv[1], "src"))
-from ao import lib as A
+from polyctl import lib as A
 started = []
 real_run = subprocess.run
 def spy(*args, **kwargs):
@@ -233,7 +233,7 @@ def test_a_budget_reading_is_kept_across_processes_for_the_quota_window(tmp_path
     tool.write_text(f'#!/bin/sh\necho "$(pwd -P) $*" >> {shlex.quote(str(calls))}\n'
                     f'echo {shlex.quote(BUDGETS["an account over its budget"][0])}\n', encoding="utf-8")
     tool.chmod(0o755)
-    adapter = {"telemetry": {"quota": {"argv": ["ao-quota-probe"], "cache_seconds": 300}}}
+    adapter = {"telemetry": {"quota": {"argv": ["polyctl-quota-probe"], "cache_seconds": 300}}}
 
     first = _another_process(home, bindir, adapter)
     second = _another_process(home, bindir, adapter)
@@ -244,7 +244,7 @@ def test_a_budget_reading_is_kept_across_processes_for_the_quota_window(tmp_path
                                  "stdin": True, "stderr": True}]
     assert second["started"] == [] and _calls(calls) == [f"{os.path.realpath(home)} budget status --json"]
 
-    kept_file = home / ".ao" / "quota.json"
+    kept_file = home / ".polyctl" / "quota.json"
     kept = json.loads(kept_file.read_text(encoding="utf-8"))
     assert kept["keyflip budget status --json"]["lines"] == ["work"]
     assert kept["keyflip budget status --json"]["breached"] == [{"name": "work", "metric": "fiveHour", "pct": 95, "limit": 80}]
@@ -283,7 +283,7 @@ def test_a_window_is_read_from_the_kept_quota_reading_and_read_again_after_a_rot
 
     assert headroom["text"] == "rotated through keyflip for the reviewer: claude now 20% used"
     assert _calls(calls) == ["usage --providers", "next --strategy best", "usage --providers"]
-    kept = json.loads((pathlib.Path(A.HOME) / ".ao" / "quota.json").read_text(encoding="utf-8"))
+    kept = json.loads((pathlib.Path(A.HOME) / ".polyctl" / "quota.json").read_text(encoding="utf-8"))
     assert kept[command]["lines"] == ["Claude (Anthropic) 20%  5h  resets in 2h 13m"]
 
 
@@ -439,13 +439,13 @@ def _launchd(monkeypatch):
 
 def test_launchctl_is_asked_by_argument_vector_and_its_listing_read_as_grep_read_it(monkeypatch):
     loaded, asked = _launchd(monkeypatch)
-    loaded.update({"com.agentorchestrator.watchdog.proj", "com.agentorchestrator.watchdog.proj-api",
-                   "com.agentorchestrator.doctor.proj"})
+    loaded.update({"com.polyctl.watchdog.proj", "com.polyctl.watchdog.proj-api",
+                   "com.polyctl.doctor.proj"})
 
     assert cli._launchd_domain() == "gui/501" and cli._launchd_domain("a.b") == "gui/501/a.b"
-    assert cli._launchd_listed("com.agentorchestrator.watchdog.proj").split("\n") == [
-        "-\t0\tcom.agentorchestrator.watchdog.proj", "-\t0\tcom.agentorchestrator.watchdog.proj-api"]
-    assert cli._launchd_listed("com.agentorchestrator.watchdog.gone") == ""
+    assert cli._launchd_listed("com.polyctl.watchdog.proj").split("\n") == [
+        "-\t0\tcom.polyctl.watchdog.proj", "-\t0\tcom.polyctl.watchdog.proj-api"]
+    assert cli._launchd_listed("com.polyctl.watchdog.gone") == ""
     assert cli._launchctl("bootout", "gui/501/a b;c")[1] == 3
     assert cli._launchctl("bootstrap", "gui/501", "/Library Agents/x.plist", merge=True) == ("", 0)
     assert asked[-2:] == [(["launchctl", "bootout", "gui/501/a b;c"], subprocess.DEVNULL),
@@ -458,7 +458,7 @@ def test_the_watchdog_job_is_installed_read_and_removed_by_argument_vector(proje
     monkeypatch.setenv("HOME", str(home))                   # the plists land here, not in a real LaunchAgents
     loaded, asked = _launchd(monkeypatch)
     root, key = project["root"], A.project_key(project["root"]).lower()
-    label, dlabel = f"com.agentorchestrator.watchdog.{key}", f"com.agentorchestrator.doctor.{key}"
+    label, dlabel = f"com.polyctl.watchdog.{key}", f"com.polyctl.doctor.{key}"
     agents = home / "Library" / "LaunchAgents"
 
     def watchdog(action):
@@ -473,7 +473,7 @@ def test_the_watchdog_job_is_installed_read_and_removed_by_argument_vector(proje
     assert all((stderr == subprocess.STDOUT) == (argv[1] == "bootstrap") for argv, stderr in asked)
     assert f"installed {label}" in capsys.readouterr().out
 
-    (home / ".ao" / f"watchdog-{key}.log").write_bytes(b"cycle 1\r\ncycle 2\ncycle 3\r\ncycle 4\ncycle 5\ncycle 6\ncycle 7")
+    (home / ".polyctl" / f"watchdog-{key}.log").write_bytes(b"cycle 1\r\ncycle 2\ncycle 3\r\ncycle 4\ncycle 5\ncycle 6\ncycle 7")
     watchdog("status")
     out = capsys.readouterr().out
     assert f"loaded  -\t0\t{label}" in out and "doctor  loaded" in out
@@ -492,10 +492,10 @@ def test_the_watchdog_job_is_installed_read_and_removed_by_argument_vector(proje
 
 @pytest.mark.skipif(os.name == "nt", reason="the telegram poller is a launchd job; Windows refuses it")
 def test_the_telegram_poller_is_read_and_removed_by_argument_vector(project, monkeypatch, capsys):
-    from ao import telegram
+    from polyctl import telegram
     loaded, asked = _launchd(monkeypatch)
     monkeypatch.setattr(telegram, "config", lambda: None)
-    label = f"com.agentorchestrator.telegram.{A.project_key(project['root']).lower()}"
+    label = f"com.polyctl.telegram.{A.project_key(project['root']).lower()}"
 
     assert cli.cmd_telegram(project, SimpleNamespace(action="status", once=False)) == 0
     assert "not installed" in capsys.readouterr().out

@@ -2,7 +2,7 @@ import os
 import subprocess
 from types import SimpleNamespace
 
-from ao import cli
+from polyctl import cli
 
 REPLACEMENT = cli.PROJECT_MARKER_BYTES.replace(b"v1", b"v9")
 
@@ -73,7 +73,7 @@ def test_a_replacement_that_forges_every_stat_field_is_caught_by_its_bytes(tmp_p
     assert {"lstat", "fstat"} <= set(hits)
     assert after["fingerprint"][1] == before["fingerprint"][1]
     assert after["fingerprint"] != before["fingerprint"]
-    assert after["problem"] == f"{cli.PROJECT_MARKER} bytes are not ao-project-v1"
+    assert after["problem"] == f"{cli.PROJECT_MARKER} bytes are not polyctl-project-v1"
 
 
 def test_the_fingerprint_of_a_valid_marker_holds_every_byte_of_it(tmp_path):
@@ -118,4 +118,4 @@ def test_init_refuses_a_marker_replaced_during_the_probe_behind_forged_stat_fiel
 
     assert hits and {"lstat", "fstat"} <= set(hits[0])
     assert "init refused" in capsys.readouterr().out
-    assert not os.path.exists(os.path.join(str(root), ".ao", "config.json"))
+    assert not os.path.exists(os.path.join(str(root), ".polyctl", "config.json"))

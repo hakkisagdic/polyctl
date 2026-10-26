@@ -1,4 +1,4 @@
-"""`ao pr watch --once` reads this checkout's pull requests through gh and mails the implementer (PR-WATCH).
+"""`polyctl pr watch --once` reads this checkout's pull requests through gh and mails the implementer (PR-WATCH).
 
 A check that failed on GitHub, a conflict with the base branch or a reviewer asking for changes waited
 until somebody opened the page. These run the command end to end against a fake gh: a small Python
@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 from tests import conftest
 
 on_posix = pytest.mark.skipif(os.name == "nt", reason="the fake gh runs through its shebang, which Windows ignores")
@@ -109,7 +109,7 @@ def _watching(project, *branches, watch="on", store=None):
     root = project["root"]
     for branch in branches or (BRANCH,):
         subprocess.run([conftest.GIT, "branch", branch], cwd=root, check=True)
-    path = os.path.join(root, ".ao", "config.json")
+    path = os.path.join(root, ".polyctl", "config.json")
     with open(path, encoding="utf-8") as fh:
         config = json.load(fh)
     if watch:
@@ -149,7 +149,7 @@ def test_with_the_setting_off_nothing_is_read_and_it_says_how_to_turn_it_on(proj
 
     code, out = _watch(root, capsys)
 
-    assert code == 2 and "pr watch is off" in out and "`ao config set pr.watch on`" in out
+    assert code == 2 and "pr watch is off" in out and "`polyctl config set pr.watch on`" in out
     assert gh.calls() == [] and _mails(root) == [] and not os.path.exists(A.pr_watch_path(root))
 
 
@@ -160,7 +160,7 @@ def test_without_once_it_says_it_runs_one_pass_and_reads_nothing(project, tmp_pa
 
     code, out = _watch(root, capsys, once=False)
 
-    assert code == 2 and "`ao pr watch --once`" in out and "watchdog" in out
+    assert code == 2 and "`polyctl pr watch --once`" in out and "watchdog" in out
     assert gh.calls() == [] and _mails(root) == []
 
 
@@ -416,7 +416,7 @@ def test_a_new_head_mails_a_fact_that_still_stands_again(project, tmp_path, monk
 
 
 @on_posix
-def test_a_record_ao_cannot_read_is_named_and_what_stands_is_mailed_once_more(project, tmp_path, monkeypatch,
+def test_a_record_polyctl_cannot_read_is_named_and_what_stands_is_mailed_once_more(project, tmp_path, monkeypatch,
                                                                               capsys):
     gh = FakeGh(tmp_path, monkeypatch)
     gh.answer(_pull(statusCheckRollup=[FAILED]))
@@ -426,7 +426,7 @@ def test_a_record_ao_cannot_read_is_named_and_what_stands_is_mailed_once_more(pr
 
     code, out = _watch(root, capsys)
 
-    assert code == 0 and ".ao/pr-watch.json could not be read" in out and len(_mails(root)) == 1
+    assert code == 0 and ".polyctl/pr-watch.json could not be read" in out and len(_mails(root)) == 1
     assert _recorded(root)["12"]["check-failed"]["head"] == HEAD
     assert "could not be read" not in _watch(root, capsys)[1] and len(_mails(root)) == 1
 
@@ -448,7 +448,7 @@ def test_a_fact_that_clears_and_returns_within_the_minute_is_mailed_again_under_
     runs.append(_ran(TEST_PASSED, "10:10"))          # a re-run passed: the fact cleared and is forgotten
     gh.answer(_pull(statusCheckRollup=runs))
     assert _watch(root, capsys)[0] == 0 and _recorded(root) == {}
-    runs.append(_ran(FAILED, "10:20"))               # and the next one failed, in the same minute of ao's clock
+    runs.append(_ran(FAILED, "10:20"))               # and the next one failed, in the same minute of polyctl's clock
     gh.answer(_pull(statusCheckRollup=runs))
     code, out = _watch(root, capsys)
 

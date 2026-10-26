@@ -1,32 +1,32 @@
-"""Every MCP tool, ao path and setting a document names is one ao has (DOCS-NAMES).
+"""Every MCP tool, polyctl path and setting a document names is one polyctl has (DOCS-NAMES).
 
 docs/mcp.md listed nine MCP tools; seven of them the server never had, and ten it has were not
-in that table. docs/gates.md declared gates in `.ao/gates.yml` with fields ao never reads, and
-docs/slices.md sent a restarted session to `.ao/ledger/slices.jsonl`, which nothing writes.
-tests/test_docs_commands.py cannot see any of it, since none of it is an `ao` invocation. This
+in that table. docs/gates.md declared gates in `.polyctl/gates.yml` with fields polyctl never reads, and
+docs/slices.md sent a restarted session to `.polyctl/ledger/slices.jsonl`, which nothing writes.
+tests/test_docs_commands.py cannot see any of it, since none of it is a `polyctl` invocation. This
 reads the same documents, under the same not-built markers, for four more kinds of name:
 
-- a tool: `ao_<name>` anywhere, except in a dotted field such as `directives.ao_files` or as a
-  key (`"ao_files": …`). The server in src/ao/mcp.py registers it. The table in docs/mcp.md
+- a tool: `polyctl_<name>` anywhere, except in a dotted field such as `directives.polyctl_files` or as a
+  key (`"polyctl_files": …`). The server in src/polyctl/mcp.py registers it. The table in docs/mcp.md
   that has an Access column lists every tool the server registers, and each class is what the
   tool is seen to do when it is called in a copy of a scratch project with each value its schema
   offers: run when it refuses without --allow-verify, write when it changes a file of the
   project, read otherwise;
-- a path: `.ao/…` or `~/.ao/…` anywhere, and each entry of a tree drawn under one. The code
-  names it in the same place, `~/.ao` on the machine or `.ao` in a project: in an os.path.join
+- a path: `.polyctl/…` or `~/.polyctl/…` anywhere, and each entry of a tree drawn under one. The code
+  names it in the same place, `~/.polyctl` on the machine or `.polyctl` in a project: in an os.path.join
   of literals, constants, loop values and what a function returns, in a storage tree primitive's
   path argument (a string or relative parts), or in a string it writes or prints. A docstring or
   an unused constant names nothing. `<placeholder>` stands for one name, and a directory is
   named when a path the code names lies inside it;
 - a file's content: a block marked json, jsonc, yaml or toml shows a file when its first line is
   a comment naming the file, or when the paragraph directly above names one file and ends with
-  a colon. A JSON file is shown as exactly one JSON value, and a YAML or TOML file ao does not name must not stand
-  in for the JSON file of that name that ao does read. A gates example holds only what
-  `ao verify` reads, and a config or settings example must pass the checks ao runs on one:
+  a colon. A JSON file is shown as exactly one JSON value, and a YAML or TOML file polyctl does not name must not stand
+  in for the JSON file of that name that polyctl does read. A gates example holds only what
+  `polyctl verify` reads, and a config or settings example must pass the checks polyctl runs on one:
   settings.problems, the role table and the capability matrix;
-- a setting, in `ao config get|set|unset <key> [<value>]`: settings.py registers the key, a value
+- a setting, in `polyctl config get|set|unset <key> [<value>]`: settings.py registers the key, a value
   that is set is one its kind accepts, and a machine setting is changed with --machine. The
-  parser accepts all of these, and `ao config` refuses them.
+  parser accepts all of these, and `polyctl config` refuses them.
 
 A marker excuses a name the same way it excuses an invocation, and a marker must excuse something
 from one of the two readings, or it has outlived its design.
@@ -42,25 +42,25 @@ from pathlib import Path
 
 import pytest
 
-from ao import cli, lib as A, matrix, mcp, settings as S, telegram
+from polyctl import cli, lib as A, matrix, mcp, settings as S, telegram
 from tests.test_docs_commands import FENCE, ROOT, _documents, _marker_problems, _option_like, _placeholder, _read
 
 ACCESS = ("read", "write", "run")
-TOOL = re.compile(r"(?<![\w.$/-])ao_[a-z][a-z0-9_]*(?![a-z0-9_])(?!\"?\s*:)")
-DOC_PATH = re.compile(r"(?<![\w.~/$-])(?:~/)?\.ao/[^\s`'\"()\[\]|,;:]*")
-CODE_PATH = re.compile(r"(?<![\w.~/$-])(?:~/)?\.ao/[\w.<>{}*/-]*")
-TREE_ROOT = re.compile(r"^\s*((?:~/)?\.ao/\S*/)(?:\s|$)")
+TOOL = re.compile(r"(?<![\w.$/-])polyctl_[a-z][a-z0-9_]*(?![a-z0-9_])(?!\"?\s*:)")
+DOC_PATH = re.compile(r"(?<![\w.~/$-])(?:~/)?\.polyctl/[^\s`'\"()\[\]|,;:]*")
+CODE_PATH = re.compile(r"(?<![\w.~/$-])(?:~/)?\.polyctl/[\w.<>{}*/-]*")
+TREE_ROOT = re.compile(r"^\s*((?:~/)?\.polyctl/\S*/)(?:\s|$)")
 TREE_ENTRY = re.compile(r"^((?:[│ ] {3})*)[├└]── ([^\s#]+)")
 WILD = re.compile(r"(<[^<>/]+>|\{[^{}/]*\}|\*)")
 DATA_BLOCKS = {"json", "jsonc", "yaml", "yml", "toml"}
-SHOWN_FIRST = re.compile(r"^\s*(?:#|//)\s*((?:~/)?\.ao/\S*[^\s/])\s*$")
+SHOWN_FIRST = re.compile(r"^\s*(?:#|//)\s*((?:~/)?\.polyctl/\S*[^\s/])\s*$")
 SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 
 UNKNOWN, HOME = "\x00", "\x01"      # a piece the code computes, and the home directory however it is reached
 
-# What `ao verify` and `ao merge-check` read of `.ao/gates.json` (parts/cli_authority.py), with
+# What `polyctl verify` and `polyctl merge-check` read of `.polyctl/gates.json` (parts/cli_authority.py), with
 # what the filter probe and the inputs rule read of a gate (parts/lib_gates.py). `expect: empty`
-# passes on no output; any other value leaves the verdict to the exit code, and `ao init`
+# passes on no output; any other value leaves the verdict to the exit code, and `polyctl init`
 # writes that value as exit_zero. A summary is a regex with pass and fail groups (lib.gate_counts).
 GATES_FILE = ("gates", "profiles", "default_profile")
 GATE = {"run": str, "expect": str, "timeout": (int, float), "summary": str, "min_tests": int, "inputs": list}
@@ -110,7 +110,7 @@ def _table_problems(text, tools, observed):
 def _arguments(tool, message):
     """One call with what a tool's schema requires, then one for each value of each enum it offers.
 
-    A required string gets the name of the message waiting in the mailbox: that is what ao_ack
+    A required string gets the name of the message waiting in the mailbox: that is what polyctl_ack
     must be given, and it serves the other tools as a summary or a question.
     """
     schema = tool.get("inputSchema") or {}
@@ -152,7 +152,7 @@ def _observed_access(project, calls):
 # ---- paths a document names ------------------------------------------------------------------
 
 def _paths(text):
-    """(line, path) of each ao path a document names, and of each entry of a tree drawn under one."""
+    """(line, path) of each polyctl path a document names, and of each entry of a tree drawn under one."""
     found, tree = [], None
     for number, line in enumerate(text.split("\n"), 1):
         found.extend((number, match.group(0).rstrip(".")) for match in DOC_PATH.finditer(line))
@@ -421,9 +421,9 @@ def _os_path(node):
 
 def _pattern(value):
     parts = [part for part in value.replace(UNKNOWN, "*").split("/") if part not in ("", ".")]
-    if ".ao" not in parts:
+    if ".polyctl" not in parts:
         return None
-    at = parts.index(".ao")
+    at = parts.index(".polyctl")
     return ("~/" if at == 1 and parts[0] in (HOME, "~") else "") + "/".join(parts[at:])
 
 
@@ -435,7 +435,7 @@ def _code_paths(source):
 # ---- a file a document shows, and what it holds ------------------------------------------------
 
 def _shown(text):
-    """(line, file, language, body) of each data block that shows an ao file."""
+    """(line, file, language, body) of each data block that shows a polyctl file."""
     lines, found, paragraph, apart, i = text.split("\n"), [], [], False, 0
     while i < len(lines):
         fence = FENCE.match(lines[i])
@@ -476,13 +476,13 @@ def _uncommented(text):
 
 
 def _content_problems(file, language, body, code):
-    """What a block showing an ao file holds that ao does not read there, as sentences."""
+    """What a block showing a polyctl file holds that polyctl does not read there, as sentences."""
     if not file.endswith((".json", ".jsonl")):
         twin = re.sub(r"\.(ya?ml|toml)$", ".json", file)
         named = [path for path in (file, twin) if any(_names(path, pattern) for pattern in code)]
-        return [f"ao reads {twin}, as JSON, and no {file}"] if named == [twin] and twin != file else []
+        return [f"polyctl reads {twin}, as JSON, and no {file}"] if named == [twin] and twin != file else []
     if language not in ("json", "jsonc"):
-        return [f"ao reads {file} as JSON, and this block is {language}"]
+        return [f"polyctl reads {file} as JSON, and this block is {language}"]
     text, decoder, documents, at = _uncommented("\n".join(body)), json.JSONDecoder(), [], 0
     try:
         while text[at:].strip():
@@ -490,12 +490,12 @@ def _content_problems(file, language, body, code):
             document, at = decoder.raw_decode(text, at)
             documents.append(document)
     except ValueError as error:
-        return [f"ao reads {file} as JSON, and this block does not parse: {error}"]
+        return [f"polyctl reads {file} as JSON, and this block does not parse: {error}"]
     if file.endswith(".json") and len(documents) != 1:
-        return [f"ao reads {file} as exactly one JSON value; this block holds {len(documents)}"]
-    if file == ".ao/gates.json":
+        return [f"polyctl reads {file} as exactly one JSON value; this block holds {len(documents)}"]
+    if file == ".polyctl/gates.json":
         return _gates_problems(documents[0])
-    if file in (".ao/config.json", "~/.ao/settings.json"):
+    if file in (".polyctl/config.json", "~/.polyctl/settings.json"):
         return _config_problems(documents[0], machine=file.startswith("~"))
     return []
 
@@ -503,7 +503,7 @@ def _content_problems(file, language, body, code):
 def _gates_problems(spec):
     if not isinstance(spec, dict):
         return ["gates are declared in one JSON object"]
-    problems = [f"ao reads no {key!r} in .ao/gates.json" for key in spec if key not in GATES_FILE]
+    problems = [f"polyctl reads no {key!r} in .polyctl/gates.json" for key in spec if key not in GATES_FILE]
     gates, profiles = spec.get("gates"), spec.get("profiles")
     if not isinstance(gates, dict) or not gates:
         return problems + ["no gate is declared"]
@@ -513,11 +513,11 @@ def _gates_problems(spec):
             continue
         for field, value in gate.items():
             if field not in GATE:
-                problems.append(f"gate {name}: ao reads no {field!r}")
+                problems.append(f"gate {name}: polyctl reads no {field!r}")
             elif isinstance(value, bool) or not isinstance(value, GATE[field]):
-                problems.append(f"gate {name}: {field} is {value!r}, which ao cannot use there")
+                problems.append(f"gate {name}: {field} is {value!r}, which polyctl cannot use there")
             elif field == "expect" and value not in EXPECT:
-                problems.append(f"gate {name}: ao tells only {' and '.join(EXPECT)} apart, not {value!r}")
+                problems.append(f"gate {name}: polyctl tells only {' and '.join(EXPECT)} apart, not {value!r}")
             elif field == "inputs" and not all(isinstance(glob, str) and glob.strip() for glob in value):
                 problems.append(f"gate {name}: inputs is a list of globs")
             elif field == "summary" and not {"pass", "fail"} <= set(_groups(value)):
@@ -529,7 +529,7 @@ def _gates_problems(spec):
             problems.append(f"profile {profile} is not a list of declared gates")
     default = spec.get("default_profile", "quick")
     if default not in profiles:
-        problems.append(f"`ao verify` without --profile runs {default!r}, and no profile has that name")
+        problems.append(f"`polyctl verify` without --profile runs {default!r}, and no profile has that name")
     return problems
 
 
@@ -541,7 +541,7 @@ def _groups(pattern):
 
 
 def _config_problems(document, machine):
-    """What ao finds wrong in a config example: settings.problems, the role table and the capability matrix."""
+    """What polyctl finds wrong in a config example: settings.problems, the role table and the capability matrix."""
     if not isinstance(document, dict):
         return ["a config is one JSON object"]
     saved = S.machine_settings
@@ -556,7 +556,7 @@ def _config_problems(document, machine):
     if actors is not None or roles is not None:
         if not isinstance(actors, dict) or not isinstance(roles, dict):
             return problems + ["actors and roles are read together, each an object"]
-        problems.extend(f"ao runs no {role} role" for role in roles if role not in A.ROLE_BLOCKS)
+        problems.extend(f"polyctl runs no {role} role" for role in roles if role not in A.ROLE_BLOCKS)
         problems.extend(f"the {role} role names {actor!r}, which is not an actor" for role, actor in roles.items()
                         if actor not in actors)
         kind = (document.get("repository") or {}).get("kind") or S.default("repository.kind")
@@ -572,7 +572,7 @@ def _config_problems(document, machine):
 # ---- settings ----------------------------------------------------------------------------------
 
 def _config_refusals(words):
-    """What `ao config` refuses in one invocation's words; [] for any other command."""
+    """What `polyctl config` refuses in one invocation's words; [] for any other command."""
     i = 1
     while i < len(words) and _option_like(words[i]):
         i += 2 if words[i] in (["-C"], ["--root"]) else 1
@@ -586,11 +586,11 @@ def _config_refusals(words):
     problems = []
     for key in keys:
         if key not in S.SETTINGS:
-            problems.append(f"ao config has no setting {key!r}")
+            problems.append(f"polyctl config has no setting {key!r}")
             continue
         for action in actions:
             if action != "get" and S.SETTINGS[key].scope == "machine" and ["--machine"] not in rest:
-                problems.append(f"{key} governs the whole machine, and ao config {action} refuses it without --machine")
+                problems.append(f"{key} governs the whole machine, and polyctl config {action} refuses it without --machine")
             for value in values if action == "set" else []:
                 try:
                     S.parse(key, value)
@@ -603,9 +603,9 @@ def _config_refusals(words):
 
 @functools.lru_cache(maxsize=None)
 def _scan(root):
-    """([Finding] for every name the documents under root show that ao does not have, [(document, Marker)])."""
+    """([Finding] for every name the documents under root show that polyctl does not have, [(document, Marker)])."""
     root = Path(root)
-    tools, code = {tool["name"] for tool in mcp.TOOLS}, _code_paths(str(root / "src" / "ao"))
+    tools, code = {tool["name"] for tool in mcp.TOOLS}, _code_paths(str(root / "src" / "polyctl"))
     findings, markers = [], []
     for name, path in _documents(root):
         text = path.read_text(encoding="utf-8")
@@ -613,7 +613,7 @@ def _scan(root):
         markers.extend((name, marker) for marker in found)
         findings.extend(Finding(name, line, "tool", f"the MCP server registers no {tool}")
                         for line, tool in _tools(text) if tool not in tools)
-        findings.extend(Finding(name, line, "path", f"ao names no {shown}")
+        findings.extend(Finding(name, line, "path", f"polyctl names no {shown}")
                         for line, shown in _paths(text) if not any(_names(shown, pattern) for pattern in code))
         findings.extend(Finding(name, line, "content", f"{file}: {problem}")
                         for line, file, language, body in _shown(text)
@@ -634,7 +634,7 @@ def _unexcused(root, kind):
 
 
 def _excusing(root):
-    """(document, line) of each marker that excuses a name ao does not have."""
+    """(document, line) of each marker that excuses a name polyctl does not have."""
     findings, markers = _scan(str(root))
     return {(name, marker.line) for name, marker in markers
             if any(f.document == name and _covered(marker, f) for f in findings)}
@@ -653,133 +653,133 @@ def test_docs_mcp_lists_every_tool_with_the_access_it_is_seen_to_have(project, t
 
     observed = _observed_access(project, tmp_path / "calls")
 
-    assert (observed["ao_verify"], observed["ao_ack"], observed["ao_board"]) == ("run", "write", "read")
+    assert (observed["polyctl_verify"], observed["polyctl_ack"], observed["polyctl_board"]) == ("run", "write", "read")
     assert _table_problems(text, set(observed), observed) == []
 
 
-def test_every_ao_path_a_document_names_is_one_the_code_names():
+def test_every_polyctl_path_a_document_names_is_one_the_code_names():
     problems = _unexcused(ROOT, "path")
 
     assert problems == [], "\n".join(problems)
 
 
-def test_a_file_a_document_shows_is_in_the_format_and_fields_ao_reads():
+def test_a_file_a_document_shows_is_in_the_format_and_fields_polyctl_reads():
     problems = _unexcused(ROOT, "content")
 
     assert problems == [], "\n".join(problems)
 
 
-def test_every_ao_config_example_names_a_setting_and_a_value_ao_config_accepts():
+def test_every_polyctl_config_example_names_a_setting_and_a_value_polyctl_config_accepts():
     problems = _unexcused(ROOT, "setting")
 
     assert problems == [], "\n".join(problems)
 
 
-def test_a_not_built_marker_gives_a_reason_and_excuses_only_what_ao_does_not_have():
+def test_a_not_built_marker_gives_a_reason_and_excuses_only_what_polyctl_does_not_have():
     problems = _marker_problems(ROOT, cli.build_parser(), _excusing(ROOT))
 
     assert problems == [], "\n".join(problems)
 
 
-CODE = '''"""A docstring names nothing, not even .ao/policy.yml."""
+CODE = '''"""A docstring names nothing, not even .polyctl/policy.yml."""
 import os
 
 HOME = os.path.expanduser("~")
 LEDGERS = ("notices.jsonl", "merges.jsonl")
 LOGS = {"nudge": "nudge-{key}.log"}
-CHAINED = (("grant", (".ao", "ledger", "authority.jsonl")),)
+CHAINED = (("grant", (".polyctl", "ledger", "authority.jsonl")),)
 
 
 def ledger_dir(root):
-    return os.path.join(root, ".ao", "ledger")
+    return os.path.join(root, ".polyctl", "ledger")
 
 
 def stores(root, key, state=None):
-    state = state or os.path.join(HOME, ".ao")
+    state = state or os.path.join(HOME, ".polyctl")
     return [os.path.join(ledger_dir(root), name) for name in LEDGERS] + [
         os.path.join(state, LOGS["nudge"].format(key=key)), os.path.join(state, f"cycles-{key}.jsonl"),
-        os.path.join(os.path.expanduser("~"), ".ao", "checkpoints.json"), os.path.join(root, ".ao", key)]
+        os.path.join(os.path.expanduser("~"), ".polyctl", "checkpoints.json"), os.path.join(root, ".polyctl", key)]
 
 
 def config(root):
-    return os.path.join(root, ".ao", "config.json"), os.path.join(root, ".ao", "gates.json")
+    return os.path.join(root, ".polyctl", "config.json"), os.path.join(root, ".polyctl", "gates.json")
 
 
 def hint(key):
-    print(f"refill .ao/backlog.md, or read ~/.ao/watchdog-{key}.log")
+    print(f"refill .polyctl/backlog.md, or read ~/.polyctl/watchdog-{key}.log")
     for name, parts in CHAINED:
         os.path.join(root, *parts)
 '''
 
 
 def test_only_paths_reaching_file_or_output_operations_are_named(tmp_path):
-    """Unused constants and returned hints once vouched for paths ao never used (TRIAGE-2-LOW)."""
+    """Unused constants and returned hints once vouched for paths polyctl never used (TRIAGE-2-LOW)."""
     source = '''import os
-UNUSED = ".ao/unused.json"
-PARTS = (".ao", "unused-parts.json")
-USED = ".ao/used.json"
+UNUSED = ".polyctl/unused.json"
+PARTS = (".polyctl", "unused-parts.json")
+USED = ".polyctl/used.json"
 def unused():
-    return f"read .ao/unused-hint.json"
+    return f"read .polyctl/unused-hint.json"
 def hint():
-    return "read .ao/hint.json"
+    return "read .polyctl/hint.json"
 def run(root, stream):
     def put(path, unused):
         open(path)
-    put(".ao/argument.json", ".ao/unused-argument.json")
+    put(".polyctl/argument.json", ".polyctl/unused-argument.json")
     path = USED
     open(path)
-    stream.write("read .ao/written.json")
+    stream.write("read .polyctl/written.json")
     print(hint())
-    os.path.join(root, ".ao", "joined.json")
+    os.path.join(root, ".polyctl", "joined.json")
 '''
     (tmp_path / "paths.py").write_text(source, encoding="utf-8")
 
-    assert _code_paths(str(tmp_path)) == {".ao/used.json", ".ao/written.json", ".ao/hint.json", ".ao/joined.json",
-                                         ".ao/argument.json"}
+    assert _code_paths(str(tmp_path)) == {".polyctl/used.json", ".polyctl/written.json", ".polyctl/hint.json", ".polyctl/joined.json",
+                                         ".polyctl/argument.json"}
 
 
 @pytest.mark.parametrize("operation, positional, keyword", [
-    ("create_in_tree", 'root, PATH, ".ao/payload.json"', 'root=root, rel=PATH, data=".ao/payload.json"'),
-    ("replace_in_tree", 'root, PATH, ".ao/payload.json"', 'root=root, rel=PATH, data=".ao/payload.json"'),
+    ("create_in_tree", 'root, PATH, ".polyctl/payload.json"', 'root=root, rel=PATH, data=".polyctl/payload.json"'),
+    ("replace_in_tree", 'root, PATH, ".polyctl/payload.json"', 'root=root, rel=PATH, data=".polyctl/payload.json"'),
     ("read_in_tree", 'root, PATH', 'root=root, rel=PATH'),
-    ("append_in_tree", 'root, PATH, ".ao/payload.json"', 'root=root, rel=PATH, data=".ao/payload.json"'),
-    ("append_chained_in_tree", 'root, PATH, ".ao/payload.json", chain',
-     'root=root, rel=PATH, record=".ao/payload.json", chain=chain'),
+    ("append_in_tree", 'root, PATH, ".polyctl/payload.json"', 'root=root, rel=PATH, data=".polyctl/payload.json"'),
+    ("append_chained_in_tree", 'root, PATH, ".polyctl/payload.json", chain',
+     'root=root, rel=PATH, record=".polyctl/payload.json", chain=chain'),
     ("read_chained_in_tree", 'root, PATH, chain', 'root=root, rel=PATH, chain=chain'),
     ("no_link_on_the_way", 'PATH', 'path=PATH'),
 ])
 @pytest.mark.parametrize("qualified", [False, True])
 @pytest.mark.parametrize("use_keyword", [False, True])
-@pytest.mark.parametrize("path", ['".ao/tree.json"', '(".ao", "tree.json")'])
+@pytest.mark.parametrize("path", ['".polyctl/tree.json"', '(".polyctl", "tree.json")'])
 def test_tree_primitives_name_only_their_path_argument(tmp_path, operation, positional, keyword,
                                                      qualified, use_keyword, path):
     call = ("storage." if qualified else "") + operation
     arguments = (keyword if use_keyword else positional).replace("PATH", path)
-    source = f'''""".ao/docstring.json"""
-UNUSED = ".ao/unused.json"
-PARTS = (".ao", "unused-parts.json")
+    source = f'''""".polyctl/docstring.json"""
+UNUSED = ".polyctl/unused.json"
+PARTS = (".polyctl", "unused-parts.json")
 def unused():
-    return ".ao/unused-return.json"
+    return ".polyctl/unused-return.json"
 def run():
-    root = ".ao/not-the-rel.json"
-    chain = ".ao/not-the-chain.json"
+    root = ".polyctl/not-the-rel.json"
+    chain = ".polyctl/not-the-chain.json"
     {call}({arguments})
 '''
     (tmp_path / "paths.py").write_text(source, encoding="utf-8")
 
-    assert _code_paths(str(tmp_path)) == {".ao/tree.json"}
+    assert _code_paths(str(tmp_path)) == {".polyctl/tree.json"}
 
 
 def test_tree_paths_flow_through_bindings_returns_loops_and_local_writers(tmp_path):
-    source = '''PARTS = (".ao", "bound.json")
-CHAINED = (("grant", (".ao", "ledger", "authority.jsonl")),)
+    source = '''PARTS = (".polyctl", "bound.json")
+CHAINED = (("grant", (".polyctl", "ledger", "authority.jsonl")),)
 def returned():
-    return (".ao", "returned.json")
+    return (".polyctl", "returned.json")
 def run(root):
     def put(rel, content):
         storage.create_in_tree(root, rel, content)
-    put(".ao/authority.md", ".ao/unused-content.json")
-    put((".ao", "local-parts.json"), ".ao/unused-content.json")
+    put(".polyctl/authority.md", ".polyctl/unused-content.json")
+    put((".polyctl", "local-parts.json"), ".polyctl/unused-content.json")
     rel = PARTS
     storage.replace_in_tree(root, rel, b"")
     storage.read_in_tree(root, returned())
@@ -788,11 +788,11 @@ def run(root):
 '''
     (tmp_path / "paths.py").write_text(source, encoding="utf-8")
 
-    assert _code_paths(str(tmp_path)) == {".ao/authority.md", ".ao/local-parts.json", ".ao/bound.json",
-                                         ".ao/returned.json", ".ao/ledger/authority.jsonl"}
+    assert _code_paths(str(tmp_path)) == {".polyctl/authority.md", ".polyctl/local-parts.json", ".polyctl/bound.json",
+                                         ".polyctl/returned.json", ".polyctl/ledger/authority.jsonl"}
 
 
-@pytest.mark.parametrize("file", [".ao/config.json", ".ao/gates.json", "~/.ao/email.json"])
+@pytest.mark.parametrize("file", [".polyctl/config.json", ".polyctl/gates.json", "~/.polyctl/email.json"])
 @pytest.mark.parametrize("body", [[], ["// no value"], ["{}", "{}"]])
 def test_a_json_file_example_holds_exactly_one_value(file, body):
     """A second JSON value was ignored, and an empty block could raise (TRIAGE-2-LOW)."""
@@ -801,33 +801,33 @@ def test_a_json_file_example_holds_exactly_one_value(file, body):
 
 
 def test_jsonl_examples_can_hold_multiple_values():
-    assert _content_problems(".ao/ledger/notices.jsonl", "json", ["{}", "{}"], set()) == []
+    assert _content_problems(".polyctl/ledger/notices.jsonl", "json", ["{}", "{}"], set()) == []
 
 SAMPLE = """# Names
 
-`ao_status` and `ao_board` exist; `ao_resume` does not, and `directives.ao_files` is a field.
+`polyctl_status` and `polyctl_board` exist; `polyctl_resume` does not, and `directives.polyctl_files` is a field.
 
-State: `.ao/ledger/notices.jsonl`, `~/.ao/nudge-<project>.log`, `~/.ao/cycles-<project>.jsonl`,
-`.ao/ledger/`, `.ao/<key>` and `.ao/backlog.md` are named; `~/.ao/notices.jsonl`, `.ao/<x>/y.json`
-and `.ao/policy.yml` are not.
+State: `.polyctl/ledger/notices.jsonl`, `~/.polyctl/nudge-<project>.log`, `~/.polyctl/cycles-<project>.jsonl`,
+`.polyctl/ledger/`, `.polyctl/<key>` and `.polyctl/backlog.md` are named; `~/.polyctl/notices.jsonl`, `.polyctl/<x>/y.json`
+and `.polyctl/policy.yml` are not.
 
 ```
-.ao/ledger/
+.polyctl/ledger/
 ├── authority.jsonl      # named
 └── slices.jsonl         # not named
 ```
 
 ```yaml
-# .ao/config.json
+# .polyctl/config.json
 alarms: { red_after_minutes: 60 }
 ```
 
 ```yaml
-# .ao/gates.yml
-gates: { full: { run: "npm test", "ao_files": [] } }
+# .polyctl/gates.yml
+gates: { full: { run: "npm test", "polyctl_files": [] } }
 ```
 
-So `.ao/gates.json` reads:
+So `.polyctl/gates.json` reads:
 
 ```json
 {"gates": {"full": {"run": "npm test", "timeout": "30m", "serialise": true, "expect": "all_pass"}},
@@ -835,77 +835,77 @@ So `.ao/gates.json` reads:
 ```
 
 ```jsonc
-// .ao/config.json
+// .polyctl/config.json
 {"alarms": {"red_after_minute": 60}, "actors": {"kiro": {"adapter": "kiro"}},
  "roles": {"implementer": "kiro", "reviewer": "kiro", "tester": "kiro"}}
 ```
 
 ```bash
-ao config set transport keyflip
-ao config set round_budget lots
-ao config set quota.block_percent 90
-ao config set quota.block_percent 90 --machine
+polyctl config set transport keyflip
+polyctl config set round_budget lots
+polyctl config set quota.block_percent 90
+polyctl config set quota.block_percent 90 --machine
 ```
 
-As a synopsis, `ao config [list|get|set|unset] [<setting> <value>] [--machine]`.
+As a synopsis, `polyctl config [list|get|set|unset] [<setting> <value>] [--machine]`.
 
 <!-- not built: sessions are resumed by a design -->
-Not built yet: `ao_resume` and `.ao/lanes.json`.
+Not built yet: `polyctl_resume` and `.polyctl/lanes.json`.
 
-<!-- not built: a design that names nothing ao lacks -->
-Not built yet: `.ao/backlog.md` holding lanes.
+<!-- not built: a design that names nothing polyctl lacks -->
+Not built yet: `.polyctl/backlog.md` holding lanes.
 """
 
 
 def test_the_reading_sees_tools_paths_trees_shown_files_settings_and_markers(tmp_path):
-    for name, text in (("src/ao/paths.py", CODE), ("docs/sample.md", SAMPLE), ("README.md", ""), ("README.tr.md", ""),
-                       ("SECURITY.md", ""), ("src/ao/skill/SKILL.md", ""),
-                       ("docs/lessons.md", "`ao_mail_send` in `.ao/roles.yml`\n")):
+    for name, text in (("src/polyctl/paths.py", CODE), ("docs/sample.md", SAMPLE), ("README.md", ""), ("README.tr.md", ""),
+                       ("SECURITY.md", ""), ("src/polyctl/skill/SKILL.md", ""),
+                       ("docs/lessons.md", "`polyctl_mail_send` in `.polyctl/roles.yml`\n")):
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(text, encoding="utf-8")
 
-    assert _code_paths(str(tmp_path / "src" / "ao")) == {
-        ".ao/ledger", ".ao/ledger/notices.jsonl", ".ao/ledger/merges.jsonl", ".ao/ledger/authority.jsonl", ".ao/*",
-        ".ao/config.json", ".ao/gates.json", ".ao/backlog.md", "~/.ao", "~/.ao/nudge-*.log", "~/.ao/cycles-*.jsonl",
-        "~/.ao/checkpoints.json", "~/.ao/watchdog-*.log"}
+    assert _code_paths(str(tmp_path / "src" / "polyctl")) == {
+        ".polyctl/ledger", ".polyctl/ledger/notices.jsonl", ".polyctl/ledger/merges.jsonl", ".polyctl/ledger/authority.jsonl", ".polyctl/*",
+        ".polyctl/config.json", ".polyctl/gates.json", ".polyctl/backlog.md", "~/.polyctl", "~/.polyctl/nudge-*.log", "~/.polyctl/cycles-*.jsonl",
+        "~/.polyctl/checkpoints.json", "~/.polyctl/watchdog-*.log"}
     assert [f"{f.document}:{f.line}: {f.text}" for f in _scan(str(tmp_path))[0]] == [
-        "docs/sample.md:3: the MCP server registers no ao_resume",
-        "docs/sample.md:48: the MCP server registers no ao_resume",
-        "docs/sample.md:6: ao names no ~/.ao/notices.jsonl",
-        "docs/sample.md:6: ao names no .ao/<x>/y.json",
-        "docs/sample.md:7: ao names no .ao/policy.yml",
-        "docs/sample.md:12: ao names no .ao/ledger/slices.jsonl",
-        "docs/sample.md:21: ao names no .ao/gates.yml",
-        "docs/sample.md:48: ao names no .ao/lanes.json",
-        "docs/sample.md:15: .ao/config.json: ao reads .ao/config.json as JSON, and this block is yaml",
-        "docs/sample.md:20: .ao/gates.yml: ao reads .ao/gates.json, as JSON, and no .ao/gates.yml",
-        "docs/sample.md:27: .ao/gates.json: gate full: timeout is '30m', which ao cannot use there",
-        "docs/sample.md:27: .ao/gates.json: gate full: ao reads no 'serialise'",
-        "docs/sample.md:27: .ao/gates.json: gate full: ao tells only exit_zero and empty apart, not 'all_pass'",
-        "docs/sample.md:27: .ao/gates.json: profile full is not a list of declared gates",
-        "docs/sample.md:27: .ao/gates.json: `ao verify` without --profile runs 'quick', and no profile has that name",
-        "docs/sample.md:32: .ao/config.json: alarms.red_after_minute in the project settings is not a setting ao "
-        "reads; `ao config list` shows the names",
-        "docs/sample.md:32: .ao/config.json: ao runs no tester role",
-        "docs/sample.md:32: .ao/config.json: the reviewer and the implementer would both be kiro; no actor reviews "
+        "docs/sample.md:3: the MCP server registers no polyctl_resume",
+        "docs/sample.md:48: the MCP server registers no polyctl_resume",
+        "docs/sample.md:6: polyctl names no ~/.polyctl/notices.jsonl",
+        "docs/sample.md:6: polyctl names no .polyctl/<x>/y.json",
+        "docs/sample.md:7: polyctl names no .polyctl/policy.yml",
+        "docs/sample.md:12: polyctl names no .polyctl/ledger/slices.jsonl",
+        "docs/sample.md:21: polyctl names no .polyctl/gates.yml",
+        "docs/sample.md:48: polyctl names no .polyctl/lanes.json",
+        "docs/sample.md:15: .polyctl/config.json: polyctl reads .polyctl/config.json as JSON, and this block is yaml",
+        "docs/sample.md:20: .polyctl/gates.yml: polyctl reads .polyctl/gates.json, as JSON, and no .polyctl/gates.yml",
+        "docs/sample.md:27: .polyctl/gates.json: gate full: timeout is '30m', which polyctl cannot use there",
+        "docs/sample.md:27: .polyctl/gates.json: gate full: polyctl reads no 'serialise'",
+        "docs/sample.md:27: .polyctl/gates.json: gate full: polyctl tells only exit_zero and empty apart, not 'all_pass'",
+        "docs/sample.md:27: .polyctl/gates.json: profile full is not a list of declared gates",
+        "docs/sample.md:27: .polyctl/gates.json: `polyctl verify` without --profile runs 'quick', and no profile has that name",
+        "docs/sample.md:32: .polyctl/config.json: alarms.red_after_minute in the project settings is not a setting polyctl "
+        "reads; `polyctl config list` shows the names",
+        "docs/sample.md:32: .polyctl/config.json: polyctl runs no tester role",
+        "docs/sample.md:32: .polyctl/config.json: the reviewer and the implementer would both be kiro; no actor reviews "
         "its own work",
-        "docs/sample.md:39: `ao config set transport keyflip`: ao config has no setting 'transport'",
-        "docs/sample.md:40: `ao config set round_budget lots`: round_budget cannot be set to 'lots': it is a whole "
+        "docs/sample.md:39: `polyctl config set transport keyflip`: polyctl config has no setting 'transport'",
+        "docs/sample.md:40: `polyctl config set round_budget lots`: round_budget cannot be set to 'lots': it is a whole "
         "number of at least 1",
-        "docs/sample.md:41: `ao config set quota.block_percent 90`: quota.block_percent governs the whole machine, "
-        "and ao config set refuses it without --machine",
+        "docs/sample.md:41: `polyctl config set quota.block_percent 90`: quota.block_percent governs the whole machine, "
+        "and polyctl config set refuses it without --machine",
     ]
-    assert _unexcused(tmp_path, "tool") == ["docs/sample.md:3: the MCP server registers no ao_resume"]
-    assert _unexcused(tmp_path, "path")[-1] == "docs/sample.md:21: ao names no .ao/gates.yml"
+    assert _unexcused(tmp_path, "tool") == ["docs/sample.md:3: the MCP server registers no polyctl_resume"]
+    assert _unexcused(tmp_path, "path")[-1] == "docs/sample.md:21: polyctl names no .polyctl/gates.yml"
     assert _excusing(tmp_path) == {("docs/sample.md", 47)}
     assert _marker_problems(tmp_path, cli.build_parser(), _excusing(tmp_path)) == [
-        "docs/sample.md:50: a not-built marker excuses nothing: no command the parser refuses, no name ao lacks"]
-    assert _table_problems("| Tool | Access | What |\n|---|---|---|\n| `ao_status` | read | x |\n"
-                           "| `ao_ack` | **drive** | x |\n| `ao_verify` | read | x |\n| `ao_resume` | run | x |\n",
-                           {"ao_status", "ao_ack", "ao_verify", "ao_board"},
-                           {"ao_status": "read", "ao_ack": "write", "ao_verify": "run", "ao_board": "read"}) == [
-        "docs/mcp.md lists no access for ao_board",
-        "docs/mcp.md:4: ao_ack is 'drive'; access is one of read, write, run",
-        "docs/mcp.md:6: the server registers no ao_resume",
-        "docs/mcp.md:5: ao_verify is listed as read, and it is seen to run",
+        "docs/sample.md:50: a not-built marker excuses nothing: no command the parser refuses, no name polyctl lacks"]
+    assert _table_problems("| Tool | Access | What |\n|---|---|---|\n| `polyctl_status` | read | x |\n"
+                           "| `polyctl_ack` | **drive** | x |\n| `polyctl_verify` | read | x |\n| `polyctl_resume` | run | x |\n",
+                           {"polyctl_status", "polyctl_ack", "polyctl_verify", "polyctl_board"},
+                           {"polyctl_status": "read", "polyctl_ack": "write", "polyctl_verify": "run", "polyctl_board": "read"}) == [
+        "docs/mcp.md lists no access for polyctl_board",
+        "docs/mcp.md:4: polyctl_ack is 'drive'; access is one of read, write, run",
+        "docs/mcp.md:6: the server registers no polyctl_resume",
+        "docs/mcp.md:5: polyctl_verify is listed as read, and it is seen to run",
     ]

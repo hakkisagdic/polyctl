@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import re
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 
 def _plain(text):

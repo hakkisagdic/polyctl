@@ -1,7 +1,7 @@
 import json
 import os
 
-from ao import lib as A, mcp
+from polyctl import lib as A, mcp
 from tests.scenarios import World
 
 
@@ -40,11 +40,11 @@ def test_a_green_claim_over_a_passed_verification_is_consistent(project):
     assert A.report_inconsistency(root, "all tests pass") is None
 
 
-def test_ao_report_quotes_the_ledger_and_marks_the_contradiction(project):
+def test_polyctl_report_quotes_the_ledger_and_marks_the_contradiction(project):
     root = project["root"]
     _verification(root, False, FAILED)
 
-    result = mcp.call("ao_report", {"kind": "done", "summary": "S1 done, 159 passed"}, project, False)
+    result = mcp.call("polyctl_report", {"kind": "done", "summary": "S1 done, 159 passed"}, project, False)
 
     text = open(os.path.join(root, project["mailbox"], result["written"]), encoding="utf-8").read()
     assert "## INCONSISTENT" in text and result["inconsistent"]

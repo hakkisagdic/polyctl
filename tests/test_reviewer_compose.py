@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import allowlist, cli, lib as A
+from polyctl import allowlist, cli, lib as A
 
 
 def test_every_adapter_declares_whether_it_can_deny_tools_and_no_composed_reviewer_grants_one():
@@ -35,10 +35,10 @@ def test_three_harness_pairs_hold_the_two_roles_with_no_hand_written_argv(projec
     assert route["composed"] is True and route["adapter"] == reviewer
 
 
-def test_ao_role_names_an_adapter_and_a_model_and_the_doctor_names_an_ineligible_one(project, capsys):
+def test_polyctl_role_names_an_adapter_and_a_model_and_the_doctor_names_an_ineligible_one(project, capsys):
     root = project["root"]
     stored = {key: value for key, value in project.items() if key != "root"}
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(stored, fh)
     args = SimpleNamespace(action="set", role="reviewer", actor="claude-code", model="some-model", effort=None,
                            hotfix=False)
@@ -73,7 +73,7 @@ def test_a_codex_reviewer_that_loads_the_persons_config_or_may_write_is_named(pr
     writing = ["codex", "exec", "{prompt}", "--ignore-user-config", "--sandbox", "workspace-write"]
 
     assert "it starts every configured MCP server (no --ignore-user-config)" in allowlist.reviewer_problems(plain)
-    assert allowlist.reviewer_problems(writing) == ["it runs with --sandbox workspace-write, where ao pins read-only"]
+    assert allowlist.reviewer_problems(writing) == ["it runs with --sandbox workspace-write, where polyctl pins read-only"]
     assert A.pinned_argv(["codex", "exec", "{prompt}", "--ignore-user-config"], "reviewer")[1] == \
         ["--sandbox", "read-only"]
     problems = dict(cli.doctor_problems(dict(project, reviewer={"adapter": "codex", "family": "openai",

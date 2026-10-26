@@ -1,0 +1,1975 @@
+"""Alarms and records: alarms, project keys, review scope, helpers, costs, deferrals, waivers,
+credits, pings, locks.
+
+A part of src/polyctl/lib.py (#44): moved out byte for byte and run in its namespace by `_part`,
+where it stood; it is not importable on its own.
+"""
+
+
+# ---- alarms -------------------------------------------------------------------
+#
+# Three levels, named by who acts: yellow is the architect's (an anomaly and a
+# wake), orange is the human's (desktop + Telegram), red is the human's *now*
+# (e-mail). The ladder is what turns a standing orange into a red: on 2026-09-05
+# every alert went to a notification centre nobody looked at for eleven hours.
+
+# The defaults, from the settings registry (#74); the functions below read the values in force.
+ALARM_RED_AFTER = settings.default("alarms.red_after_minutes") * 60
+ALARM_RED_REPEAT = settings.default("alarms.red_repeat_hours") * 3600
+ALARM_RESET_AFTER = settings.default("alarms.reset_after_hours") * 3600
+
+
+def _alarm_reset_after():
+    return settings.get(None, "alarms.reset_after_hours") * 3600
+
+
+def alarms_path():
+    return os.path.join(HOME, ".polyctl", "alarms.json")
+
+
+def load_alarms():
+    try:
+        return json.load(open(alarms_path(), encoding=UTF8))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_alarms(d):
+    """Write the episodes whole: written over in place, a write cut off left a file that read as none (JOURNAL-7)."""
+    from .storage import replace_file_durably
+    try:
+        os.makedirs(os.path.dirname(alarms_path()), exist_ok=True)
+        replace_file_durably(alarms_path(), json.dumps(d, indent=1).encode(UTF8))
+    except OSError:
+        pass
+
+
+def _alarm_store_locked(when_busy):
+    """Run one read-modify-write of the alarm files under their lock (JOURNAL-7).
+
+    Every project's watchdog, its doctor and `polyctl alarms` share ~/.polyctl/alarms.json, and each read
+    the file, changed it and wrote it back: two at once lost one's change. A change holds the lock
+    for about a millisecond; one that cannot have it in ten seconds stands behind a stalled writer,
+    whose stale copy would overwrite whatever was written past it. Nothing is written without the
+    lock: `when_busy(change, *args, **kwargs)` is what the caller gets instead, and None raises.
+
+    What is not written is not kept: a raise is recorded by the next raise and an expiry by the next
+    cycle, but a mark that a notice went is lost, and the next raise may send that notice again
+    (JOURNAL-7-3).
+    """
+    import contextlib
+    import functools
+
+    def wrap(change):
+        @functools.wraps(change)
+        def locked(*args, **kwargs):
+            from .storage import LedgerLockTimeout, _exclusive_lock
+            held = contextlib.ExitStack()
+            try:
+                held.enter_context(_exclusive_lock(alarms_path() + ".lock", timeout=10))
+            except LedgerLockTimeout:
+                if when_busy is None:
+                    raise
+                print(f"polyctl: the alarm store was held past ten seconds; {change.__name__} was not written, and "
+                      "the next cycle reckons from the store as it stands", file=sys.stderr)
+                return when_busy(change, *args, **kwargs)
+            with held:
+                return change(*args, **kwargs)
+        return locked
+    return wrap
+
+
+def _as_preview(change, *args, **kwargs):
+    """A raise reckoned from the episodes as they stand and not written: the notice still goes (JOURNAL-7).
+
+    Until the next raise records it, a mark made for a new episode has no episode to go on, and is lost as a
+    busy one is (JOURNAL-7-3).
+    """
+    return change(*args, **dict(kwargs, persist=False))
+
+
+def _not_kept(change, *args, **kwargs):
+    """A mark that a notice went - mailed, rang, named - is not written and not kept (JOURNAL-7-3).
+
+    The next raise finds the episode untold and may tell it again: a red is mailed at the next cycle, a ring
+    goes again once its window has passed, a red a resume notice named is mailed at its next raise. Told
+    twice is the price of never writing blind.
+    """
+    return None
+
+
+def _none_expired(change, *args, **kwargs):
+    return []
+
+
+def alarm_snoozes_path():
+    return os.path.join(HOME, ".polyctl", "alarm-snoozes.json")
+
+
+def load_alarm_snoozes():
+    try:
+        return json.load(open(alarm_snoozes_path(), encoding=UTF8))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_alarm_snoozes(d):
+    from .storage import replace_file_durably
+    os.makedirs(os.path.dirname(alarm_snoozes_path()), exist_ok=True)
+    replace_file_durably(alarm_snoozes_path(), json.dumps(d, indent=1).encode(UTF8))
+
+
+@_alarm_store_locked(None)
+def alarm_snooze(project, key, until, by="human", why=""):
+    """Keep one alarm off the human channels until a date; it stays on the record.
+
+    A snooze is for a condition that is real, known and waiting on someone. The
+    doctor check once reported a project's legacy commit hook, whose fix only the
+    owner could make, and not before a date already set; left alone it would ring
+    red and mail every six hours about something nobody could act on yet. The
+    snooze names who set it and why, and it ends by itself on the date.
+    """
+    d = load_alarm_snoozes()
+    d[f"{project}:{key}"] = {"until": int(until), "by": by, "why": why, "at": int(time.time())}
+    _save_alarm_snoozes(d)
+    return d[f"{project}:{key}"]
+
+
+@_alarm_store_locked(None)
+def alarm_unsnooze(project, key):
+    d = load_alarm_snoozes()
+    gone = d.pop(f"{project}:{key}", None)
+    if gone is not None:
+        _save_alarm_snoozes(d)
+    return gone
+
+
+def alarm_snoozed(project, key, now=None):
+    """The snooze standing for this alarm, or None; an expired snooze is no snooze."""
+    entry = load_alarm_snoozes().get(f"{project}:{key}")
+    if isinstance(entry, dict) and float(entry.get("until") or 0) > (now or time.time()):
+        return entry
+    return None
+
+
+@_alarm_store_locked(_as_preview)
+def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=None,
+                persist=True, quiet_until=None, evidence=None, what=None):
+    """Calculate a raise of `key` at `level`; return (level to ring at, episode).
+
+    An orange raised repeatedly for `red_after` seconds rings red. `red_due` on
+    the episode says whether a mail should go now (once per ALARM_RED_REPEAT).
+    ``persist=False`` runs the identical calculation against the current ledger
+    without writing it, so watchdog explain can preview the live verdict safely.
+
+    `what` names what the raise says, when its caller can. The episode keeps what it
+    last told (`told_what`); a raise that says something else is `news` on the returned
+    episode, and news is mailed at once when the episode is red, past the repeat and
+    past a known end: a projection told on Monday does not hold back the day the credits
+    actually run out (NOTICE-NOISE).
+    """
+    now = now or time.time()
+    d = load_alarms()
+    k = f"{project}:{key}"
+    e = d.get(k) or {}
+    if e and now - e.get("last", 0) > _alarm_reset_after():
+        e = {}
+    e.setdefault("first", now)
+    e["last"] = now
+    e["level"] = level
+    e["count"] = e.get("count", 0) + 1
+    if title:
+        e["title"] = title
+    if quiet_until:
+        e["quiet_until"] = float(quiet_until)
+    else:
+        # Each raise's own end is the only one that holds: a reading that names none - another account's,
+        # after keyflip moved to it - was held until the reset of the one before (NOTICE-NOISE-2).
+        e.pop("quiet_until", None)
+    if evidence:
+        e["evidence"] = evidence      # the ladder shows what the notice was raised on (#37)
+    news = what is not None and e.get("told_what") is not None and e["told_what"] != what
+    if what is not None and e.get("told_what") is None \
+            and any(e.get(field) is not None for field in ("rang_at", "red_sent", "named_at")):
+        e["told_what"] = what         # told by a raise that named nothing, a resume notice's: this is what it told
+    ring = level
+    e["red_due"] = False
+    if level == "red" or (level == "orange" and now - e["first"] >= red_after):
+        ring = "red"
+        # A red a resume notice named is told from then, as a mailed one is from its mail (RESUME-QUIET).
+        told = e.get("red_sent") if e.get("red_sent") is not None else e.get("named_at")
+        e["red_due"] = told is None or news or now - told >= settings.get(None, "alarms.red_repeat_hours") * 3600
+        # A standing red with a known end is mailed once, then held until that end (#40).
+        if told is not None and not news and now < float(e.get("quiet_until") or 0):
+            e["red_due"] = False
+    e["ring"] = ring
+    d[k] = e
+    if persist:
+        save_alarms(d)
+    return ring, dict(e, news=news)
+
+
+@_alarm_store_locked(_not_kept)
+def alarm_mailed(project, key, now=None, what=None):
+    d = load_alarms()
+    k = f"{project}:{key}"
+    if k in d:
+        d[k]["red_sent"] = now or time.time()
+        d[k]["red_due"] = False
+        if what is not None:
+            d[k]["told_what"] = what
+        save_alarms(d)
+
+
+@_alarm_store_locked(_not_kept)
+def alarm_rang(project, key, now=None, what=None):
+    """Record that the orange channels told this episode, and what they told (NOTICE-NOISE).
+
+    A condition raised with a `what` rings those channels once for what it says: the
+    raises after this record and do not ring again until they say something else, and
+    red's mail keeps its own schedule. A resume notice that named an episode rang it too.
+    """
+    d = load_alarms()
+    k = f"{project}:{key}"
+    if k in d:
+        d[k]["rang_at"] = now or time.time()
+        if what is not None:
+            d[k]["told_what"] = what
+        save_alarms(d)
+
+
+@_alarm_store_locked(_not_kept)
+def alarm_named(project, key, now=None):
+    """Record that a resume notice named a red episode instead of mailing it (RESUME-QUIET).
+
+    Its repeat counts from here, as a mailed red's counts from its mail, so the notice that
+    has just named it is not followed by a mail about the same thing at the next raise.
+    """
+    d = load_alarms()
+    k = f"{project}:{key}"
+    if k in d:
+        d[k]["named_at"] = now or time.time()
+        d[k]["red_due"] = False
+        save_alarms(d)
+
+
+def active_alarms(project=None, now=None):
+    now = now or time.time()
+    out = []
+    for k, e in load_alarms().items():
+        proj, _, key = k.partition(":")
+        if project and proj != project:
+            continue
+        if now - e.get("last", 0) > _alarm_reset_after():
+            continue
+        out.append(dict(e, project=proj, key=key, age_s=int(now - e.get("first", now))))
+    return sorted(out, key=lambda e: -e["age_s"])
+
+
+# ---- heartbeat ------------------------------------------------------------------
+
+# ---- one name for what a project keeps outside its tree (#66) -----------------------
+
+PROJECT_KEY_FILE = "project-key"
+
+
+def project_registry_path():
+    """Which path holds which project name on this machine."""
+    return os.environ.get("POLYCTL_PROJECT_REGISTRY") or os.path.join(HOME, ".polyctl", "projects.json")
+
+
+def project_registry():
+    try:
+        with open(project_registry_path(), encoding=UTF8) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {name: row for name, row in data.items() if isinstance(row, dict) and row.get("root")}
+
+
+def _usable_key(name):
+    return (isinstance(name, str) and 0 < len(name) <= 200 and name not in (".", "..")
+            and not any(ch in name for ch in "/\\\0\n\r"))
+
+
+def project_key(root):
+    """The name a project's files outside its tree are kept under (#66).
+
+    Push windows, watchdog state and logs, heartbeats, locks, the reviewer and
+    helper records and alarms were named by the directory's basename, so two
+    checkouts called `api` shared them: a push allowed in one opened the other,
+    and one project's watchdog state overwrote the other's.
+
+    A project's name belongs to its resolved path in the machine registry. A new
+    project takes its basename - the name its files already had, so an existing
+    install keeps them - unless a path that is still a polyctl project holds that
+    name, compared without case because launchd labels are lower-cased; then it
+    takes the basename and at least eight hex digits of its resolved path,
+    lengthened until no live project holds it (TRIAGE-2-MEDIUM). The name is
+    also written to `.polyctl/project-key` with the path, so a lost registry gives
+    each project its own name back and a copied `.polyctl/` does not claim another's.
+    A directory with no `.polyctl/` is not a polyctl project: it gets its basename and
+    nothing is written.
+    """
+    base = os.path.basename(os.path.abspath(root).rstrip("/\\")) or "root"
+    real = os.path.realpath(root)
+    if not os.path.isdir(os.path.join(real, ".polyctl")):
+        return base
+    mine = next((name for name, row in project_registry().items() if row.get("root") == real), None)
+    if mine:
+        return mine
+    from .storage import _exclusive_lock, replace_file_durably, replace_in_tree
+    registry = project_registry_path()
+    recorded = os.path.join(real, ".polyctl", PROJECT_KEY_FILE)
+    registered = False
+    try:
+        with _exclusive_lock(registry + ".lock"):
+            known = project_registry()
+            mine = next((name for name, row in known.items() if row.get("root") == real), None)
+            registered = mine is not None
+            if mine is None:
+                held = {name.lower() for name, row in known.items()
+                        if row.get("root") != real and os.path.isdir(os.path.join(row["root"], ".polyctl"))}
+                try:
+                    with open(recorded, encoding=UTF8) as fh:
+                        mark = json.load(fh)
+                except (OSError, ValueError):
+                    mark = {}
+                wanted = mark.get("key") if isinstance(mark, dict) and mark.get("root") == real else None
+                if _usable_key(wanted) and wanted.lower() not in held:
+                    mine = wanted
+                elif base.lower() not in held:
+                    mine = base
+                else:
+                    digest = hashlib.sha256(real.encode(UTF8)).hexdigest()
+                    mine = next((f"{base}-{digest[:length]}" for length in (8, 12, 16, 64)
+                                 if f"{base}-{digest[:length]}".lower() not in held), None)
+                    suffix = 2
+                    while mine is None or mine.lower() in held:
+                        mine = f"{base}-{digest}-{suffix}"
+                        suffix += 1
+                known = {name: row for name, row in known.items() if name.lower() != mine.lower()}
+                known[mine] = {"root": real, "at": int(time.time())}
+                replace_file_durably(registry, json.dumps(known, indent=1, sort_keys=True).encode("utf-8"))
+                registered = True
+            # In the tree an agent writes, through no link: a `.polyctl` made one after the look above had the first
+            # command to name the project - `polyctl init` - write this file wherever it led (LEADS-ADAPTERS). One refused
+            # is an OSError, and the name the registry holds stands.
+            replace_in_tree(real, f".polyctl/{PROJECT_KEY_FILE}", json.dumps({"key": mine, "root": real}).encode("utf-8"))
+    except OSError:
+        # A name the registry did not record is one another project may hold or take: the bare basename came
+        # back here, and a push window allowed in one project of that name opened the other's. The path's
+        # own name is no other project's (PROJECT-KEY-2).
+        if registered or (mine and mine != base):
+            return mine
+        return f"{base}-{hashlib.sha256(real.encode('utf-8')).hexdigest()[:8]}"
+    return mine
+
+
+def project_key_collisions():
+    """Registered projects that share a directory name, and the name each is kept under."""
+    groups = {}
+    for name, row in sorted(project_registry().items()):
+        if not os.path.isdir(os.path.join(row["root"], ".polyctl")):
+            continue
+        base = os.path.basename(str(row["root"]).rstrip("/\\")).lower()
+        groups.setdefault(base, []).append((name, row["root"]))
+    return {base: rows for base, rows in groups.items() if len(rows) > 1}
+
+
+# Every file a project keeps in ~/.polyctl, named under its key (SAFE-REMOVE). The code that writes one takes its name
+# from here, and `polyctl remove` deletes exactly these. It deleted every file whose name merely held the key:
+# removing `proj` took the machine's projects.json and its lock with the logs and push windows of `bigproject`
+# and `myproj`, and removing a project called `email` would take the e-mail channel's settings. What polyctl archived
+# for a project, ~/.polyctl/archive/<key>/, is not a file of this table: a review moved there is the record, and
+# remove keeps it.
+PROJECT_FILES = {
+    "heartbeat": "heartbeat-{key}",
+    "watchdog-state": "watchdog-{key}.json",
+    "watchdog-cycle-lock": "watchdog-{key}.cycle.lock",
+    "watchdog-log": "watchdog-{key}.log",
+    "cycles": "cycles-{key}.jsonl",
+    "nudge-log": "nudge-{key}.log",
+    "escalate-log": "escalate-{key}.log",
+    "refill-log": "refill-{key}.log",
+    "hunt-log": "hunt-{key}.log",
+    "doctor-log": "doctor-{key}.log",
+    "doctor-runs": "doctor-{key}.json",
+    "telegram-log": "telegram-{key}.log",
+    "push-window": "push-{key}.ok",
+    "helpers": "helpers-{key}.json",
+    "helpers-lock": "helpers-{key}.json.lock",
+    "reviewer": "reviewer-{key}.json",
+    "architect-lock": "architect-{key}.lock",
+    "architect-lock-guard": "architect-{key}.lock.guard",
+    # What the watchdog starts, claimed before its process does (JOURNAL-2), and the files SQLite keeps beside it.
+    "journal": "journal-{key}.db",
+    "journal-wal": "journal-{key}.db-wal",
+    "journal-shm": "journal-{key}.db-shm",
+    # The harness configuration a person has seen, outside the tree an agent writes (HARNESS-CONFIG).
+    "harness-seen": "harness-seen-{key}.json",
+    "harness-seen-lock": "harness-seen-{key}.lock",  # orders that record's two writers (LEADS-OPEN)
+    "harness-base": "harness-base-{key}.json",
+    # Each role's turn command as last accepted, by polyctl init, the first reading or a person (TURN-ARGV).
+    "harness-turns": "harness-turns-{key}.json",
+    # Held while the baseline or the accepted commands are read and written, so two writers never cross
+    # (LEADS-ADAPTERS).
+    "harness-lock": "harness-{key}.lock",
+}
+
+
+def project_file_name(what, key):
+    """The name one of a project's files has in ~/.polyctl, from PROJECT_FILES."""
+    return PROJECT_FILES[what].format(key=key)
+
+
+def project_file(root, what, key=None):
+    """Where one of this project's files is kept in ~/.polyctl, under `key` or the project's key."""
+    return os.path.join(HOME, ".polyctl", project_file_name(what, key or project_key(root)))
+
+
+def project_file_names(key):
+    """Every name one project's files can have in ~/.polyctl: each PROJECT_FILES name under its key, and in lower case.
+
+    A launchd label is lower-cased and a job's log is named from it; on a case-sensitive
+    filesystem that log is another file than one named from the key as it is.
+    """
+    return sorted({project_file_name(what, name) for what in PROJECT_FILES for name in (key, key.lower())})
+
+
+def registered_key(root):
+    """The name the machine registry holds for this project's resolved path, or None."""
+    real = os.path.realpath(root)
+    return next((name for name, row in project_registry().items() if row.get("root") == real), None)
+
+
+# What binds git to a repository other than the one it is asked about, from polyctl's own environment (LEADS-GATE-HOOK).
+_GIT_BINDING = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_PREFIX", "GIT_OBJECT_DIRECTORY",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM")
+
+
+def repository_identity(root):
+    """The repository a working tree belongs to, the same for each of its linked worktrees: its common git
+    directory, resolved (LEADS-GATE). RuntimeError where git cannot name it.
+
+    Asked with no repository binding inherited, as the hook inventory asks: `GIT_DIR=/other polyctl -C /victim hooks
+    install` recorded /other as enrolled while the hook went into /victim (LEADS-GATE-HOOK).
+    """
+    env = {name: value for name, value in os.environ.items()
+           if name not in _GIT_BINDING and not name.startswith("GIT_CONFIG")}
+    # A commit check has already pinned its repository; enrollment reads and writes share it (NESTED-GIT).
+    env = bound_git_environment(env)
+    try:
+        done = run_as_group([git_binary(), "--literal-pathspecs", "-C", str(root), "rev-parse", "--git-common-dir"],
+                            20, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"cannot ask git for the repository: {exc}") from exc
+    if done.returncode:
+        detail = done.stderr.decode(UTF8, "replace").strip()[:200]
+        raise RuntimeError(f"cannot ask git for the repository: {detail or 'git exit ' + str(done.returncode)}")
+    common = os.fsdecode(done.stdout.strip())
+    return os.path.realpath(os.path.join(root, common))
+
+
+# The record that a repository is enrolled, in its common git directory (LEADS-GATE-HOOK).
+ENROLLMENT_RECORD = "polyctl-enrolled.json"
+
+
+def enrollment_record_path(root):
+    """(where the record that the repository `root` belongs to is enrolled is kept, that repository): in the
+    repository's own common git directory, beside its refs, outside the tree an agent writes (LEADS-GATE-HOOK).
+
+    It was kept in `~/.polyctl`, found through `HOME`: `HOME=<empty> git commit` had the hook's polyctl read a home with
+    no record in it, and under a project key, which a `.polyctl/project-key` in a tree claims once the project's `.polyctl/`
+    is gone. The git directory is the repository's, the one every linked worktree of it shares, and no
+    environment the commit is given names another. RuntimeError where git cannot name the repository.
+    """
+    identity = repository_identity(root)
+    return os.path.join(identity, ENROLLMENT_RECORD), identity
+
+
+def enrollment_record(root):
+    """What this machine recorded of the repository `root` belongs to being enrolled, or None (LEADS-GATE-HOOK).
+
+    The record is kept in the repository's common git directory, so a linked worktree of an enrolled
+    repository finds it too, and it is never read through a `.polyctl/` an agent can empty, nor through `HOME`. One
+    that cannot be read, or names another repository, is one all the same: {"unreadable": why}.
+    """
+    try:
+        path, identity = enrollment_record_path(root)
+    except (RuntimeError, OSError) as exc:
+        return {"unreadable": f"git cannot name the repository: {' '.join(str(exc).split())[:160]}"}
+    try:
+        with open(path, encoding=UTF8) as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        return {"unreadable": " ".join(str(exc).split())[:160]}
+    if not isinstance(data, dict):
+        return {"unreadable": "it is not a JSON object"}
+    if data.get("repository") != identity:
+        return {"unreadable": f"it names another repository, {str(data.get('repository'))[:160]!r}"}
+    return data
+
+
+def record_enrollment(root):
+    """Record outside the tree, once, that the repository `root` belongs to is enrolled: None once it is, or why it
+    could not be (LEADS-GATE-HOOK).
+
+    A branch not born yet asks for it: an implementer that deleted every ref whose history tracked the
+    marker left Git no answer that the repository was ever enrolled, and the hook stood aside. Written by
+    `polyctl hooks install`, which puts the hook that asks for it in place, and by each commit check of an
+    enrolled project; each refuses where it cannot be written, since a record missing is that branch read
+    as a new repository's. A record of another repository under the same name is never written over.
+    """
+    try:
+        path, identity = enrollment_record_path(root)
+    except (RuntimeError, OSError) as exc:
+        return f"git cannot name the repository: {' '.join(str(exc).split())[:160]}"
+    try:
+        with open(path, encoding=UTF8) as fh:
+            kept = json.load(fh)
+    except FileNotFoundError:
+        kept = None
+    except (OSError, ValueError) as exc:
+        return f"{path} cannot be read: {' '.join(str(exc).split())[:160]}"
+    if isinstance(kept, dict) and kept.get("repository") == identity:
+        return None
+    if kept is not None:
+        return f"{path} names another repository, {str((kept or {}).get('repository'))[:160]!r}, and stays"
+    from .storage import replace_file_durably
+    try:
+        replace_file_durably(path, json.dumps({"root": os.path.realpath(root), "repository": identity,
+                                               "at": int(time.time())}).encode(UTF8))
+    except OSError as exc:
+        return f"{path} could not be written: {' '.join(str(exc).split())[:160]}"
+    return None
+
+
+def forget_project(root):
+    """Take this project's rows out of the machine registry, under its lock; the names they held (SAFE-REMOVE).
+
+    The registry names every project on this machine, so it is never deleted: only the rows
+    holding this project's resolved path go, and every other row is written back as it was
+    read. Raises OSError or ValueError when the registry cannot be read or replaced.
+    """
+    from .storage import _exclusive_lock, replace_file_durably
+    real = os.path.realpath(root)
+    registry = project_registry_path()
+    if not os.path.exists(registry):
+        return []
+    with _exclusive_lock(registry + ".lock"):
+        with open(registry, encoding=UTF8) as fh:
+            known = json.load(fh)
+        if not isinstance(known, dict):
+            raise ValueError(f"{registry} holds no JSON object")
+        gone = sorted(name for name, row in known.items() if isinstance(row, dict) and row.get("root") == real)
+        if gone:
+            kept = {name: row for name, row in known.items() if name not in gone}
+            replace_file_durably(registry, json.dumps(kept, indent=1, sort_keys=True).encode("utf-8"))
+    return gone
+
+
+def heartbeat_path(root):
+    return project_file(root, "heartbeat")
+
+
+def heartbeat(root):
+    """The watchdog touching this each cycle is the only proof it is alive."""
+    try:
+        p = heartbeat_path(root)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding=UTF8) as fh:
+            fh.write(str(int(time.time())))
+    except OSError:
+        pass
+
+
+def heartbeat_age(root):
+    try:
+        return int(time.time() - os.path.getmtime(heartbeat_path(root)))
+    except OSError:
+        return None
+
+
+@_alarm_store_locked(_none_expired)
+def expire_alarms(project, now=None, quiet_for=None):
+    """Episodes that went quiet are over; return them once and forget them.
+
+    `quiet_for` is a shorter quiet that ends one: a resume closes every episode its silence
+    carried, which nothing watched, instead of letting them age on (RESUME-QUIET).
+    """
+    now = now or time.time()
+    quiet = _alarm_reset_after() if quiet_for is None else quiet_for
+    d = load_alarms()
+    done = []
+    for k in list(d):
+        proj, _, key = k.partition(":")
+        e = d[k]
+        if proj == project and now - e.get("last", 0) > quiet:
+            done.append(dict(e, project=proj, key=key, age_s=int(e.get("last", now) - e.get("first", now))))
+            del d[k]
+    if done:
+        save_alarms(d)
+    return done
+
+
+RETIRED_HEARTBEAT_AGE = settings.default("heartbeat.retired_days") * 86400
+
+
+def stale_siblings(root, max_age=900):
+    """Other projects whose watchdog once had a heartbeat and now has none.
+
+    A dead watchdog cannot report itself; the ones next to it can. Only projects
+    with a heartbeat file count — a project that never ran one is not late."""
+    me = project_key(root)
+    out = {}
+    try:
+        for f in os.listdir(os.path.join(HOME, ".polyctl")):
+            if not f.startswith("heartbeat-") or f == f"heartbeat-{me}":
+                continue
+            age = int(time.time() - os.path.getmtime(os.path.join(HOME, ".polyctl", f)))
+            # A week of silence is a project that was retired, not a watchdog that
+            # just died; ringing a person about it every cycle never ended (audit).
+            if max_age < age <= settings.get(None, "heartbeat.retired_days") * 86400:
+                out[f[len("heartbeat-"):]] = age
+    except OSError:
+        pass
+    return out
+
+
+def scheduler_hint():
+    """Where a person looks into a watchdog that stopped, on this platform: launchd's `launchctl` on macOS, a user
+    systemd's `systemctl --user` on Linux, Task Scheduler on Windows (WINDOWS-SAY-WHY).
+
+    A silent watchdog was told "launchctl / polyctl watchdog status" on every platform, and the tool it
+    named is not there on Windows or Linux.
+    """
+    if os.name == "nt":
+        return "Task Scheduler"
+    return "systemctl --user" if sys.platform.startswith("linux") else "launchctl"
+
+
+# ---- review scope ----------------------------------------------------------------
+
+COORDINATION_DIRS = (".polyctl/", "agent-mail/")      # and each shipped harness's own, from harness_dirs()
+
+
+def harness_dirs():
+    """What the shipped harnesses keep in a repository (`detect.dirs`), each ending in a slash (#76)."""
+    return tuple(sorted({str(d).strip("/") + "/" for adapter in package_adapters().values()
+                         for d in (adapter.get("detect") or {}).get("dirs") or [] if str(d).strip("/")}))
+
+
+def review_diff(root, cfg, paths=None, budget=1_500_000):
+    """What the reviewer sees: the slice's changes, and nothing else.
+
+    `git diff HEAD` carried every tracked change in the tree, so an unrelated
+    steering edit polluted a review of a credential lifecycle; untracked files
+    were capped at the first twenty, and thirty review artefacts consumed the
+    cap before the one untracked file that mattered — the inventory under
+    review — was reached. Two rounds of a five-round budget went to that.
+
+    Coordination directories are never product. Untracked product files are
+    included newest first within a byte budget. `paths` narrows both sides.
+    """
+    skip = _coordination_dirs(cfg)
+    # Git without a shell: the pathspecs were single-quoted for sh, cmd.exe hands the quotes
+    # to git as part of each path, and a scoped diff held none of the changes it named (#71).
+    spec = ["--", *paths] if paths else []
+    diff = _git_text(root, "diff", "HEAD", *spec, timeout=60) or ""
+    if not paths:
+        parts = re.split(r"(?m)^(?=diff --git )", diff)
+        diff = "".join(pt for pt in parts if not any(
+            f" b/{d}" in pt.split("\n", 1)[0] for d in skip))
+    untracked = [l[3:].strip().strip('"') for l in (_git_text(root, "status", "--porcelain") or "").split("\n")
+                 if l.startswith("?? ")]
+    untracked = [f for f in untracked if not _is_coordination_path(f, cfg)]
+    if paths:
+        untracked = [f for f in untracked if any(f == p or f.startswith(p.rstrip("/") + "/")
+                                                  or p.startswith(f.rstrip("/") + "/") for p in paths)]
+    files = []
+    for f in untracked:
+        p = os.path.join(root, f)
+        if os.path.isdir(p):
+            for dp, _, fn in os.walk(p):
+                for x in fn:
+                    rel = os.path.relpath(os.path.join(dp, x), root).replace(os.sep, "/")
+                    if _is_coordination_path(rel, cfg):
+                        continue
+                    if not paths or any(rel == q or rel.startswith(q.rstrip("/") + "/") for q in paths):
+                        files.append(rel)
+        elif os.path.isfile(p):
+            files.append(f)
+    files.sort(key=lambda f: -os.path.getmtime(os.path.join(root, f)))
+    included, used = [], 0
+    for f in files:
+        p = os.path.join(root, f)
+        try:
+            size = os.path.getsize(p)
+            if size > 400_000 or used + size > budget:
+                continue
+            raw = open(p, "rb").read()
+            if b"\0" in raw[:4000]:
+                continue
+            diff += f"\n--- NEW FILE {f} ---\n" + raw.decode("utf-8", "replace")
+            used += size
+            included.append(f)
+        except OSError:
+            pass
+    return diff, included
+
+
+# ---- helpers: processes polyctl starts that are not writers -------------------------
+
+def helpers_path(root):
+    return project_file(root, "helpers")
+
+
+def _helpers_update(root, change):
+    """Change the helper registry under its lock and replace it whole (#68).
+
+    It was read, changed and written back unlocked, and the read path wrote too, so
+    a status call overwrote a helper registered a moment before and the watchdog
+    counted a running reviewer as a second writer.
+    """
+    from .storage import _exclusive_lock, replace_file_durably
+    path = helpers_path(root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with _exclusive_lock(project_file(root, "helpers-lock")):
+        try:
+            with open(path, encoding=UTF8) as fh:
+                d = json.load(fh)
+        except (OSError, ValueError):
+            d = {}
+        if not isinstance(d, dict):
+            d = {}
+        change(d)
+        replace_file_durably(path, json.dumps(d).encode(UTF8))
+
+
+def helper_register(root, pid, what):
+    """A reviewer, a probe: started by polyctl inside the repo, never a writer.
+
+    Bind the declaration to process start identity. PID existence alone is not
+    identity: after reuse it would exclude an unrelated process indefinitely.
+    """
+    start = _process_start(pid, refresh=True)
+
+    def change(d):
+        # Dead, reused or unprovable entries go here, under the lock, never on a read.
+        for key in list(d):
+            recorded = d.get(key) if isinstance(d.get(key), dict) else {}
+            try:
+                current = _process_start(int(key))
+            except (TypeError, ValueError):
+                current = None
+            if current is None or current != recorded.get("start"):
+                d.pop(key, None)
+        d[str(pid)] = {"what": what, "at": int(time.time()), "start": start}
+
+    try:
+        _helpers_update(root, change)
+    except OSError:
+        pass
+
+
+def helper_release(root, pid):
+    try:
+        _helpers_update(root, lambda d: d.pop(str(pid), None))
+    except OSError:
+        pass
+
+
+def helper_pids(root, what=None):
+    """Registered helpers still running as the process that registered; reading writes nothing."""
+    try:
+        with open(helpers_path(root), encoding=UTF8) as fh:
+            d = json.load(fh)
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(d, dict):
+        return set()
+    live = set()
+    for key, recorded in d.items():
+        try:
+            pid = int(key)
+        except (TypeError, ValueError):
+            continue
+        recorded = recorded if isinstance(recorded, dict) else {}
+        current_start = _process_start(pid)
+        # Dead, reused, or legacy/unprovable pid: never let declaration alone
+        # exclude a process. Conservative writer checks may count it once.
+        if current_start is not None and recorded.get("start") == current_start:
+            if what is None or recorded.get("what") == what:
+                live.add(pid)
+    return live
+
+
+# ---- cost: what the coordination itself spends ----------------------------------
+#
+# "How much quota does polyctl cost, and is it bureaucracy?" is answerable only from
+# the transcript. Every turn is classified by what it did — wrote product, ran
+# the review/gate ceremony, only coordinated, or read and thought — and its
+# spend is summed per class, so the overhead is a number and not an opinion.
+
+_PRODUCT_PATH = re.compile(r"(^|/)(src|lib|app|apps|test|tests|spec|fixtures|evidence|docs|plugins|site|"
+                           r"package\.json|pyproject\.toml|tsconfig)")
+def _coord_path():
+    """A path under a coordination directory, the shipped harnesses' own included (#76)."""
+    names = ["agent-mail", r"\.polyctl", "semantic-review"] + [re.escape(d.rstrip("/")) for d in harness_dirs()]
+    return re.compile(r"(^|/)(" + "|".join(names) + r")(/|$)")
+
+
+# ---- what each feature costs, measured rather than estimated (#10) ------------------------
+
+SPAWN_LOGS = {"nudge": "nudge-log", "architect_wake": "escalate-log", "refill": "refill-log"}   # PROJECT_FILES
+
+
+def spawn_times(root, what, since=None):
+    """When the watchdog started a nudge, an architect wake or a refill, read from its own logs (#10)."""
+    from .watchdog import STATE_DIR
+    path = os.path.join(STATE_DIR, project_file_name(SPAWN_LOGS[what], project_key(root)))
+    times = []
+    try:
+        with open(path, encoding=UTF8, errors="replace") as fh:
+            for line in fh:
+                found = re.match(r"^=== (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ", line)
+                if found:
+                    at = time.mktime(time.strptime(found.group(1), "%Y-%m-%d %H:%M:%S"))
+                    if since is None or at >= since:
+                        times.append(at)
+    except OSError:
+        pass
+    return times
+
+
+def feature_costs(cfg, since=None):
+    """The implementer's spend attributed to each feature switch, and the window it was measured over (#10).
+
+    `review`: turns that ran `polyctl review`. `reports`: turns that only coordinated -
+    inbox, report, board, writers. `nudge`: turns a nudge started, within five
+    minutes of it, that wrote no product; a nudge that started real work is the
+    work, not overhead. The architect's wakes and refills spend the architect's
+    pool, not this transcript, so they are counted and not priced, and an
+    inventory review cannot be told from a review in a transcript, so it is
+    counted with review. A turn the model never answered (`UNANSWERED`) is no turn
+    of the implementer's.
+    """
+    root = cfg["root"]
+    costs = turn_costs(cfg, since)
+    turns = [turn for turn in costs["turns"] if turn.get("cls") not in (None, UNANSWERED)]
+    nudges = spawn_times(root, "nudge", since)
+    features = {name: {"turns": 0, "usage": 0.0} for name in ("review", "reports", "nudge")}
+    for turn in turns:
+        start = turn.get("start") or 0
+        if turn.get("reviews"):
+            key = "review"
+        elif turn["cls"] == "coordination":
+            key = "reports"
+        elif turn["cls"] != "product" and any(0 <= start - at <= 300 for at in nudges):
+            key = "nudge"
+        else:
+            continue
+        features[key]["turns"] += 1
+        features[key]["usage"] += float(turn.get("usage") or 0)
+    starts = [turn["start"] for turn in turns if turn.get("start")]
+    return {"unit": costs["unit"], "total": sum(float(turn.get("usage") or 0) for turn in turns),
+            "turns": len(turns), "from": min(starts) if starts else None, "to": max(starts) if starts else None,
+            "features": features,
+            "counted": dict({what: len(spawn_times(root, what, since)) for what in ("architect_wake", "refill")},
+                            hunter=sum(1 for row in hunter_rows(root) if row.get("event") == "run"
+                                       and (since is None or row.get("at", 0) >= since)))}
+
+
+# The class of a turn the model never answered: every reply in it the harness wrote in the model's place,
+# with no usage (`in_place_reply`). It spent nothing and did nothing, and is counted apart from the classes
+# of the implementer's work.
+UNANSWERED = "unanswered"
+
+
+def turn_costs(cfg, since=None, by_model=False):
+    """Per-turn cost and class from the implementer's transcript.
+
+    Returns {"unit", "turns": [ {start, usage, delegated, cls, tool_calls, product_writes,
+    reviews, commits, blocked_report} ], "by_class": {cls: {turns, usage, delegated}},
+    "polyctl_commands": Counter, "total", "delegated"}. Classes: product (wrote product files or
+    committed), ceremony (review / verify / lock / commit-ok, nothing written),
+    coordination (only inbox/report/writers/board, few calls), analysis (read and
+    reasoned, wrote nothing). A turn whose every reply the harness wrote in the model's
+    place, with no usage (`in_place_reply`) - an error of the model's service, a reply to a
+    note that asked the model nothing - is `UNANSWERED`: counted, and counted apart.
+
+    A subagent the implementer started works for it: the records of its transcript
+    (`transcript.subagents`) are read after the record that starts it, its spend is in the
+    usage of the turn that started it and in that turn's `delegated`, and its tool calls,
+    writes and commits are that turn's (`with_subagents`).
+
+    Which records open and close a turn, carry usage or call a tool is the
+    implementer's adapter's to declare (`transcript.turn`, `transcript.messages`,
+    `transcript.tool_call`, `telemetry.cost`), and so is the reading that adds usage
+    up (`billing.fallback.reading`), the one the credit estimate applies. A turn opens
+    at a start record, or at a prompt when none is open or the open one ended; the
+    start record that follows a turn's prompt is that turn's start, not a second turn
+    (`next_turn`). Counting both doubled every turn count and left spend where it was.
+
+    With `by_model`, the same records are also read for the tokens the adapter prices
+    (`telemetry.cost.tokens`), by model, rate and kind, under the same reading (`add_tokens`):
+    each turn holds its own in `tokens`, and the result's `tokens` adds up those of the turns
+    in the window, as `total` adds up their usage - what `polyctl cost --usd` prices (USD-COST). The
+    result's `tokens` is None when the adapter declares no tokens polyctl can price.
+    """
+    import collections
+    msgs, _ = session_paths(cfg)
+    shape = transcript_shape(implementer_adapter(cfg))
+    usage, tool = shape["usage"], shape["tool"]
+    priced = shape["tokens"] if by_model else None
+    out = {"unit": shape["unit"], "turns": [], "by_class": {}, "polyctl_commands": collections.Counter(), "total": 0.0,
+           "delegated": 0.0}
+    if by_model:
+        out["tokens"] = {} if priced else None
+    if not msgs or not os.path.exists(msgs):
+        return out
+    recs = read_tail(msgs, 400_000_000)
+    cur, counted, counted_tokens = None, {}, {}
+    in_place, answered = set(), set()           # the turns holding a reply written in the model's place, or its own
+
+    def ts(d):
+        raw = record_time(d, shape)
+        try:
+            import datetime as _dt
+            return _dt.datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return None
+    for d, subagent in with_subagents(recs, shape, msgs):
+        pl = record_body(d, shape) or {}
+        t = record_kind(d, shape)
+        cur, opened = next_turn(cur, d, shape, subagent)
+        if opened:
+            cur.update({"start": ts(d), "usage": 0.0, "delegated": 0.0, "product_writes": 0, "coord_writes": 0,
+                        "tool_calls": 0, "reviews": 0, "commits": 0, "blocked_report": False,
+                        "polyctl": collections.Counter()})
+            out["turns"].append(cur)
+            continue
+        if cur is None:
+            continue
+        if subagent is None and t in shape["reply"]:
+            (in_place if in_place_reply(d, shape) else answered).add(id(cur))
+        if usage and t == usage["type"]:
+            add_usage(cur, pl, usage, counted, subagent)
+            if priced:
+                add_tokens(cur, pl, usage, priced, counted_tokens, subagent)
+        # Not an elif: one record of a store that nests its calls carries a response's usage and its tool calls.
+        if tool and t == tool["type"]:
+            for name, args in tool_calls(pl, tool):
+                cur["tool_calls"] += 1
+                args = args or {}
+                text = json.dumps(args, ensure_ascii=False) if not isinstance(args, str) else args
+                if name.endswith("polyctl_report") and "blocked" in text:      # MCP clients prefix tool names
+                    cur["blocked_report"] = True
+                if tool_writes_file(name, tool):
+                    # A harness on Windows names the file with backslashes, and a turn that wrote product or
+                    # coordination files was counted as analysis; the classes are read with slashes (#71).
+                    path = str(tool_path(args, tool) or "").replace("\\", "/")
+                    if _coord_path().search(path):
+                        cur["coord_writes"] += 1
+                    elif _PRODUCT_PATH.search(path) or (path and "/" in path):
+                        cur["product_writes"] += 1
+                m = re.search(r"\bpolyctl\s+(?:-C\s+\S+\s+)?([a-z][a-z-]+)", text)
+                if m:
+                    cur["polyctl"][m.group(1)] += 1
+                    out["polyctl_commands"][m.group(1)] += 1
+                if re.search(r"\bpolyctl\s+(?:-C\s+\S+\s+)?review\b", text):
+                    cur["reviews"] += 1
+                if re.search(r"git\s+commit\b", text):
+                    cur["commits"] += 1
+    for tn in out["turns"]:
+        if since and (not tn["start"] or tn["start"] < since):
+            tn["cls"] = None
+            continue
+        if id(tn) in in_place and id(tn) not in answered and not tn["usage"]:
+            cls = UNANSWERED
+        elif tn["product_writes"] or tn["commits"]:
+            cls = "product"
+        elif tn["reviews"] or any(c in tn["polyctl"] for c in ("verify", "lock", "commit-ok")):
+            cls = "ceremony"
+        elif tn["blocked_report"] or (tn["tool_calls"] <= 8 and (tn["polyctl"] or tn["coord_writes"])):
+            cls = "coordination"
+        else:
+            cls = "analysis"
+        tn["cls"] = cls
+        b = out["by_class"].setdefault(cls, {"turns": 0, "usage": 0.0, "wasted": 0, "wasted_usage": 0.0,
+                                             "delegated": 0.0})
+        b["turns"] += 1
+        b["usage"] += tn["usage"]
+        b["delegated"] += tn["delegated"]
+        if tn["blocked_report"] and not tn["product_writes"]:
+            b["wasted"] += 1
+            b["wasted_usage"] += tn["usage"]
+        out["total"] += tn["usage"]
+        out["delegated"] += tn["delegated"]
+        if priced:
+            for key, count in tn.get("tokens", {}).items():
+                out["tokens"][key] = out["tokens"].get(key, 0) + count
+    return out
+
+
+# ---- the spend in US dollars: an estimate from a price table polyctl ships (USD-COST) ----------------
+#
+# A vendor bills tokens by model and by kind, at list prices it publishes and changes. polyctl ships
+# those prices as data, src/polyctl/prices.json, with the day each vendor's were read and where, and
+# prices the tokens `turn_costs(by_model=True)` reads with them. A figure the table cannot back
+# is unknown, never zero: a model or a kind of token it does not price, or a response at a rate
+# it does not list. Only an entry that lists a model at zero prices it free.
+
+PRICES_FILE = os.path.join(_HERE, "prices.json")
+
+
+def _price(value):
+    """Is a value a price polyctl can quote: a finite number of zero or more, and not a truth value?"""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value < float("inf")
+
+
+def _day(text):
+    """Is a value a calendar day written YYYY-MM-DD?"""
+    try:
+        return isinstance(text, str) and bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", text)) \
+            and bool(datetime.strptime(text, "%Y-%m-%d"))
+    except ValueError:
+        return False
+
+
+def price_problems(table):
+    """What makes a price table one polyctl cannot quote from, as sentences; [] when it can (USD-COST).
+
+    One mistake can price every row wrong - a price in cents, a kind misspelt and so never
+    charged, one id under two vendors - so a table holding any is used for nothing at all.
+    """
+    if not isinstance(table, dict):
+        return ["the price table is not a JSON object"]
+    problems = []
+    version = table.get("version")
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        problems.append("`version` must be a whole number from 1, raised whenever a price changes")
+    if table.get("currency") != "USD":
+        problems.append("`currency` must be USD: `polyctl cost --usd` estimates US dollars")
+    if not _price(table.get("per_tokens")) or not table.get("per_tokens"):
+        problems.append("`per_tokens` must be how many tokens each price is for")
+    kinds = table.get("kinds")
+    if not isinstance(kinds, dict) or not kinds or not all(isinstance(text, str) and text.strip()
+                                                           for text in kinds.values()):
+        problems.append("`kinds` must name each kind of token a price is for, with what it is")
+        kinds = {}
+    vendors = table.get("vendors")
+    if not isinstance(vendors, dict) or not vendors:
+        return problems + ["`vendors` must hold the vendors whose prices the table lists"]
+    seen = {}
+    for vendor, block in vendors.items():
+        if not isinstance(block, dict):
+            problems.append(f"vendor {vendor} is not an object")
+            continue
+        if not _day(block.get("as_of")):
+            problems.append(f"vendor {vendor}: `as_of` must be the day its prices were read, as YYYY-MM-DD")
+        if not isinstance(block.get("source"), str) or not block["source"].strip():
+            problems.append(f"vendor {vendor}: `source` must say where its prices were read")
+        models = block.get("models")
+        if not isinstance(models, dict) or not models:
+            problems.append(f"vendor {vendor}: `models` must list the models it prices")
+            continue
+        for model, entry in models.items():
+            if not isinstance(entry, dict):
+                problems.append(f"{model}: its prices are not an object")
+                continue
+            ids = entry.get("ids", [])
+            if not isinstance(ids, list) or not all(isinstance(ident, str) and ident.strip() for ident in ids):
+                problems.append(f"{model}: `ids` must list the other ids it is written as")
+                ids = []
+            strays = sorted(set(entry) - set(kinds) - {"ids", "note"})
+            if strays:
+                problems.append(f"{model}: {', '.join(strays)} is no kind of token `kinds` names")
+            problems += [f"{model}: `{kind}` must be a price of zero or more" for kind in kinds
+                         if kind in entry and not _price(entry[kind])]
+            if not any(kind in entry for kind in kinds):
+                problems.append(f"{model}: it prices no kind of token")
+            for ident in [model] + ids:
+                if ident in seen:
+                    problems.append(f"{ident} is priced twice, under {seen[ident]} and {vendor}")
+                seen[ident] = vendor
+    return problems
+
+
+def price_table(path=None):
+    """(the price table, its problems): the one polyctl ships unless `path` names another; None when it has any."""
+    try:
+        with open(path or PRICES_FILE, encoding=UTF8) as fh:
+            table = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, [f"the price table could not be read: {exc}"]
+    problems = price_problems(table)
+    return (None if problems else table), problems
+
+
+def usd_estimate(tokens, table):
+    """Tokens by model, rate and kind, priced from a sound price table: an estimate in US dollars (USD-COST).
+
+    `tokens` is what `turn_costs(by_model=True)` adds up. Each row is one model at one rate: its
+    tokens by kind, and its dollars, or `usd` None and `why` they are unknown - the transcript
+    names no model, the table does not list the model or gives no price for a kind of token it
+    spent, or the rate is not the one the table lists (`rate` names the field that said so).
+    Unknown is never zero: `total` is None when any row is unknown, and `priced` adds up the rows
+    that are not, a floor under it. A model the table lists at zero is priced at zero, and only
+    then is it free. `vendors` holds the as-of day and source of each vendor whose prices a row
+    used, for the label.
+    """
+    listed = {ident: (vendor, entry) for vendor, block in table["vendors"].items()
+              for model, entry in block["models"].items() for ident in [model] + entry.get("ids", [])}
+    rows = {}
+    for (model, rate, kind), count in tokens.items():
+        if count:
+            row = rows.setdefault((model, rate), {"model": model, "rate": rate, "tokens": {}})
+            row["tokens"][kind] = row["tokens"].get(kind, 0) + count
+    out = {"version": table["version"], "rows": [], "priced": 0.0, "total": None, "vendors": {}}
+    for model, rate in sorted(rows, key=lambda pair: (pair[0] is None, pair[0] or "", pair[1] or "")):
+        row = rows[(model, rate)]
+        vendor, entry = listed.get(model, (None, {}))
+        unpriced = sorted(kind for kind in row["tokens"] if kind not in table["kinds"] or kind not in entry)
+        if rate is not None:
+            row["why"] = "a rate the table does not price"
+        elif model is None:
+            row["why"] = "the transcript names no model"
+        elif vendor is None:
+            row["why"] = "a model the table does not price"
+        elif unpriced:
+            row["why"] = f"the table gives it no price for {', '.join(unpriced)}"
+        else:
+            row["why"] = None
+        row["usd"] = None if row["why"] else \
+            sum(count * entry[kind] for kind, count in row["tokens"].items()) / table["per_tokens"]
+        if row["usd"] is not None:
+            out["priced"] += row["usd"]
+            out["vendors"][vendor] = {field: table["vendors"][vendor][field] for field in ("as_of", "source")}
+        out["rows"].append(row)
+    out["total"] = out["priced"] if all(row["usd"] is not None for row in out["rows"]) else None
+    return out
+
+
+# ---- ids: a clock reading names one record, even where the clock is coarse (#71) --------
+
+_ID_CLOCK = {}
+
+
+def _unique_clock(unit):
+    """Nanoseconds since the epoch in whole `unit`s, never the same value twice in this process (#71).
+
+    Windows advanced the clock about every 15.6 ms before Python 3.13, so every id
+    minted within one tick - two notices in one watchdog cycle, two merge checks, two
+    grants - was one id. A repeat takes the next value up: an id keeps its shape and
+    still sorts by the time it was minted. Two processes can still read one tick; where
+    a shared id would overwrite a record, the store claims it (a review's state file is
+    created exclusively), and two ledger rows that share one stay two rows.
+    """
+    import threading
+    with _ID_CLOCK.setdefault("lock", threading.Lock()):     # the first lock stored is the one used
+        value = max(time.time_ns() // unit, _ID_CLOCK.get(unit, 0) + 1)
+        _ID_CLOCK[unit] = value
+    return value
+
+
+def unique_ms():
+    """Milliseconds since the epoch for an id: a notice, a submitted review, a merge check."""
+    return _unique_clock(1_000_000)
+
+
+def unique_ns():
+    """Nanoseconds since the epoch for an id: a commit grant's token."""
+    return _unique_clock(1)
+
+
+# ---- deferred work: what could not run, so it can run later ----------------------
+#
+# A quota window closing must not lose anything. Every action polyctl could not take
+# — a nudge, a wake, a review — is written down with why, and `polyctl catchup`
+# replays the queue when the way is clear. This is the "bypass now, reconcile
+# later" the human asked for: the run degrades, it never forgets.
+
+def _deferred_write(root, row):
+    """One row of the deferred queue, appended under its lock and synced before it returns (JOURNAL-4)."""
+    from .storage import append_jsonl
+    try:
+        os.makedirs(os.path.join(root, ".polyctl", "ledger"), exist_ok=True)
+        append_jsonl(os.path.join(root, ".polyctl", "ledger", "deferred.jsonl"), row)
+    except OSError:
+        pass
+
+
+def deferred_append(root, kind, **fields):
+    """Defer one kind of work; an open deferral of that kind is the one that stands (#87).
+
+    A wake is state, not a queue of attempts: fourteen deferred wakes piled up over
+    one outage and replayed in a burst when it ended. A later end the work waits for
+    moves the standing one's: it was dropped, and the queue kept the first (JOURNAL-4).
+    """
+    standing = next((row for row in deferred_open(root) if row.get("kind") == kind), None)
+    if standing:
+        until = fields.get("until")
+        if isinstance(until, (int, float)) and until > float(standing.get("until") or 0):
+            _deferred_write(root, {"event": "until", "id": standing["id"], "until": until, "at": int(time.time())})
+            standing = dict(standing, until=until)
+        return standing
+    now = time.time()
+    rec = {"event": "deferred", "id": f"DF-{int(now)}-{kind}", "kind": kind, "at": now}
+    rec.update(fields)
+    _deferred_write(root, rec)
+    return rec
+
+
+def deferred_close(root, did, outcome="done"):
+    _deferred_write(root, {"event": "closed", "id": did, "at": int(time.time()), "outcome": outcome})
+
+
+
+def deferred_open(root):
+    p = os.path.join(root, ".polyctl", "ledger", "deferred.jsonl")
+    if not os.path.exists(p):
+        return []
+    rows, closed = {}, set()
+    for line in open(p, errors="replace", encoding=UTF8):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("event") == "deferred":
+            rows[r["id"]] = r
+        elif r.get("event") == "until" and r.get("id") in rows:
+            rows[r["id"]] = dict(rows[r["id"]], until=r.get("until"))
+        elif r.get("event") == "closed":
+            closed.add(r["id"])
+    return [r for i, r in rows.items() if i not in closed]
+
+
+def recently_deferred(root, kind, within=3600):
+    cut = time.time() - within
+    return any(r["kind"] == kind and r["at"] >= cut for r in deferred_open(root))
+
+
+# ---- waivers: the human's bypass, on the record ---------------------------------
+
+WAIVER_CHAIN = "polyctl-waiver-row-v1"
+WAIVER_HOURS_DEFAULT = settings.default("waivers.default_hours")
+WAIVER_HOURS_MAX = settings.default("waivers.max_hours")
+
+
+def waivers_path(root):
+    return os.path.join(root, ".polyctl", "ledger", "waivers.jsonl")
+
+
+def waiver_rows(root):
+    """Every waiver row once the chain validates (#67).
+
+    Rows written before the ledger was chained may stand first. An unlinked row
+    after them, or a broken link, makes the ledger unreadable, and every reader
+    fails closed.
+    """
+    from .storage import read_chained_jsonl
+    return read_chained_jsonl(waivers_path(root), WAIVER_CHAIN, legacy_prefix=True)
+
+
+def _login_and_terminal():
+    """The login a command ran under and whether a terminal was attached."""
+    try:
+        import getpass
+        user = getpass.getuser()
+    except Exception:
+        user = None
+    try:
+        interactive = os.isatty(0)
+    except OSError:
+        interactive = False
+    return user, bool(interactive)
+
+
+def waive(root, gate, slice_id, why, by, hours=WAIVER_HOURS_DEFAULT):
+    """Record that a person waived a gate for one slice, for a bounded time (#67).
+
+    A chained append like an authority row. It carries an expiry, the name the
+    person gave, and beside it what polyctl can check: the login and whether a terminal
+    was attached.
+    """
+    from .storage import append_chained_jsonl
+    now = int(time.time())
+    taken = {row.get("id") for row in waiver_rows(root) if isinstance(row, dict)}
+    wid, n = f"W-{now}", 2
+    while wid in taken:
+        wid, n = f"W-{now}-{n}", n + 1
+    user, interactive = _login_and_terminal()
+    record = {"event": "waived", "id": wid, "gate": gate, "slice": slice_id, "why": why,
+              "by": by, "at": now, "expires": now + int(float(hours) * 3600),
+              "user": user, "interactive": interactive,
+              "head": _git_text(root, "rev-parse", "HEAD"), "tree": tree_digest(root)}
+    return append_chained_jsonl(waivers_path(root), record, WAIVER_CHAIN, legacy_prefix=True)
+
+
+def close_waiver(root, wid, outcome, evidence=None):
+    """Retire a waiver with a durable chained append; a failure raises rather than leaving it open unseen (#67).
+
+    `evidence` is what a close stood on when no review decided it: a move proof, and what it read (#44).
+    """
+    from .storage import append_chained_jsonl
+    row = {"event": "closed", "id": wid, "at": int(time.time()), "outcome": outcome}
+    if evidence is not None:
+        row["evidence"] = evidence
+    return append_chained_jsonl(waivers_path(root), row, WAIVER_CHAIN, legacy_prefix=True)
+
+
+# ---- opt-ins: a person weakens a guarantee, on the record (REVIEW-TIERS) -----------------
+
+OPT_IN_CHAIN = "polyctl-opt-in-row-v1"
+
+
+def opt_ins_path(root):
+    return os.path.join(root, ".polyctl", "ledger", "opt-ins.jsonl")
+
+
+def record_opt_in(root, setting, value, by):
+    """Record that a person set or cleared a setting that weakens a guarantee (settings.RECORDED).
+
+    A chained append like a waiver: the value, the name the person gave, and beside it
+    what polyctl can check - the login and whether a terminal was attached. A value of None
+    is the setting cleared.
+    """
+    from .storage import append_chained_in_tree
+    user, interactive = _login_and_terminal()
+    row = {"at": int(time.time()), "setting": setting, "value": value, "by": by,
+           "user": user, "interactive": interactive}
+    return append_chained_in_tree(root, ".polyctl/ledger/opt-ins.jsonl", row, OPT_IN_CHAIN)
+
+
+def recorded_opt_in(root, setting):
+    """The newest recorded row for one setting, or None; raises when the ledger cannot be read."""
+    from .storage import read_chained_in_tree
+    rows = [row for row in read_chained_in_tree(root, ".polyctl/ledger/opt-ins.jsonl", OPT_IN_CHAIN)
+            if isinstance(row, dict) and row.get("setting") == setting]
+    return rows[-1] if rows else None
+
+
+def open_waivers(root, gate=None, slice_id=None):
+    rows, closed = {}, set()
+    for r in waiver_rows(root):
+        if not isinstance(r, dict):
+            continue
+        if r.get("event") == "waived" and r.get("id"):
+            rows[r["id"]] = r
+        elif r.get("event") == "closed":
+            closed.add(r.get("id"))
+    out = [r for i, r in rows.items() if i not in closed]
+    if gate:
+        out = [r for r in out if r.get("gate") == gate]
+    if slice_id:
+        out = [r for r in out if r.get("slice") in (slice_id, "*")]
+    return out
+
+
+def _waiver_candidates(root):
+    """Candidate digests each waiver has already authorised, from the grants that used it.
+
+    Every grant, the sealed ones too: read from the live rows, a waiver whose grant a seal retired
+    looked unused and stood in for the review of other bytes (the review of BOUNDED-STORES,
+    LEDGER-HISTORY).
+    """
+    bound = {}
+    for row in authority_history(root):
+        if isinstance(row, dict) and row.get("granted") is True and row.get("waiver"):
+            bound.setdefault(row["waiver"], set()).add((row.get("candidate") or {}).get("digest"))
+    return bound
+
+
+def review_waiver_for(root, running, candidate_digest, now=None, wanted=None):
+    """The review waiver that may stand in for a review of this candidate, and why others may not (#67).
+
+    It names a running slice exactly, has not expired, and has authorised no other
+    candidate. A waiver for every slice, one from before waivers expired, and one
+    already spent on other bytes stand in for nothing. With `wanted`, only that waiver
+    is asked: a grant is checked against the waiver it stood on, and a second one opened
+    for the same slice since read as a different waiver and refused it (WAIVER-BOUND-2).
+    """
+    now = time.time() if now is None else now
+    # The whole authority history is read only for a waiver that could stand in: `polyctl commit-ok` asks every time.
+    bound = None
+    notes = []
+    for waiver in reversed(open_waivers(root, gate="review")):
+        wid, slice_id = waiver.get("id"), waiver.get("slice")
+        if wanted is not None and wid != wanted:
+            continue
+        if slice_id not in running:
+            if slice_id == "*":
+                notes.append(f"waiver {wid} names every slice; a waiver covers one")
+            continue
+        expires = waiver.get("expires")
+        if not isinstance(expires, (int, float)) or isinstance(expires, bool):
+            notes.append(f"waiver {wid} for {slice_id} predates waiver expiry; a person opens a new one")
+            continue
+        if expires <= now:
+            notes.append(f"waiver {wid} for {slice_id} expired "
+                         f"{time.strftime('%d %b %H:%M', time.localtime(expires))}")
+            continue
+        bound = _waiver_candidates(root) if bound is None else bound
+        used = bound.get(wid, set())
+        if used and candidate_digest not in used:
+            notes.append(f"waiver {wid} already authorised other bytes; it covers one candidate")
+            continue
+        return waiver, notes
+    return None, notes
+
+
+def open_waiver_report(root, now=None):
+    """One line per open waiver with its age and expiry, for `polyctl doctor` (#67)."""
+    now = time.time() if now is None else now
+    lines = []
+    for waiver in open_waivers(root):
+        age = max(0, int(now - (waiver.get("at") or now)))
+        expires = waiver.get("expires")
+        state = ("no expiry (legacy)" if not isinstance(expires, (int, float))
+                 else "expired" if expires <= now
+                 else f"expires in {int((expires - now) // 3600)}h")
+        lines.append(f"{waiver.get('id')} {waiver.get('gate')} for {waiver.get('slice')}, "
+                     f"open {age // 86400}d {age % 86400 // 3600}h, {state}, by {waiver.get('by')}")
+    return lines
+
+
+# How long before a waiver was opened a commit landed under it may say it was committed: a clock
+# that disagreed, on this machine or on the one the commit was made on (CATCHUP-POLISH).
+WAIVER_CLOCK_ALLOWANCE = 86400
+
+
+def _waiver_history(root, waiver, grants):
+    """The `git log` revisions that hold the commit a bounded waiver's grant landed, or None (CATCHUP-POLISH).
+
+    The newest 500 commits were searched, and a repository that lands dozens of commits a day
+    would soon have called every older waiver UNRESOLVED. The commit that lands a granted tree
+    descends from the head the grant was built on, so the search runs from the first recorded
+    head git still has on HEAD's line, whatever came before it. A head comes from a ledger
+    anyone on the machine can edit, so it must be a full object id; a history rewritten since
+    can have left it off that line, and then the waiver's own date bounds the walk: git stops
+    walking where the commits grow older than that. With neither, nothing is searched: the
+    whole history of a long-lived repository is no bound.
+    """
+    seen = set()
+    for row in grants:
+        head = str((row.get("candidate") or {}).get("head") or "")
+        if head in seen or not _OBJECT_ID.fullmatch(head):
+            continue
+        seen.add(head)
+        try:
+            ancestor = subprocess.run(
+                [git_binary(), "merge-base", "--is-ancestor", head, "HEAD"], cwd=root,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60,
+            ).returncode
+        except (OSError, subprocess.TimeoutExpired):
+            ancestor = 2
+        if ancestor == 0:
+            return ["--ancestry-path", f"{head}..HEAD"]
+    at = waiver.get("at")
+    if isinstance(at, (int, float)) and not isinstance(at, bool) and at > WAIVER_CLOCK_ALLOWANCE:
+        return [f"--since=@{int(at) - WAIVER_CLOCK_ALLOWANCE}", "HEAD"]
+    return None
+
+
+def _bound_waiver_target(root, waiver, grants):
+    """The one landed commit a bounded waiver covers, found by the tree granted under it (#17).
+
+    A waiver that nothing was granted under covers no commit; one whose granted tree
+    never landed is UNRESOLVED rather than reviewed by guess. The newest grant of the
+    tree that landed says who landed it, where it recorded that (#65), and the move
+    proof it stood on, where it recorded one (#44). The commit is looked for where it can
+    have landed, and it is the first there to carry a granted tree: a later commit of the
+    same tree landed under another grant (CATCHUP-POLISH).
+    """
+    trees = {(row.get("candidate") or {}).get("index_tree") for row in grants}
+    item = {"waiver": waiver, "start": "", "end": "", "landed": 0,
+            "newest": False, "problem": None, "unused": not trees, "author": None, "grant": None,
+            "move_only": None, "expired": (waiver.get("expires") or 0) <= time.time()}
+    if not trees:
+        return item
+    span = _waiver_history(root, waiver, grants)
+    if span is None:
+        item["problem"] = ("UNRESOLVED: no grant under it records a head on HEAD's line, and it records no date "
+                           "to search from")
+        return item
+    try:
+        log = _git_output(root, "log", "--format=%H %T", *span, "--").decode("ascii")
+    except (RuntimeError, UnicodeError):
+        item["problem"] = "UNRESOLVED: git cannot list the landed commits"
+        return item
+    carried = [(parts[0], parts[1]) for parts in (line.split() for line in log.splitlines())
+               if len(parts) == 2 and parts[1] in trees]
+    if not carried:
+        item["problem"] = "UNRESOLVED: no landed commit carries the tree granted under it"
+        return item
+    sha, tree = carried[-1]                      # git lists the newest first
+    try:
+        parent = _git_output(root, "rev-parse", "--verify", f"{sha}^").decode("ascii").strip()
+    except (RuntimeError, UnicodeError):
+        item["problem"] = "UNRESOLVED: its landed commit has no parent to review against"
+        return item
+    grant = next((row for row in reversed(grants) if (row.get("candidate") or {}).get("index_tree") == tree), {})
+    item.update(start=parent, end=sha, landed=1, grant=grant.get("token"),
+                author=grant.get("author") if isinstance(grant.get("author"), dict) else None,
+                move_only=grant.get("move_only") if isinstance(grant.get("move_only"), dict) else None)
+    return item
+
+
+def review_waiver_ranges(root):
+    """Each open review waiver with the commits that landed while it was the newest.
+
+    A waiver records the HEAD it was opened on and nothing else, so reviewing
+    head..HEAD for every open waiver reviews each later slice again under the
+    first slice's boundary: with one waiver per slice, N waivers become N
+    overlapping reviews and the earliest carries every slice after it. A slice's
+    commits run from its waiver's head to the head of the next review waiver
+    opened after it, open or closed, and the newest waiver runs to HEAD.
+
+    Heads come from a ledger file anyone on the machine can edit, so each is
+    required to be a full object id and git runs without a shell.
+
+    Returns dicts: waiver, start, end, landed (commit count), newest, problem, and
+    for a bounded waiver's landed commit the grant that landed it and the author and
+    move proof that grant recorded; a waiver from before waivers were bounded has none.
+    """
+    waived, closed = [], set()
+    for r in waiver_rows(root):
+        if not isinstance(r, dict):
+            continue
+        if r.get("event") == "waived" and r.get("gate") == "review":
+            waived.append(r)
+        elif r.get("event") == "closed":
+            closed.add(r.get("id"))
+    if not waived:
+        return []
+    granted = {}
+    # A grant a seal retired is still the one its waiver stood in for: read from the live rows, the waiver
+    # read as unused and catch-up closed it with no review (the review of BOUNDED-STORES, LEDGER-HISTORY).
+    for row in authority_history(root):
+        if isinstance(row, dict) and row.get("granted") is True and row.get("waiver"):
+            granted.setdefault(row["waiver"], []).append(row)
+    try:
+        current = _git_output(root, "rev-parse", "--verify", "HEAD").decode("ascii").strip()
+    except (RuntimeError, UnicodeError):
+        current = None
+    out = []
+    for i, w in enumerate(waived):
+        if w.get("id") in closed:
+            continue
+        if "expires" in w:
+            out.append(_bound_waiver_target(root, w, granted.get(w["id"], [])))
+            continue
+        later = waived[i + 1] if i + 1 < len(waived) else None
+        start = str(w.get("head") or "")
+        end = str(later.get("head") or "") if later else (current or "")
+        item = {"waiver": w, "start": start, "end": end, "landed": 0,
+                "newest": later is None, "problem": None, "author": None, "grant": None, "move_only": None}
+        if not _OBJECT_ID.fullmatch(start):
+            item["problem"] = "its recorded head is not a full object id"
+        elif not _OBJECT_ID.fullmatch(end):
+            item["problem"] = ("the next waiver's recorded head is not a full object id"
+                               if later else "HEAD cannot be resolved")
+        else:
+            try:
+                ancestor = subprocess.run(
+                    [git_binary(), "merge-base", "--is-ancestor", start, end], cwd=root,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60,
+                ).returncode
+            except (OSError, subprocess.TimeoutExpired):
+                ancestor = 2
+            if ancestor == 1:
+                item["problem"] = "its head is not an ancestor of the range end; history was rewritten"
+            elif ancestor:
+                item["problem"] = "git cannot compare its head with the range end"
+            else:
+                try:
+                    item["landed"] = int(_git_output(root, "rev-list", "--count", f"{start}..{end}").strip() or 0)
+                except (RuntimeError, ValueError):
+                    item["problem"] = "git cannot count the commits in its range"
+        out.append(item)
+    return out
+
+
+def range_changed_lines(root, start, end):
+    """Lines a landed range adds and removes, as git counts them for its diff; None when git cannot say.
+
+    A binary file counts none. `polyctl catchup --plan` sizes a sitting of retrospective
+    reviews from these before any reviewer is asked.
+    """
+    try:
+        out = _git_output(root, "diff", "--numstat", "--no-ext-diff", f"{start}..{end}", "--").decode(UTF8, "replace")
+    except RuntimeError:
+        return None
+    total = 0
+    for line in out.splitlines():
+        added, _, rest = line.partition("\t")
+        removed = rest.partition("\t")[0]
+        if added.isdigit() and removed.isdigit():
+            total += int(added) + int(removed)
+    return total
+
+
+def range_unchanged(root, start, end):
+    """Whether a landed range ends on the tree it starts from: True, False, or None when git cannot say.
+
+    No net change is a fact about trees, not about the lines a diff counts: a binary file counts
+    none, and a textconv driver that reads two versions alike, or a submodule set to `ignore =
+    all`, shows a changed range as no diff at all (WAIVER-BOUND-3).
+    """
+    try:
+        trees = _git_output(root, "rev-parse", f"{start}^{{tree}}", f"{end}^{{tree}}").decode(UTF8, "replace").split()
+    except RuntimeError:
+        return None
+    return trees[0] == trees[1] if len(trees) == 2 else None
+
+
+def range_move_proof(root, start, end):
+    """(moved, problems): `polyctl split-check`'s proof, taken on a landed range rather than a candidate (#44).
+
+    A move-only grant recorded that proof for the tree it granted. What landed is proven
+    again, from the commit it landed on: a proof taken against another parent says nothing
+    about this diff. The proof reads Python definitions only, so every other changed path is
+    a problem too - a closure on the proof must cover the whole range. The commits come from
+    ledgers anyone on the machine can edit, so each must be a full object id.
+    """
+    if not (_OBJECT_ID.fullmatch(str(start)) and _OBJECT_ID.fullmatch(str(end))):
+        return [], ["the range is not two full object ids"]
+    try:
+        names = _git_output(root, "diff", "--name-only", "--no-renames", "-z", start, end, "--")
+        result = split_moves(root, start, end)
+    except (RuntimeError, ValueError) as exc:
+        return [], [f"the landed range cannot be read: {exc}"]
+    unread = sorted({os.fsdecode(raw) for raw in names.split(b"\0") if raw and not raw.endswith(b".py")})
+    return result["moved"], result["problems"] + [f"{path} changed, and the proof reads Python definitions only"
+                                                  for path in unread]
+
+
+# ---- credits: burn rate and the day the work stops -------------------------------
+
+def credit_account(profile):
+    """A stable name for the account a reading came from; the profile itself is not kept (#36)."""
+    if not profile:
+        return None
+    return "acct-" + hashlib.sha256(str(profile).encode("utf-8")).hexdigest()[:12]
+
+
+def record_credit_sample(root, used, limit, reset_at=None, account=None, at=None, adapter=None):
+    """One credit reading, with the account it is of (#36) and the adapter whose lookup took it (ACCOUNT-READERS)."""
+    d = os.path.join(root, ".polyctl", "ledger")
+    try:
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "credits.jsonl"), "a", encoding=UTF8) as fh:
+            fh.write(json.dumps({"at": int(at if at is not None else time.time()), "used": float(used),
+                                 "limit": float(limit), "reset_at": reset_at,
+                                 "account": account, "adapter": adapter}) + "\n")
+    except OSError:
+        pass
+
+
+def credit_samples(root, adapter, limit=500):
+    """The newest credit readings taken through this adapter's lookup; none for a call that names no adapter.
+
+    A reading is the account of the adapter that read it (ACCOUNT-READERS). One ledger can
+    hold another harness's readings - an implementer that moved to another harness leaves
+    its old one's behind - and an implementer does not bill that account, so no reader
+    takes them for its own. A reading written before readings named their adapter is
+    nobody's, as one that does not name its account projects nothing (#36).
+    """
+    p = os.path.join(root, ".polyctl", "ledger", "credits.jsonl")
+    if not adapter or not os.path.exists(p):
+        return []
+    rows = []
+    for line in open(p, errors="replace", encoding=UTF8):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("adapter") == adapter:
+            rows.append(row)
+    return rows[-limit:]
+
+
+def burn_rate(root, adapter, window=72 * 3600, now=None):
+    """From the samples this adapter's lookup took: credits per day, days left, and whether
+    the plan runs out before it resets. None when there are not two samples a few hours apart."""
+    now = now or time.time()
+    rows = [r for r in credit_samples(root, adapter) if r["at"] >= now - window]
+    # One account's series only (#36). An owner who switched accounts left the old
+    # account's cumulative `used` in the ledger, and the projection ran across both:
+    # exhaustion declared against an account that was 4% used. A reading that does
+    # not say whose it is projects nothing.
+    account = rows[-1].get("account") if rows else None
+    if not account:
+        return None
+    rows = [r for r in rows if r.get("account") == account]
+    if len(rows) < 2:
+        return None
+    first, last = rows[0], rows[-1]
+    span = last["at"] - first["at"]
+    if span < 3 * 3600:
+        return None
+    per_day = max(0.0, (last["used"] - first["used"]) / span * 86400)
+    remaining = max(0.0, last["limit"] - last["used"])
+    days_left = remaining / per_day if per_day > 0 else None
+    exhausts_at = now + days_left * 86400 if days_left is not None else None
+    reset_at = last.get("reset_at")
+    before_reset = bool(exhausts_at and reset_at and exhausts_at < reset_at)
+    return {"per_day": per_day, "remaining": remaining, "days_left": days_left,
+            "exhausts_at": exhausts_at, "reset_at": reset_at, "before_reset": before_reset,
+            "used": last["used"], "limit": last["limit"], "account": account,
+            "samples": [first, last]}
+
+
+# ---- external ping: the dead man's switch --------------------------------------------
+
+def pings_path():
+    return os.path.join(HOME, ".polyctl", "pings.json")
+
+
+def ping_url(root):
+    try:
+        d = json.load(open(pings_path(), encoding=UTF8))
+    except (OSError, ValueError):
+        return None
+    key = project_key(root)
+    return d.get(key) or d.get("*")
+
+
+def set_ping_url(root, url, all_projects=False):
+    try:
+        d = json.load(open(pings_path(), encoding=UTF8))
+    except (OSError, ValueError):
+        d = {}
+    d["*" if all_projects else project_key(root)] = url
+    # The URL stands for the watchdog being alive: whoever holds it can ping in its place. The file is 0600 from its
+    # creation and replaces the one before whole, as ~/.polyctl/email.json does; written in place and chmod-ed after, it
+    # was readable meanwhile, and a write cut short lost every project's URL (HUNT-LEADS-SEC).
+    from .storage import replace_file_durably
+    replace_file_durably(pings_path(), json.dumps(d, indent=2).encode(UTF8), mode=0o600)
+    return d
+
+
+def ping(root, opener=None):
+    """One GET to the project's ping URL. A service that expects it every N
+    minutes alarms when it stops — which is the only way anyone learns that both
+    the watchdog and its doctor job have died."""
+    url = ping_url(root)
+    if not url:
+        return None
+    import urllib.request
+    try:
+        (opener or urllib.request.urlopen)(url, timeout=5)
+        return True
+    except Exception:
+        return False
+
+
+# ---- architect lock: one judge at a time --------------------------------------------
+
+def architect_lock_path(root):
+    return project_file(root, "architect-lock")
+
+
+def architect_lock_holder(root):
+    try:
+        d = json.load(open(architect_lock_path(root), encoding=UTF8))
+    except (OSError, ValueError):
+        return None
+    if d.get("pid") and not _pid_alive(int(d["pid"])):
+        return None                                        # stale: holder died
+    if time.time() - d.get("at", 0) > 3 * 3600:
+        return None                                        # stale: forgotten
+    return d
+
+
+def acquire_architect(root, pid, who):
+    """Take the lock unless a live holder has it. Two architect copies deciding at
+    once — a desktop resume beside a watchdog wake — contradict each other."""
+    from .storage import _exclusive_lock
+    with _exclusive_lock(project_file(root, "architect-lock-guard")):
+        holder = architect_lock_holder(root)
+        if holder and holder.get("pid") != pid:
+            return None
+        d = {"pid": pid, "who": who, "at": int(time.time())}
+        try:
+            with open(architect_lock_path(root), "w", encoding=UTF8) as fh:
+                json.dump(d, fh)
+        except OSError:
+            return None
+        return d
+
+
+def release_architect(root, pid=None):
+    from .storage import _exclusive_lock
+    with _exclusive_lock(project_file(root, "architect-lock-guard")):
+        try:
+            with open(architect_lock_path(root), encoding=UTF8) as fh:
+                d = json.load(fh)
+            if pid is None or d.get("pid") == pid:
+                os.remove(architect_lock_path(root))
+        except (OSError, ValueError):
+            pass
+
+
+# ---- foreign edits: a person in the same files -------------------------------------
+
+def implementer_recent_writes(cfg, minutes=15):
+    """Paths the implementer's tools wrote in the last N minutes, from its transcript.
+
+    A tool call, the argument naming its file and the tools that write one are what the
+    implementer's adapter declares in `transcript.tool_call` (`write_tools`, `write_words`),
+    as `polyctl cost` reads them; one that declares none has written nothing polyctl can see. Every
+    call naming a file was taken for a write, reads and directory listings too, so a person
+    editing a file the implementer had only read was never told apart from the implementer.
+    A subagent's calls are the implementer's too: every subagent transcript beside the
+    session's written in the window is read (`transcript.subagents`), whichever turn started it.
+    """
+    msgs, _ = session_paths(cfg)
+    if not msgs or not os.path.exists(msgs):
+        return set()
+    shape = transcript_shape(implementer_adapter(cfg))
+    tool = shape["tool"]
+    if not tool:
+        return set()
+    cut = time.time() - minutes * 60
+    out = set()
+    for d in read_tail(msgs, 3_000_000) + subagent_tails(msgs, shape, cut, 3_000_000):
+        if record_kind(d, shape) != tool["type"]:
+            continue
+        try:
+            import datetime as _dt
+            at = _dt.datetime.fromisoformat(record_time(d, shape).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            continue
+        if at < cut:
+            continue
+        for name, args in tool_calls(record_body(d, shape), tool):
+            path = tool_path(args, tool) if tool_writes_file(name, tool) else None
+            if path:
+                out.add(os.path.realpath(str(path)))
+    return out
+
+
+def foreign_edits(root, cfg, minutes=15):
+    """Product files changed in the last N minutes that the implementer did not write.
+
+    `polyctl writers` sees agents; it cannot see a person in an editor. This is the
+    nearest thing: a dirty product file whose mtime is recent and which the
+    implementer's own tool calls never touched. Named in the nudge so the
+    implementer keeps away from it."""
+    mine = implementer_recent_writes(cfg, minutes)
+    cut = time.time() - minutes * 60
+    out = []
+    for line in product_dirty(root, cfg):
+        rel = line[3:].strip().strip('"')
+        p = os.path.join(root, rel)
+        files = []
+        if os.path.isdir(p):                                    # git lists an untracked dir as one entry
+            for dp, _, fn in os.walk(p):
+                files += [os.path.join(dp, x) for x in fn]
+        elif os.path.isfile(p):
+            files = [p]
+        for f in files:
+            try:
+                if os.path.getmtime(f) >= cut and os.path.realpath(f) not in mine:
+                    out.append(os.path.relpath(f, root).replace(os.sep, "/"))     # git's slashes, everywhere
+            except OSError:
+                pass
+    return sorted(out)
+
+
+# ---- fleet reserve: the machine's shared windows ----------------------------------
+
+def fleet_reserve():
+    return settings.get(None, "fleet.window_reserve_pct")
+
+
+def window_headroom(provider):
+    """(left_pct, reserve_pct) or (None, reserve) when the window is unreadable or no provider is known."""
+    w = provider_window(provider) if provider else None
+    return (100 - w["pct"]) if w else None, fleet_reserve()
+
+
+def turn_ended(cfg):
+    """Has the implementer's transcript closed its last turn?
+
+    A process that is alive after its transcript wrote `turn_end` is not
+    working; it is a runtime that forgot to exit. Waiting the full silence
+    threshold for it (three times the idle window) cost twenty minutes per
+    occurrence. The transcript's own word is enough to reap at the idle window.
+
+    Which kinds close a turn and which are bookkeeping that may follow it is the
+    implementer's adapter's to declare (`transcript.turn`).
+
+    A session may end its turn while a subagent it started works on in the background
+    (`transcript.subagents`, or `transcript.subagent_sessions` where a store keeps each subagent as
+    a session of its own), and its runtime then lingers for the subagent, not because it forgot to
+    exit. A subagent that wrote after the session's own last write holds work the session has not
+    taken back, so the turn has not ended. The session takes a finished subagent back with a record
+    of its own - the result of the call that waited for it, or the notification of its end - so a
+    finished subagent leaves the turn to what the session says. Only the two last writes are read,
+    both from one clock (`session_write`): a subagent's own records cannot say it finished, since an
+    agent a workflow started ends on the result of a call, not on a response that ends a turn."""
+    msgs, _ = session_paths(cfg)
+    if not msgs or not os.path.exists(msgs):
+        return False
+    shape = transcript_shape(implementer_adapter(cfg))
+    tail = read_tail(msgs, 200_000)
+    skipped = False
+    for d in reversed(tail):
+        t = record_kind(d, shape)
+        if is_bookkeeping(t, shape):
+            skipped = True
+            continue                                        # bookkeeping after the turn
+        if not closes_turn(d, shape):
+            return False
+        written = session_write(msgs)
+        if skipped:
+            # Bookkeeping written after the turn closed - a Stop hook's summary, a title - moved the file's time
+            # past a subagent's write the session had not taken back, and the watchdog reaped it at the idle
+            # window: the closing record's own time is when the session last spoke (SUBAGENT-LIVENESS-2).
+            closed = _ledger_time(record_time(d, shape))
+            if closed:
+                written = min(written, closed)
+        return all(mtime <= written for mtime, _ in subagent_writes(msgs, shape))
+    return False
+
+
+def last_message(cfg):
+    """Who spoke last in the implementer's transcript, or None: {"at", "text", "in_place", "record", "spoken"}.
+
+    The newest prompt or reply that holds words, in the kinds its adapter declares; a record of
+    neither kind, or one whose words are none - a tool's call or result, a note the harness keeps
+    - is passed over. `in_place` says the harness wrote the reply in the model's place
+    (`in_place_reply`): what its service returned where the model gave no answer, a usage limit
+    among them, so its words are the harness's and never the model's prose, and `record` is the
+    record itself, for what the harness keeps beside its words. `spoken` is when the newest words
+    the harness did not write in the model's place were written: a person's, or the model's. Words
+    of any length count, since a person who resumes a session with "go on" has spoken. `at` and
+    `spoken` are epoch seconds, None where a time cannot be read or nobody spoke (QUOTA-PARK).
+    """
+    msgs, _ = session_paths(cfg)
+    if not msgs or not os.path.exists(msgs):
+        return None
+    shape = transcript_shape(implementer_adapter(cfg))
+    kinds = set(shape["prompt"]) | set(shape["reply"])
+    last = None
+    for rec in reversed(read_tail(msgs, 200_000)):
+        if record_kind(rec, shape) not in kinds:
+            continue
+        text = message_words(record_body(rec, shape), shape, shortest=1)
+        if not text:
+            continue
+        at, in_place = _ledger_time(record_time(rec, shape)) or None, in_place_reply(rec, shape)
+        if last is None:
+            last = {"at": at, "text": text, "in_place": in_place, "record": rec, "spoken": None}
+        if not in_place:
+            last["spoken"] = at
+            break
+    return last

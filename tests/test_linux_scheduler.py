@@ -1,6 +1,6 @@
 """On Linux the watchdog's two jobs are systemd user units, as they are launchd jobs on macOS (LINUX-SCHEDULER).
 
-`ao watchdog install` wrote a plist into ~/Library/LaunchAgents and asked launchctl, which a Linux
+`polyctl watchdog install` wrote a plist into ~/Library/LaunchAgents and asked launchctl, which a Linux
 machine does not have: the install failed there, and the watchdog ran only when someone ran it. Each
 job is now a oneshot service and a timer in ~/.config/systemd/user, started at once and then every
 interval as the launchd job's RunAtLoad and StartInterval start it, enabled with `systemctl --user`
@@ -9,7 +9,7 @@ nothing is written, and install says why and what would run the jobs instead.
 
 The units are written into a scratch home and read back here, and `systemctl` and `loginctl` are
 fake executables first on PATH that keep what they were asked in a file, so every call is the real
-program-start path ao takes.
+program-start path polyctl takes.
 """
 import json
 import os
@@ -21,18 +21,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="the fake systemctl is a POSIX executable; Windows "
                                                           "schedules the watchdog with Task Scheduler")
 
-PROGRAMS = {"ao-watchdog": ["/opt/ao tool/bin/ao-watchdog"], "ao": ["/opt/ao tool/bin/ao"]}
+PROGRAMS = {"polyctl-watchdog": ["/opt/polyctl tool/bin/polyctl-watchdog"], "polyctl": ["/opt/polyctl tool/bin/polyctl"]}
 
 # A user manager that loads the unit files present at its last daemon-reload, and a loginctl.
 FAKE_SYSTEMCTL = r'''
 import json, os, sys
 
-STATE, UNITS = os.environ["AO_FAKE_SYSTEMD"], os.environ["AO_FAKE_UNITS"]
+STATE, UNITS = os.environ["POLYCTL_FAKE_SYSTEMD"], os.environ["POLYCTL_FAKE_UNITS"]
 with open(STATE, encoding="utf-8") as fh:
     state = json.load(fh)
 args = sys.argv[1:]
@@ -93,7 +93,7 @@ done(2, err=f"the fake does not know: {args}")
 
 FAKE_LOGINCTL = r'''
 import os, sys
-linger = os.environ.get("AO_FAKE_LINGER", "no")
+linger = os.environ.get("POLYCTL_FAKE_LINGER", "no")
 if linger == "unknown":
     print("Failed to get user: User ID is not logged in or lingering", file=sys.stderr)
     sys.exit(1)
@@ -106,7 +106,7 @@ def _plain(capsys):
 
 
 def _args(action="install", **changes):
-    """What `ao watchdog <action>` parses to, with an idle time given so no setting is read."""
+    """What `polyctl watchdog <action>` parses to, with an idle time given so no setting is read."""
     return SimpleNamespace(**{"action": action, "idle_minutes": 6, "interval": 120, **changes})
 
 
@@ -121,7 +121,7 @@ def _fake(bindir, name, source):
 
 
 def _systemd(tmp_path, monkeypatch, booted=True, reachable=True, linger="no"):
-    """ao on a Linux whose user systemd and loginctl are the fakes above; the fake manager's state, as a reader."""
+    """polyctl on a Linux whose user systemd and loginctl are the fakes above; the fake manager's state, as a reader."""
     home = Path(A.HOME)
     monkeypatch.setenv("HOME", str(home))                   # the programs are looked for from here, not a real home
     bindir = tmp_path / "fake-bin"
@@ -132,9 +132,9 @@ def _systemd(tmp_path, monkeypatch, booted=True, reachable=True, linger="no"):
     state.write_text(json.dumps({"calls": [], "loaded": [], "enabled": [], "active": [], "stuck": [],
                                  "reachable": reachable}), encoding="utf-8")
     monkeypatch.setenv("PATH", os.pathsep.join([str(bindir), os.environ.get("PATH", "")]))
-    monkeypatch.setenv("AO_FAKE_SYSTEMD", str(state))
-    monkeypatch.setenv("AO_FAKE_UNITS", str(home / ".config" / "systemd" / "user"))
-    monkeypatch.setenv("AO_FAKE_LINGER", linger)
+    monkeypatch.setenv("POLYCTL_FAKE_SYSTEMD", str(state))
+    monkeypatch.setenv("POLYCTL_FAKE_UNITS", str(home / ".config" / "systemd" / "user"))
+    monkeypatch.setenv("POLYCTL_FAKE_LINGER", linger)
     runtime = tmp_path / "run" / "systemd" / "system"
     if booted:
         runtime.mkdir(parents=True)
@@ -188,7 +188,7 @@ def _systemd_words(value, expand=True):
                 word.append(chr(int(text[i + 2:i + 4], 16)))
                 i += 4
             elif text[i] == "\\":
-                assert text[i + 1] in '\\"', f"an escape ao does not write in {text!r}"
+                assert text[i + 1] in '\\"', f"an escape polyctl does not write in {text!r}"
                 word.append(text[i + 1])
                 i += 2
             else:
@@ -205,7 +205,7 @@ def _systemd_words(value, expand=True):
 
 def _units(key):
     """The user unit directory, and the names without suffix of the two jobs' units for a project's key."""
-    return Path(A.HOME) / ".config" / "systemd" / "user", f"ao-watchdog-{key}", f"ao-doctor-{key}"
+    return Path(A.HOME) / ".config" / "systemd" / "user", f"polyctl-watchdog-{key}", f"polyctl-doctor-{key}"
 
 
 # ---- install -----------------------------------------------------------------------------------
@@ -215,13 +215,13 @@ def test_install_writes_a_service_and_a_timer_for_each_job_and_enables_and_start
     fake = _systemd(tmp_path, monkeypatch)
     root, key = project["root"], A.project_key(project["root"]).lower()
     units, watchdog, doctor = _units(key)
-    log, dlog = (os.path.join(A.HOME, ".ao", f"{job}-{key}.log") for job in ("watchdog", "doctor"))
+    log, dlog = (os.path.join(A.HOME, ".polyctl", f"{job}-{key}.log") for job in ("watchdog", "doctor"))
 
     assert cli.cmd_watchdog(project, _args()) == 0
 
     service = _directives((units / f"{watchdog}.service").read_text(encoding="utf-8"))
     timer = _directives((units / f"{watchdog}.timer").read_text(encoding="utf-8"))
-    assert _systemd_words(service["ExecStart"][0]) == PROGRAMS["ao-watchdog"] + ["--root", root, "--idle-minutes", "6"]
+    assert _systemd_words(service["ExecStart"][0]) == PROGRAMS["polyctl-watchdog"] + ["--root", root, "--idle-minutes", "6"]
     assert _systemd_words(service["Environment"][0], expand=False) == [f"PATH={fake.path}"]
     assert service["Type"] == ["oneshot"] and service["KillMode"] == ["process"]
     assert service["StandardOutput"] == service["StandardError"] == [f"append:{log}"]
@@ -229,7 +229,7 @@ def test_install_writes_a_service_and_a_timer_for_each_job_and_enables_and_start
     assert timer["WantedBy"] == ["timers.target"]
     dservice = _directives((units / f"{doctor}.service").read_text(encoding="utf-8"))
     dtimer = _directives((units / f"{doctor}.timer").read_text(encoding="utf-8"))
-    assert _systemd_words(dservice["ExecStart"][0]) == PROGRAMS["ao"] + ["-C", root, "doctor", "--check", "--notify"]
+    assert _systemd_words(dservice["ExecStart"][0]) == PROGRAMS["polyctl"] + ["-C", root, "doctor", "--check", "--notify"]
     assert dservice["StandardOutput"] == [f"append:{dlog}"] and dtimer["OnUnitActiveSec"] == ["900s"]
 
     timers = [f"{watchdog}.timer", f"{doctor}.timer"]
@@ -239,7 +239,7 @@ def test_install_writes_a_service_and_a_timer_for_each_job_and_enables_and_start
     assert fake()["active"] == fake()["enabled"] == sorted(timers)
     out = _plain(capsys)
     assert f"installed {watchdog}.timer" in out and f"installed {doctor}.timer" in out
-    assert cli.LINGER_ADVICE in out and f"remove with: ao -C {root} watchdog uninstall" in out
+    assert cli.LINGER_ADVICE in out and f"remove with: polyctl -C {root} watchdog uninstall" in out
     assert not (Path(A.HOME) / "Library").exists()
 
 
@@ -262,8 +262,8 @@ def test_install_says_so_when_the_manager_does_not_start_a_timer(project, tmp_pa
 
     out = _plain(capsys)
     key = A.project_key(project["root"]).lower()
-    assert f"NOT SCHEDULED: ao-doctor-{key}.timer is failed" in out and "installed" not in out
-    assert f"run: systemctl --user enable --now ao-watchdog-{key}.timer ao-doctor-{key}.timer" in out
+    assert f"NOT SCHEDULED: polyctl-doctor-{key}.timer is failed" in out and "installed" not in out
+    assert f"run: systemctl --user enable --now polyctl-watchdog-{key}.timer polyctl-doctor-{key}.timer" in out
     assert fake()["calls"][-1][1] == "is-active"
 
 
@@ -284,7 +284,7 @@ def test_linger_is_advised_only_when_loginctl_says_it_is_off(project, tmp_path, 
 
     out = _plain(capsys)
     assert cli.LINGER_ADVICE not in out and "\nlinger  yes\n" in out
-    monkeypatch.setenv("AO_FAKE_LINGER", "unknown")         # loginctl knows no session of this user
+    monkeypatch.setenv("POLYCTL_FAKE_LINGER", "unknown")         # loginctl knows no session of this user
     assert cli.cmd_watchdog(project, _args("status")) == 0
     assert "\nlinger  unknown\n" in _plain(capsys)
 
@@ -302,10 +302,10 @@ def test_without_systemd_nothing_is_written_and_the_crontab_that_would_run_the_j
     assert "not installed: no user systemd — this machine does not run systemd (a container" in out
     assert not (Path(A.HOME) / ".config").exists() and fake()["calls"] == []
     lines = {line.split(" >> ")[0].strip(): line for line in out.split("\n") if " * * * * " in line}
-    watchdog = [*PROGRAMS["ao-watchdog"], "--root", root, "--idle-minutes", "6"]
-    doctor = [*PROGRAMS["ao"], "-C", root, "doctor", "--check", "--notify"]
+    watchdog = [*PROGRAMS["polyctl-watchdog"], "--root", root, "--idle-minutes", "6"]
+    doctor = [*PROGRAMS["polyctl"], "-C", root, "doctor", "--check", "--notify"]
     assert set(lines) == {f"*/2 * * * * {shlex.join(watchdog)}", f"*/15 * * * * {shlex.join(doctor)}"}
-    log = os.path.join(A.HOME, ".ao", f"watchdog-{key}.log")
+    log = os.path.join(A.HOME, ".polyctl", f"watchdog-{key}.log")
     assert lines[f"*/2 * * * * {shlex.join(watchdog)}"].endswith(f" >> {shlex.quote(log)} 2>&1")
     assert f"one watchdog cycle by hand: {shlex.join(watchdog)}" in out
 
@@ -322,11 +322,11 @@ def test_a_manager_this_shell_cannot_reach_is_named_with_what_systemctl_said(pro
 
 
 def test_a_crontab_line_escapes_the_percent_cron_would_read_as_a_line_break(capsys):
-    cli._systemd_absent("no systemd", {"watchdog": ["/opt/ao", "--root", "/w/50%"], "doctor": ["/opt/ao"]},
+    cli._systemd_absent("no systemd", {"watchdog": ["/opt/polyctl", "--root", "/w/50%"], "doctor": ["/opt/polyctl"]},
                         {"watchdog": 90, "doctor": 900}, {"watchdog": "/h/w.log", "doctor": "/h/d.log"})
 
     out = _plain(capsys)
-    assert "*/2 * * * * /opt/ao --root /w/50\\% >> /h/w.log 2>&1" in out       # 90s is every two minutes to cron
+    assert "*/2 * * * * /opt/polyctl --root /w/50\\% >> /h/w.log 2>&1" in out       # 90s is every two minutes to cron
 
 
 def test_a_log_path_a_unit_cannot_name_is_refused_before_anything_is_written(project, tmp_path, monkeypatch, capsys):
@@ -350,13 +350,13 @@ def test_status_reads_the_timers_linger_and_the_log(project, tmp_path, monkeypat
     assert "timer   inactive" in before and "units   absent  (~/.config/systemd/user)" in before
 
     cli.cmd_watchdog(project, _args())
-    (Path(A.HOME) / ".ao" / f"watchdog-{key}.log").write_text("cycle 1\ncycle 2\n", encoding="utf-8")
+    (Path(A.HOME) / ".polyctl" / f"watchdog-{key}.log").write_text("cycle 1\ncycle 2\n", encoding="utf-8")
     capsys.readouterr()
     assert cli.cmd_watchdog(project, status) == 0
 
     out = _plain(capsys).split("\n")
-    assert out[:5] == [f"unit    ao-watchdog-{key}.timer", "timer   active",
-                       "doctor  active  (ao doctor --check every 15m)", "units   present  (~/.config/systemd/user)",
+    assert out[:5] == [f"unit    polyctl-watchdog-{key}.timer", "timer   active",
+                       "doctor  active  (polyctl doctor --check every 15m)", "units   present  (~/.config/systemd/user)",
                        f"linger  no — {cli.LINGER_ADVICE}"]
     assert "\n".join(out).rstrip().endswith("cycle 1\ncycle 2")
 
@@ -395,7 +395,7 @@ def test_uninstall_disables_and_stops_both_jobs_removes_their_files_and_the_hear
     assert "removed" not in _plain(capsys)                  # nothing was there the second time
 
 
-# ---- ao remove ---------------------------------------------------------------------------------
+# ---- polyctl remove ---------------------------------------------------------------------------------
 
 def test_remove_finds_the_jobs_by_their_files_and_takes_each_off_checked_gone(project, tmp_path, monkeypatch):
     fake = _systemd(tmp_path, monkeypatch)
@@ -434,7 +434,7 @@ def test_a_manager_out_of_reach_leaves_the_jobs_and_their_files_to_a_session_tha
     left = cli._unschedule(f"{watchdog}.timer")
 
     assert left.startswith("systemctl --user reaches no user manager: Failed to connect to bus")
-    assert left.endswith("take it off from a login session of this user: ao watchdog uninstall")
+    assert left.endswith("take it off from a login session of this user: polyctl watchdog uninstall")
     assert (units / f"{watchdog}.timer").exists() and (units / f"{watchdog}.service").exists()
     assert f"{watchdog}.timer" in fake()["active"]
 
@@ -455,25 +455,25 @@ def test_without_systemd_a_jobs_files_are_all_there_is_to_remove(project, tmp_pa
     assert fake()["calls"] == []
 
 
-# ---- ao uninstall ------------------------------------------------------------------------------
+# ---- polyctl uninstall ------------------------------------------------------------------------------
 
 def test_uninstall_takes_every_unit_in_aos_namespace_and_no_other(project, tmp_path, monkeypatch):
-    """`ao uninstall` (UPDATE-UNINSTALL) takes every job ao scheduled on the machine: on Linux each unit in ao's
+    """`polyctl uninstall` (UPDATE-UNINSTALL) takes every job polyctl scheduled on the machine: on Linux each unit in polyctl's
     namespace in the user unit directory, a project's the registry lost among them, and never a unit of another's."""
     fake = _systemd(tmp_path, monkeypatch)
     units, watchdog, doctor = _units(A.project_key(project["root"]).lower())
     cli.cmd_watchdog(project, _args())
-    (units / "ao-doctor-gone.service").write_text("[Service]\n", encoding="utf-8")       # a project deleted since
-    (units / "backup.timer").write_text("[Timer]\n", encoding="utf-8")                   # not ao's
+    (units / "polyctl-doctor-gone.service").write_text("[Service]\n", encoding="utf-8")       # a project deleted since
+    (units / "backup.timer").write_text("[Timer]\n", encoding="utf-8")                   # not polyctl's
 
     jobs = cli._machine_jobs()
 
-    assert sorted(jobs) == sorted(("systemd timer", f"{unit}.timer") for unit in (watchdog, doctor, "ao-doctor-gone"))
+    assert sorted(jobs) == sorted(("systemd timer", f"{unit}.timer") for unit in (watchdog, doctor, "polyctl-doctor-gone"))
     assert [cli._unschedule(name) for _, name in jobs] == [None, None, None]
     assert cli._machine_jobs() == [] and fake()["active"] == []
     assert (units / "backup.timer").exists()
     leaves = cli._uninstall_leaves(SimpleNamespace(purge=False), {"kind": None, "where": "/x", "remove": None})
-    assert "systemd: a unit you wrote to run ao stays" in "\n".join(leaves)
+    assert "systemd: a unit you wrote to run polyctl stays" in "\n".join(leaves)
 
 
 # ---- the doctor --------------------------------------------------------------------------------
@@ -481,7 +481,7 @@ def test_uninstall_takes_every_unit_in_aos_namespace_and_no_other(project, tmp_p
 def test_the_doctor_shows_the_watchdog_running_from_its_timer(project, tmp_path, monkeypatch, capsys):
     _systemd(tmp_path, monkeypatch)
     cli.cmd_doctor(project, SimpleNamespace(check=False))
-    assert "watchdog        not installed — ao watchdog install" in _plain(capsys)
+    assert "watchdog        not installed — polyctl watchdog install" in _plain(capsys)
 
     cli.cmd_watchdog(project, _args())
     cli.cmd_doctor(project, SimpleNamespace(check=False))
@@ -499,7 +499,7 @@ def test_linux_schedules_with_systemd_windows_with_task_scheduler_and_the_rest_w
         assert cli._scheduler() == scheduler
 
 
-@pytest.mark.parametrize("word", ["/opt/ao tool/bin/ao", 'say "hi"', "back\\slash\\", "100%", "%h",
+@pytest.mark.parametrize("word", ["/opt/polyctl tool/bin/polyctl", 'say "hi"', "back\\slash\\", "100%", "%h",
                                   "$HOME and ${PATH} and $$", "tab\tand\nline", ";", "-flag", "café"])
 def test_a_word_reaches_the_program_as_it_was_whatever_it_holds(word):
     assert _systemd_words(cli._systemd_word(word)) == [word]
@@ -513,9 +513,9 @@ def test_a_description_cannot_end_its_line_or_join_the_next_one():
 
 
 def test_unit_names_escape_what_a_unit_name_cannot_hold_and_keep_two_keys_apart():
-    assert cli._systemd_unit("watchdog", "Proj") == "ao-watchdog-proj"
-    assert cli._systemd_unit("doctor", "my proj@x") == "ao-doctor-my\\x20proj\\x40x"
-    assert cli._systemd_unit("watchdog", "café") == "ao-watchdog-caf\\xc3\\xa9"
+    assert cli._systemd_unit("watchdog", "Proj") == "polyctl-watchdog-proj"
+    assert cli._systemd_unit("doctor", "my proj@x") == "polyctl-doctor-my\\x20proj\\x40x"
+    assert cli._systemd_unit("watchdog", "café") == "polyctl-watchdog-caf\\xc3\\xa9"
     keys = ["a b", "a_b", "a\\x20b", "a\\b", "a-b", "a.b"]
     names = [cli._systemd_unit("watchdog", key) for key in keys]
     assert len(set(names)) == len(keys)
@@ -528,4 +528,4 @@ def test_a_long_key_is_cut_to_the_length_systemd_accepts_and_stays_its_own(tmp_p
 
     assert names[0] != names[1]
     assert all(len(name + ".service") <= cli.SYSTEMD_NAME_MAX for name in names)
-    assert all(re.fullmatch(r"ao-watchdog-(\\xc3\\xa9)+-[0-9a-f]{8}", name) for name in names)
+    assert all(re.fullmatch(r"polyctl-watchdog-(\\xc3\\xa9)+-[0-9a-f]{8}", name) for name in names)

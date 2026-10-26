@@ -1,0 +1,327 @@
+#!/usr/bin/env python3
+"""polyctl telegram — a second keyboard for the mailbox, and a phone that says what happened.
+
+Two directions, and the inbound one is the point. When the architect's quota runs
+out everything stops, twice in one day here; if a human can write a decision from
+a phone at that moment, it does not stop. The architect role is already file-driven
+— a decision is a file in `agent-mail/` — so this adds no new source of truth. It
+is a keyboard for the mailbox, exactly as the MCP tools are.
+
+Outbound carries what a human can act on *and* what is being done about the rest,
+because "an anomaly was detected" without "and the architect is handling it" is the
+half that makes someone check manually.
+
+Everything a human sends is treated as urgent. A person who reaches for their
+phone to type a decision has already decided it matters, and second-guessing that
+with a marker they must remember is how a channel gets ignored.
+
+Standard library only. Long polling — a webhook needs a public endpoint, and
+nothing else here does.
+"""
+import json
+import os
+import sys
+import re
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from polyctl import language, lib as A  # noqa: E402
+UTF8 = "utf-8"    # every text file polyctl writes or reads; Windows would otherwise use cp1252
+
+CONF = os.path.join(A.HOME, ".polyctl", "telegram.json")
+API = "https://api.telegram.org/bot{token}/{method}"
+
+
+def config():
+    """Token and allowed chats. A file with 0600, never the repository.
+
+    A bot token is a credential that can instruct the implementer, so it lives
+    where credentials live and not where code lives. The allowlist is not
+    optional: an inbound channel without one is an authority surface open to
+    whoever finds the bot.
+    """
+    if not os.path.exists(CONF):
+        return None
+    try:
+        c = json.load(open(CONF, encoding=UTF8))
+    except Exception:
+        return None
+    if not c.get("token") or not c.get("chats"):
+        return None
+    c["chats"] = [str(x) for x in c["chats"]]
+    return c
+
+
+# A bot token as @BotFather gives one: the bot's number, a colon, and letters, digits, `-` and `_`. Anything else is
+# refused before it is put into a request's URL, where an error could quote it back (LEADS-SECRETS).
+TOKEN_SHAPE = re.compile(r"\d+:[A-Za-z0-9_-]+")
+# A chat as Telegram numbers it, which is what the poller compares a message's chat with; a group's is negative.
+CHAT_SHAPE = re.compile(r"-?\d+")
+
+
+def save(token, chats):
+    """Write the bot token and the chats it allows to CONF, readable by the person alone from the moment it exists.
+
+    The setup had a person echo the file into place and chmod it afterwards: anyone on the machine could read the
+    token between the two, and the shell's history kept the line that held it. polyctl asks for the token now and
+    writes the file itself, as ~/.polyctl/email.json is written: 0600 from its creation, in place of the old one whole
+    (HUNT-LEADS-SEC, LEADS-SECRETS).
+
+    A token of another bot drops the poller's place in the messages, ~/.polyctl/telegram-offset, which counts the old
+    bot's updates: kept, it asked the new bot for its updates from that number on, and Telegram takes every update
+    below the number asked from as read, so the messages a person sent the new bot, numbered lower, were dropped
+    unread. The same token keeps its place, or what was read since its last confirmation is read again (SECRETS-2).
+    """
+    from polyctl.storage import replace_file_durably
+    try:
+        with open(CONF, encoding=UTF8) as fh:
+            saved = json.load(fh)
+    except (OSError, ValueError):
+        saved = None
+    data = (json.dumps({"token": token, "chats": [str(chat) for chat in chats]}, indent=1) + "\n").encode(UTF8)
+    replace_file_durably(CONF, data, mode=0o600)
+    if not isinstance(saved, dict) or saved.get("token") != token:
+        try:
+            os.remove(_offset_path())
+        except FileNotFoundError:
+            pass
+    return config()
+
+
+def _chat_name(chat):
+    """What Telegram calls a chat, as a terminal can show it: a group's title, or a person's names and username.
+
+    The names are whatever the chat's owner chose, a stranger's among them, so a character a terminal would act
+    on is left out (LEADS-SECRETS).
+    """
+    name = " ".join(str(chat[key]) for key in ("title", "first_name", "last_name") if chat.get(key))
+    if chat.get("username"):
+        name += f" (@{chat['username']})"
+    return "".join(ch for ch in name if ch.isprintable())[:60] or str(chat.get("type") or "?")
+
+
+def recent_chats(token):
+    """({chat id: its name}, None) for the chats that wrote to the bot, or (None, what Telegram answered instead).
+
+    Asked in this process with the token the setup was given: it had a person put the token into a curl or
+    PowerShell command line to find their chat id, and the shell's history and the process list kept it
+    (LEADS-SECRETS). Without an offset getUpdates confirms nothing, so the poller still reads these messages;
+    Telegram keeps an update it was not asked to confirm for 24 hours.
+    """
+    answer = api({"token": token}, "getUpdates", timeout=0)
+    if not answer.get("ok"):
+        why = str(answer.get("description") or answer.get("error") or "getUpdates failed")
+        return None, why.replace(token, "<token>")
+    found = {}
+    for update in answer.get("result") or []:
+        for kind in ("message", "edited_message", "channel_post", "my_chat_member"):
+            chat = (update.get(kind) or {}).get("chat") or {}
+            if chat.get("id") is not None:
+                found[str(chat["id"])] = _chat_name(chat)
+    return found, None
+
+
+def api(cfg, method, **params):
+    url = API.format(token=cfg["token"], method=method)
+    data = urllib.parse.urlencode(
+        {k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
+         for k, v in params.items() if v is not None}).encode()
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=data),
+                                    timeout=(params.get("timeout") or 10) + 15) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        return {"ok": False, "error": f"HTTP {e.code}", "body": e.read()[:200].decode(errors="replace")}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def send(text, root=None, keyboard=None):
+    """Send to every allowed chat. Returns how many got it."""
+    cfg = config()
+    if not cfg:
+        return 0
+    n = 0
+    for chat in cfg["chats"]:
+        r = api(cfg, "sendMessage", chat_id=chat, text=text[:4000],
+                parse_mode="Markdown", disable_web_page_preview="true",
+                reply_markup={"inline_keyboard": keyboard} if keyboard else None)
+        if r.get("ok"):
+            n += 1
+        elif root:
+            A.record_notice(root, "telegram send failed", str(r)[:200], sent=False,
+                            key="telegram-error")
+    return n
+
+
+def _offset_path():
+    return os.path.join(A.HOME, ".polyctl", "telegram-offset")
+
+
+def poll(root, cfg_project, seconds=25):
+    """Fetch new messages and turn each into an urgent architect message.
+
+    Delivery-by-file, like everything else: the message lands in `agent-mail/`
+    where the implementer already looks, rather than in a queue only this process
+    knows about.
+    """
+    cfg = config()
+    if not cfg:
+        return {"error": f"no config at {CONF}"}
+    try:
+        offset = int(open(_offset_path(), encoding=UTF8).read().strip())
+    except Exception:
+        offset = 0
+    r = api(cfg, "getUpdates", offset=offset or None, timeout=seconds,
+            allowed_updates=["message", "channel_post", "callback_query"])
+    if not r.get("ok"):
+        return {"error": r.get("error") or r.get("description") or "getUpdates failed"}
+
+    box = cfg_project.get("mailbox", "agent-mail")
+    os.makedirs(os.path.join(root, box), exist_ok=True)
+    # What a person is answered in, and what their message is written as, is the project's language as it
+    # stands now: a poller runs for days, and a project can choose another meanwhile (LANGUAGE-OUTPUT).
+    # What they type or tap is read the same in every language.
+    project = A.load_config(root) if r.get("result") else cfg_project
+    written, ignored, last = [], 0, offset
+    for u in r.get("result", []):
+        last = max(last, u.get("update_id", 0) + 1)
+
+        # A tapped button. This is the whole point of asking with options: the
+        # answer costs one tap, where the same blocker as prose costs minutes.
+        cq = u.get("callback_query")
+        if cq:
+            chat = str(((cq.get("message") or {}).get("chat") or {}).get("id", ""))
+            if chat not in cfg["chats"]:
+                ignored += 1
+                api(cfg, "answerCallbackQuery", callback_query_id=cq["id"],
+                    text=language.text(project, "telegram.unauthorised"))
+                continue
+            did, _, keyv = (cq.get("data") or "").partition(":")
+            try:
+                rec = A.answer(root, did, keyv,
+                               by=(cq.get("from") or {}).get("username") or chat)
+            except A.AnswerRefused as refused:
+                # A second tap, or a button of an answered question, keeps the first answer.
+                api(cfg, "answerCallbackQuery", callback_query_id=cq["id"], text=str(refused)[:200])
+                continue
+            if rec:
+                api(cfg, "answerCallbackQuery", callback_query_id=cq["id"],
+                    text=language.text(project, "telegram.recorded", option=keyv))
+                send(f"✅ *{rec['question']}*\n→ {rec['answer']}", root)
+                written.append(f"{did}={keyv}")
+            else:
+                api(cfg, "answerCallbackQuery", callback_query_id=cq["id"],
+                    text=language.text(project, "telegram.no-decision"))
+            continue
+
+        m = u.get("message") or u.get("channel_post") or {}
+        text = (m.get("text") or "").strip()
+        chat = str((m.get("chat") or {}).get("id", ""))
+        if not text:
+            continue
+        if chat not in cfg["chats"]:
+            ignored += 1                    # not on the allowlist: it never happened
+            continue
+        if text.startswith("/"):
+            written.append(_command(root, project, text, chat))
+            continue
+
+        # "D-123 b" or "D-123 x <free text>" answers a pending question by typing,
+        # for when a button is not in reach — an old message, a different device.
+        mm = re.match(r"^(D-\d+)\s+(\S+)\s*(.*)$", text, re.S)
+        if mm:
+            did, key, extra = mm.group(1), mm.group(2), mm.group(3).strip()
+            try:
+                # The key leads, as on the terminal: the free-text key takes the words after it.
+                rec = A.answer(root, did, f"{key} {extra}" if key.lower() == "x" else key,
+                               by=(m.get("from") or {}).get("username") or chat)
+            except A.AnswerRefused as refused:
+                send(f"`{did}`: {refused}", root)
+                continue
+            if rec:
+                send(f"✅ *{rec['question']}*\n→ {rec['answer']}", root)
+                written.append(f"{did}={rec.get('answer_key') or 'free'}")
+                continue
+            send(language.text(project, "telegram.no-such-decision", id=did), root)
+            continue
+        # Everything a person types is urgent. They reached for a phone to say it.
+        # Marked in the project's language; every reader knows both (LANGUAGE-FILES).
+        slug = A.safe_slug(text.lower(), language.text(project, "mail.untitled-message"))
+        # From a person, to whoever holds the implementer role (#31).
+        name = (f"{time.strftime('%Y%m%d-%H%M%S')}-human-to-{A.mail_names(project)[0]}-"
+                f"{language.marker(project, 'urgent-kind')}-{slug}.md")
+        who = (m.get("from") or {}).get("username") or chat
+        # Through write_mail, as every mail polyctl writes - its envelope, the credential scan, the mail ledger - where
+        # a person's message was written past all three (ROLE-TABLE-2).
+        name = A.write_mail(root, dict(project, mailbox=box), name,
+                     f"# {text.splitlines()[0][:120]}\n\n{language.marker(project, 'urgent')}\n\n{text}\n\n"
+                     f"_Telegram, {who}, {time.strftime('%Y-%m-%d %H:%M')}_\n",
+                     {"kind": language.marker(project, "urgent-kind"), "class": "urgent", "from": "human",
+                      "to": A.mail_names(project)[0]})
+        written.append(name)
+        send(language.text(project, "telegram.saved", name=name), root)
+    if last != offset:
+        open(_offset_path(), "w", encoding=UTF8).write(str(last))
+    return {"written": written, "ignored_unauthorised": ignored}
+
+
+def _command(root, cfg_project, text, chat):
+    """A few read-only commands, so the phone can answer 'what is happening'.
+
+    The commands are the same words in every language; the list of them is in the project's (LANGUAGE-OUTPUT).
+    """
+    import subprocess
+    cmd = text.split()[0].lstrip("/").split("@")[0]
+    exe = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "..", "bin", "polyctl")
+    # Past the clone's own script, the polyctl on PATH, never one the current directory holds (WINDOWS-NO-CWD-EXEC).
+    exe = os.path.abspath(exe) if os.path.exists(exe) else A.program_path("polyctl")
+    allowed = {"status": ["status"], "board": ["board"], "credits": ["credits"],
+               "notices": ["notices", "-n", "8"], "fleet": ["fleet"],
+               "decisions": ["decisions", "-n", "6"]}
+    if cmd not in allowed:
+        send(language.text(cfg_project, "telegram.commands"), root)
+        return f"/{cmd} (unknown)"
+    try:
+        if exe is None:
+            raise FileNotFoundError("polyctl is not on PATH")
+        out = subprocess.run([exe, "-C", root] + allowed[cmd], capture_output=True,
+                             text=True, encoding=UTF8, errors="replace", timeout=60).stdout
+    except Exception as e:
+        out = str(e)
+    import re
+    clean = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", out)[:3500]
+    send(f"```\n{clean}\n```", root)
+    return f"/{cmd}"
+
+
+def main():
+    A.utf8_streams()                         # the names of the messages it wrote are UTF-8 in its log (#71)
+    root = os.getcwd()
+    if "-C" in sys.argv:
+        root = os.path.abspath(os.path.expanduser(sys.argv[sys.argv.index("-C") + 1]))
+    cfg_project = A.load_config(root)
+    once = "--once" in sys.argv
+    while True:
+        r = poll(root, cfg_project)
+        if r.get("error"):
+            print(r["error"], flush=True)
+            if once:
+                return 1
+            time.sleep(30)
+            continue
+        if r.get("written"):
+            print(f"{len(r['written'])} message(s): {', '.join(r['written'])}", flush=True)
+        if r.get("ignored_unauthorised"):
+            print(f"{r['ignored_unauthorised']} ignored (chat not on the allowlist)",
+                  flush=True)
+        if once:
+            return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

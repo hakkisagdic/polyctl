@@ -1,7 +1,7 @@
-"""action.yml, the GitHub Action that has a pull request reviewed by another model family, runs only what ao has (GITHUB-ACTION).
+"""action.yml, the GitHub Action that has a pull request reviewed by another model family, runs only what polyctl has (GITHUB-ACTION).
 
 A composite action is YAML, which nothing in the standard library reads, and a wrong word in it shows only on someone's
-pull request. So it is read as text here: every ao command its steps run is one the parser accepts; no input reaches a
+pull request. So it is read as text here: every polyctl command its steps run is one the parser accepts; no input reaches a
 script but through the environment, since a pull request's title written into a script is a command its author
 chose; the key is never an input; every input and output is documented; the release it installs is the one this
 commit is; and `fail-on` decides what the review's exit does to the job.
@@ -13,8 +13,8 @@ import subprocess
 
 import pytest
 
-import ao
-from ao import cli
+import polyctl
+from polyctl import cli
 from tests import standin
 from tests.test_docs_commands import _commands, _refusals
 
@@ -66,7 +66,7 @@ def _scripts(text):
     return scripts
 
 
-def test_every_ao_command_a_step_runs_is_one_the_parser_accepts():
+def test_every_polyctl_command_a_step_runs_is_one_the_parser_accepts():
     parser, ran = cli.build_parser(), []
     for script in _scripts(_text(ACTION)):
         for line in script.splitlines():
@@ -74,8 +74,8 @@ def test_every_ao_command_a_step_runs_is_one_the_parser_accepts():
                 ran.append(written)
                 assert _refusals(parser, words[1:]) == [], written
 
-    assert [written.split(" --")[0] for written in ran] == ["ao config set review.api_providers \"ci "
-                                                            "$REVIEW_BASE_URL $REVIEW_KEY_ENV\"", "ao ci review"]
+    assert [written.split(" --")[0] for written in ran] == ["polyctl config set review.api_providers \"ci "
+                                                            "$REVIEW_BASE_URL $REVIEW_KEY_ENV\"", "polyctl ci review"]
 
 
 def test_no_input_reaches_a_script_but_through_the_environment():
@@ -104,16 +104,16 @@ def test_every_input_and_output_is_documented_and_each_output_is_the_review_step
     inputs, outputs = _mapping(text, "inputs"), _mapping(text, "outputs")
 
     assert sorted(inputs) == sorted(["model", "base-url", "api-key-env", "reviewer-family", "author-family", "base",
-                                     "head", "boundary", "fail-on", "ao-version", "python-version"])
+                                     "head", "boundary", "fail-on", "polyctl-version", "python-version"])
     assert [name for name in list(inputs) + list(outputs) if f"`{name}`" not in doc] == []
     assert all(f"value: ${{{{ steps.review.outputs.{name} }}}}" in lines for name, lines in outputs.items())
     assert re.search(r"^\s+id: review$", text, re.M) and re.search(r"^  using: composite$", text, re.M)
 
 
 def test_the_release_it_installs_is_the_one_this_commit_is():
-    default = next(line for line in _mapping(_text(ACTION), "inputs")["ao-version"] if line.startswith("default:"))
+    default = next(line for line in _mapping(_text(ACTION), "inputs")["polyctl-version"] if line.startswith("default:"))
 
-    assert default == f'default: "{ao.__version__}"'
+    assert default == f'default: "{polyctl.__version__}"'
 
 
 def _bash():
@@ -140,8 +140,8 @@ def _bash():
 ])
 def test_fail_on_decides_what_the_review_s_exit_does_to_the_job(tmp_path, fail_on, exits):
     review = _scripts(_text(ACTION))[-1]
-    # The stand-in is a program named ao on Windows too, as the ao pip installs on a runner is (tests/standin.py).
-    standin.program(tmp_path, "ao", "import os\nimport sys\nsys.exit(int(os.environ['STAND_IN_EXIT']))\n")
+    # The stand-in is a program named polyctl on Windows too, as the polyctl pip installs on a runner is (tests/standin.py).
+    standin.program(tmp_path, "polyctl", "import os\nimport sys\nsys.exit(int(os.environ['STAND_IN_EXIT']))\n")
     for code, job in exits.items():
         env = dict(os.environ, PATH=f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}", STAND_IN_EXIT=str(code),
                    FAIL_ON=fail_on, GITHUB_STEP_SUMMARY=str(tmp_path / "summary"), GITHUB_OUTPUT=str(tmp_path / "out"))

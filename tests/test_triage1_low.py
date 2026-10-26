@@ -5,14 +5,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import allowlist as AL, cli, lib as A, settings as S, storage
+from polyctl import allowlist as AL, cli, lib as A, settings as S, storage
 
 
 @pytest.mark.parametrize("rule", [
-    "Bash(ao config set round_budget 999)",
-    "Bash(ao config set round_budget 999 --machine)",
-    "Bash(ao config unset round_budget)",
-    "Bash(env ao config unset round_budget --machine)",
+    "Bash(polyctl config set round_budget 999)",
+    "Bash(polyctl config set round_budget 999 --machine)",
+    "Bash(polyctl config unset round_budget)",
+    "Bash(env polyctl config unset round_budget --machine)",
 ])
 def test_implementer_settings_grants_are_named_whatever_the_value(rule):
     argv = ["agent", "--allowedTools", rule]
@@ -24,7 +24,7 @@ def test_implementer_settings_grants_are_named_whatever_the_value(rule):
 @pytest.mark.parametrize("role", ["implementer", "architect"])
 def test_machine_role_names_are_known_groups(project, tmp_path, monkeypatch, role):
     machine = tmp_path / "settings.json"
-    monkeypatch.setenv("AO_SETTINGS", str(machine))
+    monkeypatch.setenv("POLYCTL_SETTINGS", str(machine))
     machine.write_text(json.dumps({role: {"name": "dev"}}), encoding="utf-8")
     assert S.problems(project) == []
     machine.write_text(json.dumps({role: {"name": "dev", "typo": "unknown"}}), encoding="utf-8")
@@ -37,21 +37,21 @@ def test_machine_role_names_are_known_groups(project, tmp_path, monkeypatch, rol
 ])
 def test_doctor_names_live_evidence_rows_past_the_bound(project, name, chain, legacy):
     cfg = dict(project, retention={"evidence_keep": 500})
-    path = Path(project["root"]) / ".ao" / "ledger" / (name + ".jsonl")
+    path = Path(project["root"]) / ".polyctl" / "ledger" / (name + ".jsonl")
     for n in range(500):
         storage.append_chained_jsonl(str(path), {"id": str(n)}, chain, legacy_prefix=legacy)
     assert name + ".jsonl" not in "\n".join(cli._store_bound_lines(cfg))
     storage.append_chained_jsonl(str(path), {"id": "500"}, chain, legacy_prefix=legacy)
     line = "\n".join(cli._store_bound_lines(cfg))
     assert name + ".jsonl 501/500 rows" in line
-    assert "ao prune --evidence --yes" in line
+    assert "polyctl prune --evidence --yes" in line
     storage.seal_chained_jsonl(str(path), chain, keep=500, legacy_prefix=legacy)
     assert name + ".jsonl" not in "\n".join(cli._store_bound_lines(cfg))
 
 
 @pytest.mark.parametrize("yes", [False, True])
 def test_prune_says_plans_are_kept_whole_and_never_sealed(project, capsys, yes):
-    path = Path(project["root"]) / ".ao" / "ledger" / "plans.jsonl"
+    path = Path(project["root"]) / ".polyctl" / "ledger" / "plans.jsonl"
     before = b'{"at": 1, "plan": "old"}\n'
     path.write_bytes(before)
     args = SimpleNamespace(days=30, yes=yes, evidence=True, keep_kb=256, review_days=30)
@@ -62,7 +62,7 @@ def test_prune_says_plans_are_kept_whole_and_never_sealed(project, capsys, yes):
 
 
 def test_doctor_names_an_unreadable_evidence_bound(project):
-    path = Path(project["root"]) / ".ao" / "ledger" / "verifications.jsonl"
+    path = Path(project["root"]) / ".polyctl" / "ledger" / "verifications.jsonl"
     path.write_text("not json\n", encoding="utf-8")
     storage._record_committed_length(str(path), 1, None)
     line = "\n".join(cli._store_bound_lines(project))
@@ -71,11 +71,11 @@ def test_doctor_names_an_unreadable_evidence_bound(project):
 
 
 @pytest.mark.parametrize("rule", [
-    "Bash(ao doctor:*)",
-    "Bash(ao doctor --check --notify)",
-    "Bash(ao doctor --notify --check)",
+    "Bash(polyctl doctor:*)",
+    "Bash(polyctl doctor --check --notify)",
+    "Bash(polyctl doctor --notify --check)",
 ])
 def test_agent_grants_must_not_page_a_person(rule):
     assert any(reason == "pages a person" and granted == rule
                for reason, _, granted in AL.problems(["agent", "--allowedTools", rule]))
-    assert AL.problems(["agent", "--allowedTools", "Bash(ao doctor --check)"]) == []
+    assert AL.problems(["agent", "--allowedTools", "Bash(polyctl doctor --check)"]) == []

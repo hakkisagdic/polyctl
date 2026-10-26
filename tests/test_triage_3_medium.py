@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import allowlist as AL, cli, drivers, lib as A, storage, watchdog as W
+from polyctl import allowlist as AL, cli, drivers, lib as A, storage, watchdog as W
 from tests.scenarios import World
 from tests.test_review_chain import _repo_with_change
 from tests.standin import program
@@ -32,7 +32,7 @@ def _reviewer(tmp_path, exit_code=0, capture=None):
 
 def _board(root, running="S1", keep=True):
     old = "- [S1] first · acceptance: changed boundary\n" if keep else ""
-    Path(root, ".ao", "board.md").write_text(
+    Path(root, ".polyctl", "board.md").write_text(
         "## running\n" + ("- [S1] first · acceptance: original boundary\n" if running == "S1"
                          else "- [S2] second · acceptance: second boundary\n")
         + "## queued\n" + (old if running != "S1" else "") + "## done\n", encoding="utf-8")
@@ -142,7 +142,7 @@ def test_m4_missing_reference_ledger_keeps_everything(project, kind):
     else:
         A.record_verification(root, {"id": "V-1", "at": 1, "passed": True, "review": "old.md"})
         name = "verifications.jsonl"
-    Path(root, ".ao", "ledger", name).unlink()
+    Path(root, ".polyctl", "ledger", name).unlink()
     with pytest.raises((OSError, RuntimeError, ValueError)):
         A.prune_review_artefacts(root, project, 30, apply=True)
     assert Path(loose).exists()
@@ -155,12 +155,12 @@ def test_m4_sealed_references_keep_the_review(project, kind):
     if kind == "grant":
         for n in range(2):
             A.record_authority(root, True, [], "sha256:t", "V-1", f"C-{n}", review="old.md" if n == 0 else None)
-        path, chain = Path(root, ".ao", "ledger", "authority.jsonl"), A.AUTHORITY_CHAIN
+        path, chain = Path(root, ".polyctl", "ledger", "authority.jsonl"), A.AUTHORITY_CHAIN
     else:
         for n in range(2):
             A.record_verification(root, {"id": f"V-{n}", "at": n, "passed": True,
                                          "review": "old.md" if n == 0 else None})
-        path, chain = Path(root, ".ao", "ledger", "verifications.jsonl"), A.VERIFICATION_CHAIN
+        path, chain = Path(root, ".polyctl", "ledger", "verifications.jsonl"), A.VERIFICATION_CHAIN
     storage.seal_chained_jsonl(str(path), chain, keep=1, legacy_prefix=kind == "verification")
     result = A.prune_review_artefacts(root, project, 30, apply=True)
     assert Path(kept).exists() and kind in result["kept"]["old.md"]
@@ -224,7 +224,7 @@ def test_m6_missing_token_store_is_named(project):
 
 
 def test_m6_request_failure_is_a_broken_check(project, tmp_path, monkeypatch):
-    from ao import outbound
+    from polyctl import outbound
     db = tmp_path / "tokens"
     db.touch()
     api = {"token": {"sqlite": str(db), "table": "tokens", "key": "token"},
@@ -268,11 +268,11 @@ def test_m7_second_decision_gets_its_own_report_and_wake(project, tmp_path, monk
 def test_m1_submitted_boundary_file_keeps_contents(project, tmp_path, monkeypatch):
     root = project["root"]
     _repo_with_change(root)
-    boundary = Path(root, ".ao", "boundary.md")
+    boundary = Path(root, ".polyctl", "boundary.md")
     original = "# Boundary\n## Invariant\nkeep the original invariant\n"
     boundary.write_text(original, encoding="utf-8")
-    Path(root, ".ao", "board.md").write_text(
-        "## running\n- [S1] first · boundary: .ao/boundary.md\n## queued\n", encoding="utf-8")
+    Path(root, ".polyctl", "board.md").write_text(
+        "## running\n- [S1] first · boundary: .polyctl/boundary.md\n## queued\n", encoding="utf-8")
     source = A.read_boundary(root, A.running_slice(root))
     capture = tmp_path / "prompt.txt"
     cfg = dict(project, reviewer={"id": "r1", "family": "x",
@@ -296,12 +296,12 @@ def test_m4_missing_sealed_segment_keeps_everything(project, kind):
     if kind == "grant":
         for n in range(2):
             A.record_authority(root, True, [], "sha256:t", "V-1", f"C-{n}", review="old.md" if n == 0 else None)
-        path, chain = Path(root, ".ao", "ledger", "authority.jsonl"), A.AUTHORITY_CHAIN
+        path, chain = Path(root, ".polyctl", "ledger", "authority.jsonl"), A.AUTHORITY_CHAIN
     else:
         for n in range(2):
             A.record_verification(root, {"id": f"V-{n}", "at": n, "passed": True,
                                          "review": "old.md" if n == 0 else None})
-        path, chain = Path(root, ".ao", "ledger", "verifications.jsonl"), A.VERIFICATION_CHAIN
+        path, chain = Path(root, ".polyctl", "ledger", "verifications.jsonl"), A.VERIFICATION_CHAIN
     seal = storage.seal_chained_jsonl(str(path), chain, keep=1, legacy_prefix=kind == "verification")
     (path.parent / "sealed" / seal["archives"][0]).unlink()
     with pytest.raises((OSError, RuntimeError, ValueError)):

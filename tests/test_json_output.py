@@ -1,4 +1,4 @@
-"""`ao status`, `ao fleet` and `ao notices` print their facts as one JSON document with --json (JSON-OUTPUT).
+"""`polyctl status`, `polyctl fleet` and `polyctl notices` print their facts as one JSON document with --json (JSON-OUTPUT).
 
 A program that wanted what the panel shows had to read the panel: strip its colours, find its
 sections by their rules of box characters and parse numbers out of sentences that wrap with the
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 from tests.test_cli_robust import _printed
 from tests.test_session_identity import _kiro_session
 
@@ -47,7 +47,7 @@ def _fixed(monkeypatch):
     monkeypatch.setattr(cli, "C", TAGS)
     monkeypatch.setenv("COLUMNS", "60")
     monkeypatch.setenv("LINES", "40")
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
 
 
 # ---- one fixed project, as every reader the panel asks answers for it ------------------------------
@@ -140,7 +140,7 @@ def _nobody(monkeypatch):
         monkeypatch.setattr(A, name, answer)
 
 
-# ---- the fleet: four workspaces, one of them no project ao can read ---------------------------------
+# ---- the fleet: four workspaces, one of them no project polyctl can read ---------------------------------
 
 WORKSPACES = {
     "/work/acme-api": {"cfg": {"project": "acme-api", "implementer": {"adapter": "kiro", "session": "s1"}},
@@ -200,8 +200,8 @@ NOTICES_RECORDED = [
 
 
 def _noticed(root):
-    """The notices above, written to the project's ledger as ao records them."""
-    with open(os.path.join(root, ".ao", "ledger", "notices.jsonl"), "w", encoding="utf-8") as fh:
+    """The notices above, written to the project's ledger as polyctl records them."""
+    with open(os.path.join(root, ".polyctl", "ledger", "notices.jsonl"), "w", encoding="utf-8") as fh:
         fh.write("".join(json.dumps(row) + "\n" for row in NOTICES_RECORDED))
 
 
@@ -209,7 +209,7 @@ def _noticed(root):
 
 STATUS = "\n".join([
     "<b><cyan>════════════════════════════════════════════════════════════</>",
-    "<b>  ACME-API</><dim>   agent-orchestrator   26 Sep 14:30:00</>",
+    "<b>  ACME-API</><dim>   polyctl   26 Sep 14:30:00</>",
     "<b><cyan>════════════════════════════════════════════════════════════</>",
     "",
     "<red><b>○ IDLE</>  <dim>kiro · last write 12m 34s ago</>",
@@ -232,14 +232,14 @@ STATUS = "\n".join([
     "   <red>restart failed</> <dim>10m ago · exit 2</>",
     "     <dim>error: the agent could not start: its login expired,</>",
     "     <dim>and a person has to run the login again</>",
-    "     <dim>full log: ~/.ao/nudge-acme-api.log</>",
+    "     <dim>full log: ~/.polyctl/nudge-acme-api.log</>",
     "   <dim>14:02</> <yellow>agent error</>  FAIL tests/test_store.py::test_round_trip -",
     "        <dim>│</>  AssertionError: 1 != 2",
     "",
-    "   <yellow><b>REVIEW RETURNED</> for S3: R-17 NEEDS_CHANGES — handle it before new work (<b>ao "
+    "   <yellow><b>REVIEW RETURNED</> for S3: R-17 NEEDS_CHANGES — handle it before new work (<b>polyctl "
     f"review collect {A.copyable_word('R-17')}</>)",
     "",
-    "   <yellow><b>REVIEW ENDED</> for a slice: R-18 failed, no verdict — collect it, then submit again (<b>ao "
+    "   <yellow><b>REVIEW ENDED</> for a slice: R-18 failed, no verdict — collect it, then submit again (<b>polyctl "
     f"review collect {A.copyable_word('R-18')}</>)",
     "",
     "<b><mag>── REVIEWS ────────────────────────────────────────────────</>",
@@ -284,7 +284,7 @@ STATUS = "\n".join([
 
 NOBODY = "\n".join([
     "<b><cyan>════════════════════════════════════════════════════════════</>",
-    "<b>  ACME-API</><dim>   agent-orchestrator   26 Sep 14:30:00</>",
+    "<b>  ACME-API</><dim>   polyctl   26 Sep 14:30:00</>",
     "<b><cyan>════════════════════════════════════════════════════════════</>",
     "",
     "<yellow>No implementer session found for this workspace.</>",
@@ -292,8 +292,8 @@ NOBODY = "\n".join([
     "",
     "   Run it from a project, or point at one:",
     # Copyable commands use the platform's quoting, as review ids above do (WINDOWS-TESTS-8).
-    f"     <b>ao -C {A.copyable_word('/work/acme-web')}</>  <dim>5m ago</>",
-    f"     <b>ao -C {A.copyable_word('/work/acme-docs')}</>  <dim>3h ago</>",
+    f"     <b>polyctl -C {A.copyable_word('/work/acme-web')}</>  <dim>5m ago</>",
+    f"     <b>polyctl -C {A.copyable_word('/work/acme-docs')}</>  <dim>3h ago</>",
     "",
     "<b><mag>── REPOSITORY ─────────────────────────────────────────────</>",
     "   <dim>0 files uncommitted · </><yellow>no remote default branch to compare against</>",
@@ -303,7 +303,7 @@ NOBODY = "\n".join([
 
 FLEET = "\n".join([
     "<b><cyan>════════════════════════════════════════════════════════════</>",
-    "<b>  ALL PROJECTS</><dim>   agent-orchestrator   26 Sep 14:30:00</>",
+    "<b>  ALL PROJECTS</><dim>   polyctl   26 Sep 14:30:00</>",
     "<b><cyan>════════════════════════════════════════════════════════════</>",
     "",
     " <red>○</> <b>acme-web              </><dim>idle      66m</>  q0 r0 <dim>·</> 0 dirty   "
@@ -393,19 +393,19 @@ def _lived_in(project, monkeypatch):
     root = project["root"]
     monkeypatch.setattr(A, "quota", lambda adapter, ttl=300: [])        # no keyflip is asked
     _kiro_session(root, "s1", 600)
-    with open(os.path.join(root, ".ao", "board.md"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "board.md"), "w", encoding="utf-8") as fh:
         fh.write("# Board\n\n## running\n\n- [S3] store\n\n## blocked\n\n- [S2] sync · needs: a key\n\n"
                  "## queued\n\n- [S4] export\n\n## verified\n\n## done\n")
     with open(os.path.join(root, project["mailbox"], MAIL[0]), "w", encoding="utf-8") as fh:
         fh.write("# queue is empty and S3 needs a decision\n\n## URGENT\n\nwhich store?\n")
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     _in_colour(monkeypatch)                             # the document still has none
     return root
 
 
 # ---- the documents -------------------------------------------------------------------------------
 
-def test_ao_status_json_prints_one_document_holding_what_the_panel_shows(project, monkeypatch):
+def test_polyctl_status_json_prints_one_document_holding_what_the_panel_shows(project, monkeypatch):
     root = _lived_in(project, monkeypatch)
 
     code, out = _printed(project, monkeypatch, True, "status", "--json", "--window", "12h")
@@ -436,11 +436,11 @@ def test_ao_status_json_prints_one_document_holding_what_the_panel_shows(project
 
 @pytest.mark.parametrize("role", [None, "architect"])
 def test_the_document_records_no_marked_message_as_seen_where_the_panel_does(project, monkeypatch, role):
-    # A status bar or a scheduled job polls the document, under whatever AO_ROLE it inherited. Recorded
+    # A status bar or a scheduled job polls the document, under whatever POLYCTL_ROLE it inherited. Recorded
     # as seen, a request no person was shown would never climb the watchdog's ladder (#30).
     root = _lived_in(project, monkeypatch)
     if role:
-        monkeypatch.setenv("AO_ROLE", role)
+        monkeypatch.setenv("POLYCTL_ROLE", role)
 
     code, out = _printed(project, monkeypatch, False, "status", "--json")
     mail = json.loads(out)["mail"]
@@ -456,14 +456,14 @@ def test_the_document_records_no_marked_message_as_seen_where_the_panel_does(pro
 
 
 def test_without_an_implementer_the_document_names_the_workspaces_to_point_at(project, monkeypatch, tmp_path):
-    path = os.path.join(project["root"], ".ao", "config.json")
+    path = os.path.join(project["root"], ".polyctl", "config.json")
     with open(path, encoding="utf-8") as fh:
         stored = json.load(fh)
     del stored["implementer"]
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(stored, fh)
     # Six workspaces with a Kiro session each, the newest written a minute ago: the panel offers the
-    # five newest to point ao at, and so does the document.
+    # five newest to point polyctl at, and so does the document.
     places = []
     for n in range(6):
         place = tmp_path / f"acme-{n}"
@@ -482,7 +482,7 @@ def test_without_an_implementer_the_document_names_the_workspaces_to_point_at(pr
     assert (facts["telemetry"], facts["problems"], facts["throughput"], facts["messages"]) == (None, None, None, [])
 
 
-def test_ao_fleet_json_prints_one_row_per_project(project, monkeypatch):
+def test_polyctl_fleet_json_prints_one_row_per_project(project, monkeypatch):
     root = _lived_in(project, monkeypatch)
 
     code, out = _printed(project, monkeypatch, True, "fleet", "--json")
@@ -496,9 +496,9 @@ def test_ao_fleet_json_prints_one_row_per_project(project, monkeypatch):
     assert row["seconds_since_write"] >= 600 and (row["spinning_minutes"], row["has_source"]) == (None, False)
 
 
-def test_ao_notices_json_prints_the_rows_and_one_notice_by_its_id(project, monkeypatch):
+def test_polyctl_notices_json_prints_the_rows_and_one_notice_by_its_id(project, monkeypatch):
     root = project["root"]
-    with open(os.path.join(root, ".ao", "ledger", "notices.jsonl"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "ledger", "notices.jsonl"), "w", encoding="utf-8") as fh:
         fh.write(json.dumps(NOTICES_RECORDED[0]) + "\n")                  # raised before notices had ids
     evidence = A.notice_evidence("burn_rate", [{"value": "5000/10000", "source": "GetUsageLimits",
                                                 "at": time.time()}])
@@ -540,7 +540,7 @@ def test_ao_notices_json_prints_the_rows_and_one_notice_by_its_id(project, monke
 def test_every_key_is_named_on_the_page_that_describes_its_command(page, keys):
     text = (ROOT / page).read_text(encoding="utf-8")
 
-    assert "*In ao since slice JSON-OUTPUT" in text
+    assert "*In polyctl since slice JSON-OUTPUT" in text
     assert sorted(key for key in keys if f"`{key}`" not in text and f'"{key}"' not in text) == []
 
 
@@ -553,7 +553,7 @@ def test_the_status_panel_reads_as_it_did_before_its_facts_were_separated(projec
 
     assert _shown(capsys, cli.cmd_status, cfg, SimpleNamespace(messages=4, window=24.0)) == (None, STATUS)
     panel = STATUS.rstrip("\n").split("\n")
-    # ao watch bounds it: the fixed sections first, and what room is left goes to the messages.
+    # polyctl watch bounds it: the fixed sections first, and what room is left goes to the messages.
     hidden = "   <dim>… older messages hidden (window too short)</>"
     assert cli.render(cfg, 4, 60, 5) == "\n".join(panel[:5])
     assert cli.render(cfg, 4, 60, 60) == "\n".join(panel[:59] + [hidden])
@@ -590,7 +590,7 @@ def test_the_notices_read_as_they_did_before_json_output(project, monkeypatch, c
     assert _shown(capsys, cli.cmd_notices, project, SimpleNamespace(n=12, all=False, ident="N-1790432400003")) == \
         (0, NOTICE)
     assert _shown(capsys, cli.cmd_notices, project, SimpleNamespace(n=12, all=False, ident="N-0")) == \
-        (1, "no notice N-0; `ao notices --all` lists them with their ids\n")
-    os.remove(os.path.join(project["root"], ".ao", "ledger", "notices.jsonl"))
+        (1, "no notice N-0; `polyctl notices --all` lists them with their ids\n")
+    os.remove(os.path.join(project["root"], ".polyctl", "ledger", "notices.jsonl"))
     assert _shown(capsys, cli.cmd_notices, project, SimpleNamespace(n=12, all=False, ident=None)) == \
         (0, "<dim>No notices recorded.</>\n")

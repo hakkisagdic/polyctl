@@ -1,4 +1,4 @@
-"""A reviewer reads nothing of ao's own standard input (REVIEWER-STDIN).
+"""A reviewer reads nothing of polyctl's own standard input (REVIEWER-STDIN).
 
 On 2026-10-12 a range was reviewed again with Codex from a shell whose standard input was a pipe nobody closed.
 `codex exec`, finding its input open and no terminal, said "Reading additional input from stdin...", waited for the
@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from ao import cli
+from polyctl import cli
 
 READS_ALL = ("import sys\n"
              "rest = sys.stdin.read()\n"
@@ -43,8 +43,8 @@ def test_a_reviewer_is_started_with_an_empty_input_unless_its_prompt_comes_on_it
 
 @pytest.mark.skipif(os.name == "nt", reason="the test hands this process a pipe as its input, and on Windows a child "
                                             "is given the process's standard handle, which that does not change")
-def test_a_reviewer_that_reads_its_input_to_the_end_answers_while_ao_s_own_input_stays_open(project):
-    read_end, write_end = os.pipe()                    # ao's own input: a pipe its writer never closes
+def test_a_reviewer_that_reads_its_input_to_the_end_answers_while_polyctl_s_own_input_stays_open(project):
+    read_end, write_end = os.pipe()                    # polyctl's own input: a pipe its writer never closes
     kept = os.dup(0)
     os.dup2(read_end, 0)
     try:

@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from ao import email, lib as A, telegram
-from ao import watchdog as W
+from polyctl import email, lib as A, telegram
+from polyctl import watchdog as W
 from tests.scenarios import World
 
 NOTIFY = W.notify                  # the scenario world replaces it; a resume is about the real ladder
@@ -61,7 +61,7 @@ def test_after_two_weeks_one_notice_names_everything_and_nothing_rings_on_the_si
                                               "title": "proj: unread decision request", "ring": "red",
                                               "red_due": False, "red_sent": began - 3600}})
     A.alarm_snooze("proj", "credits-exhaust", time.time() - DAY, by="owner", why="the plan resets on the 1st")
-    with open(os.path.join(world.root, ".ao", "ledger", "deferred.jsonl"), "a", encoding="utf-8") as fh:
+    with open(os.path.join(world.root, ".polyctl", "ledger", "deferred.jsonl"), "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"event": "deferred", "id": f"DF-{int(began - DAY)}-wake", "kind": "wake",
                              "at": int(began - DAY), "reason": "architect quota"}) + "\n")
     W.save_state(world.root, {"last_credit_sample": began, "last_credit_attempt": began})
@@ -155,7 +155,7 @@ def test_a_silence_that_carried_only_the_architects_business_goes_to_its_mailbox
     _request(world, REQUEST, 4 * DAY)
     world.transcript_age(3 * DAY)
     # The whole machine was off: a sibling has not ticked yet either, and is not a dead watchdog.
-    sibling = os.path.join(A.HOME, ".ao", "heartbeat-other")
+    sibling = os.path.join(A.HOME, ".polyctl", "heartbeat-other")
     with open(sibling, "w", encoding="utf-8") as fh:
         fh.write("1")
     os.utime(sibling, (time.time() - 3 * DAY, time.time() - 3 * DAY))

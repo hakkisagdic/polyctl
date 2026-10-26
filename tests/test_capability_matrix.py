@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, matrix as M, storage
+from polyctl import cli, lib as A, matrix as M, storage
 from tests.conftest import review_off
 
 
@@ -448,7 +448,7 @@ def test_strict_commit_check_accepts_exact_grant_and_refuses_drift_without_writi
     _persist_verification(cfg)
     _quiet_authority_environment(monkeypatch)
     assert cli.cmd_commit_ok(cfg, SimpleNamespace(verify=False, profile=None)) == 0
-    ledger = os.path.join(cfg["root"], ".ao", "ledger", "authority.jsonl")
+    ledger = os.path.join(cfg["root"], ".polyctl", "ledger", "authority.jsonl")
     before = open(ledger, "rb").read()
     capsys.readouterr()
 
@@ -479,7 +479,7 @@ def test_strict_and_legacy_grants_never_cross_authorize(project, monkeypatch, ca
     candidate = _persist_verification(cfg)
     _quiet_authority_environment(monkeypatch)
     assert cli.cmd_commit_ok(cfg, SimpleNamespace(verify=False, profile=None)) == 0
-    ledger = os.path.join(cfg["root"], ".ao", "ledger", "authority.jsonl")
+    ledger = os.path.join(cfg["root"], ".polyctl", "ledger", "authority.jsonl")
     strict_bytes = open(ledger, "rb").read()
 
     legacy_cfg = copy.deepcopy(cfg)
@@ -493,7 +493,7 @@ def test_strict_and_legacy_grants_never_cross_authorize(project, monkeypatch, ca
     # a ledger is a cut the recorded length refuses (#62), so the replacement
     # also forgets that record, as a ledger started on another machine would.
     open(ledger, "w", encoding="utf-8").write("")
-    os.remove(os.environ["AO_LEDGER_CHECKPOINTS"])
+    os.remove(os.environ["POLYCTL_LEDGER_CHECKPOINTS"])
     review_name = os.path.basename(_review_body(cfg)[0])
     A.record_authority(
         cfg["root"], True, [], A.tree_digest(cfg["root"], cfg), "V-matrix",
@@ -523,11 +523,11 @@ def test_review_off_still_requires_matrix_but_can_grant_without_reviewer(
     assert row["review"] is None
     assert row["reviewer_identity"] is None
     before = open(
-        os.path.join(cfg["root"], ".ao", "ledger", "authority.jsonl"), "rb"
+        os.path.join(cfg["root"], ".polyctl", "ledger", "authority.jsonl"), "rb"
     ).read()
     assert cli.cmd_commit_check(cfg, SimpleNamespace()) == 0
     assert open(
-        os.path.join(cfg["root"], ".ao", "ledger", "authority.jsonl"), "rb"
+        os.path.join(cfg["root"], ".polyctl", "ledger", "authority.jsonl"), "rb"
     ).read() == before
 
 
@@ -557,7 +557,7 @@ def test_doctor_has_stable_matrix_errors_and_legacy_has_no_matrix_warning(projec
     ],
 )
 def test_malformed_json_with_matrix_key_cannot_reactivate_legacy(project, payload):
-    path = os.path.join(project["root"], ".ao", "config.json")
+    path = os.path.join(project["root"], ".polyctl", "config.json")
     open(path, "wb").write(payload)
     cfg = A.load_config(project["root"])
     assert M.is_strict(cfg) is True
@@ -566,7 +566,7 @@ def test_malformed_json_with_matrix_key_cannot_reactivate_legacy(project, payloa
 
 
 def test_malformed_legacy_json_with_only_nested_matrix_key_stays_legacy(project):
-    path = os.path.join(project["root"], ".ao", "config.json")
+    path = os.path.join(project["root"], ".polyctl", "config.json")
     open(path, "wb").write(b'{"outer":{"capability_matrix": 1},')
     assert M.is_strict(A.load_config(project["root"])) is False
 
@@ -583,7 +583,7 @@ def test_strict_catchup_keeps_waiver_open_on_configuration_exit_two(
               "why": "reviewer unavailable", "by": "human", "at": 1, "tree": "t",
               "head": subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
                                      capture_output=True, text=True).stdout.strip()}
-    ledger = os.path.join(root, ".ao", "ledger", "waivers.jsonl")
+    ledger = os.path.join(root, ".polyctl", "ledger", "waivers.jsonl")
     with open(ledger, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(waiver) + "\n")
     storage._record_committed_length(ledger, 1, storage.chained_row_digest(waiver, A.WAIVER_CHAIN))
@@ -599,7 +599,7 @@ def test_strict_catchup_keeps_waiver_open_on_configuration_exit_two(
     def unexpected_mail(*args, **kwargs):
         raise AssertionError("catch-up falsely reported a completed review")
 
-    from ao import watchdog as W
+    from polyctl import watchdog as W
     monkeypatch.setattr(cli, "_run_reviewer", unexpected_spawn)
     monkeypatch.setattr(A, "write_mail", unexpected_mail)
     monkeypatch.setattr(W, "run", lambda args: 0)

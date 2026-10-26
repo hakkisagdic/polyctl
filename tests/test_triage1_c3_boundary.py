@@ -2,7 +2,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests import test_criteria_verdicts as criteria
 from tests import test_slice_boundary as boundary
 from tests.test_review_chain import _args

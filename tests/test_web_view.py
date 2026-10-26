@@ -1,6 +1,6 @@
-"""`ao watch --web`: the panel, the board, the pipeline and the fleet as read-only pages and JSON endpoints on 127.0.0.1 (WEB-VIEW, WEB-API).
+"""`polyctl watch --web`: the panel, the board, the pipeline and the fleet as read-only pages and JSON endpoints on 127.0.0.1 (WEB-VIEW, WEB-API).
 
-Each test starts the server as the command line does, `ao watch --web --port 0`, in a thread
+Each test starts the server as the command line does, `polyctl watch --web --port 0`, in a thread
 against a temporary project, and reads it the way a browser or a local program does.
 """
 import hashlib
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, web
+from polyctl import cli, lib as A, web
 
 BOARD = """# Board
 
@@ -39,7 +39,7 @@ URGENT = "20260926-0900-fable-to-kiro-DECISION-stop.md"
 
 @pytest.fixture
 def start(project, monkeypatch):
-    """start(*words) runs `ao -C <project> watch --web --port 0 <words>` in a thread and returns once it serves.
+    """start(*words) runs `polyctl -C <project> watch --web --port 0 <words>` in a thread and returns once it serves.
 
     What comes back holds the port it listens on and the exit status the command returns once
     the server is shut down, which happens after the test. Serving is known from an answer to a
@@ -48,8 +48,8 @@ def start(project, monkeypatch):
     """
     monkeypatch.setattr(A, "quota", lambda adapter, ttl=300: [])   # no real keyflip: the panel asks it for the quota
     monkeypatch.setattr(A, "all_workspaces", lambda: [{"path": project["root"], "mtime": time.time()}])
-    monkeypatch.delenv("AO_ROLE", raising=False)
-    Path(project["root"], ".ao", "board.md").write_text(BOARD, encoding="utf-8")
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
+    Path(project["root"], ".polyctl", "board.md").write_text(BOARD, encoding="utf-8")
     listening, running = [], []
     listen = web.listen
 
@@ -67,7 +67,7 @@ def start(project, monkeypatch):
         deadline = time.monotonic() + 10
         while len(listening) <= len(running) and thread.is_alive() and time.monotonic() < deadline:
             thread.join(0.01)
-        assert len(listening) > len(running), f"ao watch --web exited {view.exits} before it listened"
+        assert len(listening) > len(running), f"polyctl watch --web exited {view.exits} before it listened"
         view.server, view.thread = listening[-1], thread
         view.port = view.server.server_port
         running.append(view)
@@ -139,17 +139,17 @@ def test_the_panel_the_board_the_pipeline_and_the_fleet_are_pages_that_refresh_t
     assert "RUNNING (1)" in board and "W2  a question for the owner   needs: the owner's answer" in board
     assert "waiting" in pipeline and "with a person" in pipeline and "W1" in pipeline and "W2" in pipeline
     assert "ALL PROJECTS" in fleet and re.search(r"proj\s+unknown", fleet)
-    assert f"ao watch --web: http://127.0.0.1:{view.port}/  read-only" in capsys.readouterr().out
+    assert f"polyctl watch --web: http://127.0.0.1:{view.port}/  read-only" in capsys.readouterr().out
 
 
 def test_with_all_the_address_it_prints_is_the_fleet(start, capsys):
     view = start("--all")
 
-    assert f"ao watch --web: http://127.0.0.1:{view.port}/fleet  read-only" in capsys.readouterr().out
+    assert f"polyctl watch --web: http://127.0.0.1:{view.port}/fleet  read-only" in capsys.readouterr().out
     assert _request(view.port, "/fleet")[0] == 200
 
 
-def test_the_board_page_is_the_text_ao_board_prints_banner_and_all(start, project, capsys):
+def test_the_board_page_is_the_text_polyctl_board_prints_banner_and_all(start, project, capsys):
     Path(project["root"], project["mailbox"], URGENT).write_text("# stop W1\n\n## URGENT\n", encoding="utf-8")
     view = start()
     capsys.readouterr()
@@ -186,7 +186,7 @@ def test_every_method_but_get_is_refused_and_changes_nothing(start, project):
             assert status == 405 and headers["Allow"] == "GET", (path, method)
             assert headers["Content-Security-Policy"] == web.CSP, (path, method)
             assert text == ("" if method == "HEAD"
-                            else "ao watch --web is read-only: it answers GET and nothing else.\n")
+                            else "polyctl watch --web is read-only: it answers GET and nothing else.\n")
 
     assert _files(project["root"]) == before
     assert _request(view.port, "/board")[0] == 200
@@ -216,7 +216,7 @@ def test_nothing_but_a_loopback_address_is_bound():
         server.server_close()
 
 
-def test_a_page_marks_no_message_seen_and_writes_nothing_where_ao_board_marks_it_seen(start, project):
+def test_a_page_marks_no_message_seen_and_writes_nothing_where_polyctl_board_marks_it_seen(start, project):
     Path(project["root"], project["mailbox"], URGENT).write_text("# stop W1\n\n## URGENT\n", encoding="utf-8")
     A.project_key(project["root"])          # a project is named the first time any command looks at it (#66)
     view = start()
@@ -239,14 +239,14 @@ def test_a_page_that_cannot_be_computed_says_so_and_the_others_still_serve(start
         raise RuntimeError("the store\nis gone")
 
     monkeypatch.setattr(cli, "render_fleet", broken)
-    monkeypatch.delenv("AO_DEBUG", raising=False)
+    monkeypatch.delenv("POLYCTL_DEBUG", raising=False)
     view = start()
 
     status, _, page = _request(view.port, "/fleet")
 
     assert status == 500 and "this page could not be computed: RuntimeError: the store is gone" in page
     assert '<meta http-equiv="refresh"' in page
-    assert "ao watch --web: /fleet: RuntimeError: the store is gone" in capsys.readouterr().err
+    assert "polyctl watch --web: /fleet: RuntimeError: the store is gone" in capsys.readouterr().err
     assert _request(view.port, "/")[0] == 200
 
 
@@ -326,7 +326,7 @@ def test_the_json_endpoints_serve_what_the_pages_show_with_schema_version(start,
 
 def test_the_pipeline_page_places_each_slice_in_its_column_and_shows_person_steps_as_command_text_only(start, project):
     root = Path(project["root"])
-    (root / ".ao" / "board.md").write_text(
+    (root / ".polyctl" / "board.md").write_text(
         "# Board\n\n"
         "## running\n"
         "- [W1] review in flight\n\n"
@@ -340,7 +340,7 @@ def test_the_pipeline_page_places_each_slice_in_its_column_and_shows_person_step
         "- [W5] already landed\n",
         encoding="utf-8",
     )
-    reviews_dir = root / ".ao" / "reviews"
+    reviews_dir = root / ".polyctl" / "reviews"
     reviews_dir.mkdir(parents=True, exist_ok=True)
     (reviews_dir / "R-1700000000001.json").write_text(
         json.dumps({"id": "R-1700000000001", "slice": "W1", "state": "running", "submitted_at": time.time()}),
@@ -363,16 +363,16 @@ def test_the_pipeline_page_places_each_slice_in_its_column_and_shows_person_step
     assert [s["id"] for s in data["columns"]["in review"]] == ["W1"]
     assert [s["id"] for s in data["columns"]["with a person"]] == ["W2"]
     assert [s["id"] for s in data["columns"]["landed"]] == ["W5"]
-    assert data["columns"]["with a person"][0]["command"] == "ao slice start W2"
-    assert any(item["kind"] == "harness-unseen" and item["command"] == "ao harness seen --by <your name> --ask"
+    assert data["columns"]["with a person"][0]["command"] == "polyctl slice start W2"
+    assert any(item["kind"] == "harness-unseen" and item["command"] == "polyctl harness seen --by <your name> --ask"
                for item in data["person"])
 
     for col, sid in (("waiting", "W3"), ("verified", "W4"), ("in review", "W1"),
                      ("with a person", "W2"), ("landed", "W5")):
         section = re.search(rf'<section class="column" data-column="{re.escape(col)}">(.*?)</section>', page, re.S)
         assert section and f'data-slice="{sid}"' in section.group(1), (col, sid)
-    assert "<code>ao slice start W2</code>" in page
-    assert "<code>ao harness seen --by &lt;your name&gt; --ask</code>" in page
+    assert "<code>polyctl slice start W2</code>" in page
+    assert "<code>polyctl harness seen --by &lt;your name&gt; --ask</code>" in page
     assert "&lt;script&gt;alert(1)&lt;/script&gt; queued slice" in page
     for forbidden in ("<script", "<form", "<button", "<input"):
         assert forbidden not in page.lower()
@@ -381,7 +381,7 @@ def test_the_pipeline_page_places_each_slice_in_its_column_and_shows_person_step
 def test_serving_pages_and_api_endpoints_writes_nothing_to_the_project_or_home(start, project):
     Path(project["root"], project["mailbox"], URGENT).write_text("# stop W1\n\n## URGENT\n", encoding="utf-8")
     assert not os.path.exists(A.project_registry_path())
-    assert not os.path.exists(os.path.join(project["root"], ".ao", A.PROJECT_KEY_FILE))
+    assert not os.path.exists(os.path.join(project["root"], ".polyctl", A.PROJECT_KEY_FILE))
     before_project = _tree_digest(project["root"])
     before_home = _tree_digest(A.HOME)
 
@@ -394,12 +394,12 @@ def test_serving_pages_and_api_endpoints_writes_nothing_to_the_project_or_home(s
     assert _tree_digest(project["root"]) == before_project
     assert _tree_digest(A.HOME) == before_home
     assert not os.path.exists(A.project_registry_path())
-    assert not os.path.exists(os.path.join(project["root"], ".ao", A.PROJECT_KEY_FILE))
+    assert not os.path.exists(os.path.join(project["root"], ".polyctl", A.PROJECT_KEY_FILE))
 
 
 def test_a_collected_review_leaves_in_review_and_a_verified_slice_waits_in_verified(start, project, monkeypatch):
     root = Path(project["root"])
-    reviews_dir = root / ".ao" / "reviews"
+    reviews_dir = root / ".polyctl" / "reviews"
     reviews_dir.mkdir(parents=True, exist_ok=True)
     review_file = reviews_dir / "R-1700000000002.json"
     review_file.write_text(
@@ -416,7 +416,7 @@ def test_a_collected_review_leaves_in_review_and_a_verified_slice_waits_in_verif
     monkeypatch.setattr(
         A, "pipeline_items",
         lambda cfg: [A.next_item("implementer", "no-review", "no APPROVED review is bound to these bytes",
-                                 "ao review", slice="W1")],
+                                 "polyctl review", slice="W1")],
     )
     data = json.loads(_request(view.port, "/api/pipeline")[2])
     assert [s["id"] for s in data["columns"]["in review"]] == []
@@ -430,7 +430,7 @@ def test_a_collected_review_leaves_in_review_and_a_verified_slice_waits_in_verif
     monkeypatch.setattr(
         A, "pipeline_items",
         lambda cfg: [A.next_item("implementer", "granted", "1 path(s) stand granted on G-1",
-                                 'ao commit -m "<message>"', slice="W1")],
+                                 'polyctl commit -m "<message>"', slice="W1")],
     )
     page = _request(view.port, "/pipeline")[2]
     data = json.loads(_request(view.port, "/api/pipeline")[2])
@@ -458,4 +458,4 @@ def test_a_type_error_inside_load_config_fails_closed_without_recording_the_proj
     assert json.loads(raw) == {"schema_version": 1, "error": "TypeError: malformed config value"}
     assert calls == [False]
     assert not os.path.exists(A.project_registry_path())
-    assert not os.path.exists(os.path.join(project["root"], ".ao", A.PROJECT_KEY_FILE))
+    assert not os.path.exists(os.path.join(project["root"], ".polyctl", A.PROJECT_KEY_FILE))

@@ -2,11 +2,11 @@
 
 The review of RULE-PROPOSALS found three things. The evidence sentence put a first-pass rate measured over the
 reviewed slices under a count of every landed one, so a person read a rate whose denominator was not the one
-the sentence named. A person's decision on a proposal named no person, though ao records the login and whether
+the sentence named. A person's decision on a proposal named no person, though polyctl records the login and whether
 a terminal was attached for every other act it attributes to one. And a review ledger that could not be read
 was shown as no slice having landed.
 """
-from ao import cli, language, lib as A, storage
+from polyctl import cli, language, lib as A, storage
 from tests.test_rule_proposals import CHANGE, WHY, _person, _propose, proposing  # noqa: F401  (a fixture)
 
 

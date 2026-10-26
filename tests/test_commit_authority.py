@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 
 
 def _git(root, *args):
@@ -158,9 +158,9 @@ def test_tree_digest_changes_for_tracked_product_content(project):
 
 def test_verify_record_does_not_invalidate_its_own_tree(project, tmp_path, monkeypatch):
     root = project["root"]
-    verification_ledger = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
+    verification_ledger = os.path.join(root, ".polyctl", "ledger", "verifications.jsonl")
     open(verification_ledger, "w", encoding="utf-8").write("")
-    _git(root, "add", ".ao/ledger/verifications.jsonl")
+    _git(root, "add", ".polyctl/ledger/verifications.jsonl")
     _git(root, "commit", "-q", "-m", "track verification ledger")
 
     argv = [sys.executable, "-c", 'print("gate ok")']
@@ -170,7 +170,7 @@ def test_verify_record_does_not_invalidate_its_own_tree(project, tmp_path, monke
         "profiles": {"quick": ["smoke"]},
         "default_profile": "quick",
     }
-    open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8").write(
+    open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8").write(
         json.dumps(gates)
     )
     monkeypatch.setattr(A, "GATE_LOCK", str(tmp_path / "gate.lock"))
@@ -185,7 +185,7 @@ def test_verify_record_does_not_invalidate_its_own_tree(project, tmp_path, monke
 
 
 def test_gate_lock_liveness_probe_does_not_signal_windows_process(tmp_path, monkeypatch):
-    from ao import procs
+    from polyctl import procs
 
     lock = tmp_path / "gate.lock"
     lock.write_text(json.dumps({"root": "project", "pid": 4242, "at": 1}), encoding="utf-8")
@@ -277,7 +277,7 @@ def test_record_authority_persists_the_complete_grant(project):
         review="review.md",
         reviewer="independent-reviewer",
     )
-    path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     row = json.loads(open(path, encoding="utf-8").read().splitlines()[-1])
     assert row == {
         "previous": None,
@@ -305,7 +305,7 @@ def test_commit_ok_records_the_exact_index_candidate(project, monkeypatch, capsy
     output = capsys.readouterr().out
 
     assert code == 0 and "GRANTED" in output
-    ledger = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    ledger = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     row = json.loads(open(ledger, encoding="utf-8").read().splitlines()[-1])
     assert row["schema"] == 2
     assert row["candidate"]["digest"] == candidate["digest"]
@@ -382,7 +382,7 @@ def _install_passing_gate(project, tmp_path, monkeypatch):
         "profiles": {"quick": ["smoke"]},
         "default_profile": "quick",
     }
-    open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8").write(
+    open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8").write(
         json.dumps(gates)
     )
     monkeypatch.setattr(A, "GATE_LOCK", str(tmp_path / "gate.lock"))
@@ -511,7 +511,7 @@ def test_commit_check_accepts_exact_persisted_grant_without_mutating_ledger(
     root = project["root"]
     _repo_with_change(root)
     candidate = _persist_exact_candidate_grant(project)
-    ledger = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    ledger = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     before = open(ledger, "rb").read()
 
     code = cli.cmd_commit_check(project, SimpleNamespace())
@@ -545,7 +545,7 @@ def test_commit_check_refuses_tampered_review_integrity_without_mutating_ledger(
     _persist_exact_candidate_grant(project)
     review_path = os.path.join(root, project["reviews"], "approved.md")
     _tamper_review(review_path, field)
-    ledger = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    ledger = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     before = open(ledger, "rb").read()
 
     code = cli.cmd_commit_check(project, SimpleNamespace())
@@ -561,7 +561,7 @@ def test_commit_check_refuses_changed_index_without_mutating_ledger(project, cap
     root = project["root"]
     path = _repo_with_change(root)
     _persist_exact_candidate_grant(project)
-    ledger = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    ledger = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     before = open(ledger, "rb").read()
 
     open(path, "w", encoding="utf-8").write("value = 3\n")
@@ -597,7 +597,7 @@ def test_commit_check_refuses_a_broken_authority_chain_without_mutating_it(
     root = project["root"]
     _repo_with_change(root)
     _persist_three_authority_decisions(project)
-    ledger = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    ledger = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     rows = [json.loads(line) for line in open(ledger, encoding="utf-8")]
 
     if mutation == "middle-edit":
@@ -638,7 +638,7 @@ def test_commit_ok_refuses_to_append_to_an_unchained_legacy_ledger(
     candidate = A.index_candidate(root)
     _write_approved_review(project, tree, candidate)
     _allow_commit_prerequisites(monkeypatch, tree, candidate)
-    ledger = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    ledger = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     open(ledger, "w", encoding="utf-8").write(
         '{"granted":false,"token":"legacy"}\n'
     )
@@ -653,8 +653,8 @@ def test_commit_ok_refuses_to_append_to_an_unchained_legacy_ledger(
     assert "could not persist authority grant" in output
     assert "has no 'previous' field" in output
     assert (
-        "legacy ledger — archive .ao/ledger/authority.jsonl and re-run "
-        "ao commit-ok (docs/ledger.md)"
+        "legacy ledger — archive .polyctl/ledger/authority.jsonl and re-run "
+        "polyctl commit-ok (docs/ledger.md)"
     ) in output
     assert "GRANTED" not in output
     assert open(ledger, "rb").read() == before
@@ -670,7 +670,7 @@ def test_digest_surfaces_broken_authority_chain_without_trusting_counts(
     A.record_authority(
         root, True, [], "sha256:second", "V-2", "C-2"
     )
-    ledger = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    ledger = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     rows = [json.loads(line) for line in open(ledger, encoding="utf-8")]
     rows[0]["tree"] = "sha256:tampered"
     with open(ledger, "w", encoding="utf-8") as handle:

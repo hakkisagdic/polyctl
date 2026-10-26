@@ -1,10 +1,10 @@
-"""`ao cost --usd` prices the implementer's tokens from a price table ao ships, and says it is an estimate (USD-COST).
+"""`polyctl cost --usd` prices the implementer's tokens from a price table polyctl ships, and says it is an estimate (USD-COST).
 
-`ao cost` counts spend in the unit a harness bills - credits, tokens - and a token count weighs a
+`polyctl cost` counts spend in the unit a harness bills - credits, tokens - and a token count weighs a
 cache read like an output token though one costs fifty times the other. The adapter declares where
 a usage record names its model and its tokens of each kind (`telemetry.cost.model`, `tokens`) and
 the fields that say it was billed at list prices (`priced_when`); the same reading and the same
-turns as `ao cost` read them, and src/ao/prices.json prices them per million tokens, by model and
+turns as `polyctl cost` read them, and src/polyctl/prices.json prices them per million tokens, by model and
 kind. The figure is labelled an estimate, with the table's version and the day and source of each
 vendor's prices. A model, a kind of token or a rate the table does not price is unknown, never
 zero; a model served free is priced at zero only because the table lists it so; a table with a
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_second_harness_cost import HARNESS, R1, R2, R3, R4, _prompt, _stamp, _text, _world
 from tests.test_subagent_spend import S1, S2, S3, S4, _delegating, _subagents, _world as _delegating_world
 from tests.test_transcript_shape import FIXTURE, _event, _world as _shape_world
@@ -240,9 +240,9 @@ def test_the_estimate_is_labelled_as_one_with_the_tables_version_and_each_vendor
     assert "unknown is never counted as zero" in out
 
 
-# ── the same turns `ao cost` counts, under the same reading ──
+# ── the same turns `polyctl cost` counts, under the same reading ──
 
-def test_tokens_are_read_from_the_turns_ao_cost_counts_in_its_window(project, monkeypatch, tmp_path):
+def test_tokens_are_read_from_the_turns_polyctl_cost_counts_in_its_window(project, monkeypatch, tmp_path):
     now = time.time()
     early, late = _usage(fresh=1_000, five=2_000, read=30_000, written=400), _usage(fresh=7, hour=90, written=5)
     cfg, _ = _world(project, monkeypatch, tmp_path, records=[
@@ -273,7 +273,7 @@ def test_a_subagents_tokens_are_priced_at_its_own_model_once_per_response(projec
     assert _of(tokens, "model-sub") == _by_kind(S1, S2, S3, S4, S1)
 
 
-def test_a_harness_ao_never_shipped_has_its_tokens_priced_through_its_declaration(project, monkeypatch, tmp_path):
+def test_a_harness_polyctl_never_shipped_has_its_tokens_priced_through_its_declaration(project, monkeypatch, tmp_path):
     declared = json.loads(json.dumps(FIXTURE))
     declared["telemetry"]["cost"].update(model="engine", tokens={"input": "tokens.in", "output": "tokens.out"})
     declared["billing"] = {"fallback": {"reading": "peak-per-turn"}}
@@ -307,7 +307,7 @@ def test_an_implementer_billed_in_credits_gets_no_dollar_figure(project, monkeyp
 
     assert A.turn_costs(project, by_model=True)["tokens"] is None
     assert code == 0 and out.startswith("no estimate in US dollars: kiro declares no tokens by model and kind")
-    assert out.rstrip().endswith("`ao cost` counts its spend in its own unit, credit") and "$" not in out
+    assert out.rstrip().endswith("`polyctl cost` counts its spend in its own unit, credit") and "$" not in out
 
 
 def test_a_price_table_holding_a_mistake_prices_nothing(project, monkeypatch, tmp_path, capsys):
@@ -327,7 +327,7 @@ def test_a_price_table_holding_a_mistake_prices_nothing(project, monkeypatch, tm
     assert broken(lambda table, vendor, models: models["model-free"].update(ids=["model-known"])) == [
         "model-known is priced twice, under vendor-a and vendor-a"]
     assert broken(lambda table, vendor, models: table.update(currency="EUR")) == [
-        "`currency` must be USD: `ao cost --usd` estimates US dollars"]
+        "`currency` must be USD: `polyctl cost --usd` estimates US dollars"]
     now = time.time()
     cfg, _ = _world(project, monkeypatch, tmp_path, records=[
         _prompt(now - 60, "write the parser"), *_answer(now - 50, "msg-1", "model-known", BIG)])
@@ -340,7 +340,7 @@ def test_a_price_table_holding_a_mistake_prices_nothing(project, monkeypatch, tm
     assert code == 1 and "`version` must be a whole number from 1" in out and "$" not in out
 
 
-def test_the_table_ao_ships_is_sound_and_prices_the_models_its_adapters_run_by_default():
+def test_the_table_polyctl_ships_is_sound_and_prices_the_models_its_adapters_run_by_default():
     table, problems = A.price_table()
 
     assert problems == [] and table["currency"] == "USD" and table["per_tokens"] == 1_000_000
@@ -356,7 +356,7 @@ def test_the_table_ao_ships_is_sound_and_prices_the_models_its_adapters_run_by_d
 
 # ── the declaration and the command line ──
 
-def test_a_pricing_declaration_ao_cannot_read_whole_is_named_and_prices_nothing():
+def test_a_pricing_declaration_polyctl_cannot_read_whole_is_named_and_prices_nothing():
     shipped = A.load_adapter(HARNESS)
     cost = dict(shipped["telemetry"]["cost"], priced_when=[{"field": "message.usage.speed", "values": "standard"}])
     declared = dict(shipped, telemetry=dict(shipped["telemetry"], cost=cost))
@@ -369,7 +369,7 @@ def test_a_pricing_declaration_ao_cannot_read_whole_is_named_and_prices_nothing(
     assert A.transcript_shape(shipped)["tokens"] is not None and A.transcript_shape(declared)["tokens"] is None
 
 
-def test_usd_and_features_are_two_views_of_ao_cost_and_not_one(capsys):
+def test_usd_and_features_are_two_views_of_polyctl_cost_and_not_one(capsys):
     parser = cli.build_parser()
 
     assert parser.parse_args(["cost", "--usd", "--since", "24h"]).usd is True

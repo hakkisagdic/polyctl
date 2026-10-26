@@ -5,7 +5,7 @@ import subprocess
 import time
 from types import SimpleNamespace
 
-from ao import cli, features as F, lib as A, storage
+from polyctl import cli, features as F, lib as A, storage
 
 
 def test_features_default_on_and_switch(project):
@@ -60,7 +60,7 @@ def _allow_candidate_verification(monkeypatch, candidate):
 
 def test_waiver_is_honoured_by_commit_ok_and_recorded(project, monkeypatch, capsys):
     root = project["root"]
-    b = os.path.join(root, ".ao", "board.md")
+    b = os.path.join(root, ".polyctl", "board.md")
     t = open(b, encoding="utf-8").read()
     open(b, "w", encoding="utf-8").write(t.replace("## running\n", "## running\n- [B7] slice · since: 2026-09-05 10:00\n"))
     candidate = _stage_candidate(root)
@@ -106,7 +106,7 @@ def test_burn_rate_projects_exhaustion(project):
     now = 1_800_000_000
     reset = now + 20 * 86400
     A.record_credit_sample(root, 6000, 10000, reset, account="acct-a", adapter="kiro")
-    p = os.path.join(root, ".ao", "ledger", "credits.jsonl")
+    p = os.path.join(root, ".polyctl", "ledger", "credits.jsonl")
     rows = [json.loads(l) for l in open(p, encoding="utf-8")]
     rows[0]["at"] = now - 2 * 86400
     rows.append({"at": now, "used": 7000, "limit": 10000, "reset_at": reset, "account": "acct-a", "adapter": "kiro"})
@@ -185,7 +185,7 @@ def test_hook_install_roles_are_independent_and_uninstall_preserves_foreign_hook
 
     assert cli.cmd_hooks(project, SimpleNamespace(action="install")) == 1
     output = capsys.readouterr().out
-    assert "AO push-window hook unavailable" in output
+    assert "polyctl push-window hook unavailable" in output
     assert os.path.exists(pre_commit)
     assert open(pre_push, encoding="utf-8").read() == foreign
 
@@ -244,7 +244,7 @@ def test_verdict_without_counts_is_invalid_and_masks_older_approval(project, tmp
 def _legacy_waiver(root, slice_id):
     """A review waiver as ledgers held it before waivers were bounded (#67): catch-up
     reviews the range from its head to the next waiver's."""
-    path = os.path.join(root, ".ao", "ledger", "waivers.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "waivers.jsonl")
     count = len(open(path, encoding="utf-8").read().splitlines()) if os.path.exists(path) else 0
     row = {"event": "waived", "id": f"W-legacy-{slice_id}-{count}", "gate": "review",
            "slice": slice_id, "why": "quota", "by": "h", "at": int(time.time()),
@@ -267,7 +267,7 @@ def test_catchup_reviews_the_landed_range_and_closes_the_waiver(project, tmp_pat
     import sys
     cfg = dict(project, reviewer={"id": "r", "family": "x", "argv": [sys.executable, "-c",
                                   "print('BLOCKER: 0'); print('HIGH: 0'); print('MEDIUM: 0'); print('LOW: 0'); print('VERDICT: APPROVED')", "{prompt}"]})
-    from ao import watchdog as W
+    from polyctl import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: 0)
     # Nothing recorded who wrote a legacy waiver's range; a person names the family (#65).
     assert cli.cmd_catchup(cfg, SimpleNamespace(boundary=None, author_family="author-family", by="A. Person")) == 0
@@ -292,7 +292,7 @@ def _catchup_with_recorded_ranges(project, monkeypatch):
             {"kind": "commit-range", "commits": ns.commits, "author": getattr(ns, "author", None)}, "APPROVED")
         return 0
     monkeypatch.setattr(cli, "cmd_review", fake_review)
-    from ao import watchdog as W
+    from polyctl import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: (_ for _ in ()).throw(AssertionError("no watchdog cycle expected")))
     assert cli.cmd_catchup(project, SimpleNamespace(boundary=None, author_family="author-family", by="A. Person")) == 0
     return seen
@@ -339,7 +339,7 @@ def test_catchup_closes_a_waiver_that_covered_no_commits(project, monkeypatch):
 
     assert seen == [f"{kept['head']}..{_head(root)}"]
     assert A.open_waivers(root) == []
-    ledger = open(os.path.join(root, ".ao", "ledger", "waivers.jsonl"), encoding="utf-8").read()
+    ledger = open(os.path.join(root, ".polyctl", "ledger", "waivers.jsonl"), encoding="utf-8").read()
     assert empty["id"] in ledger and "no commits landed before the next waiver" in ledger
 
 
@@ -360,7 +360,7 @@ def test_catchup_refuses_a_forged_waiver_head_without_a_shell(project, monkeypat
     canary = tmp_path / "pwned"
     forged = {"event": "waived", "id": "W-forged", "gate": "review", "slice": "B7", "why": "x", "by": "h",
               "at": 1, "head": f"HEAD; touch {canary}", "tree": "t"}
-    path = os.path.join(root, ".ao", "ledger", "waivers.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "waivers.jsonl")
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(forged) + "\n")
     storage._record_committed_length(path, 1, storage.chained_row_digest(forged, A.WAIVER_CHAIN))

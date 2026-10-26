@@ -4,7 +4,7 @@ The retrospective review of PROJECT-KEY found project_key falling back to the ba
 registry could not be locked or written: two new projects called `api` both answered `api`, and a push
 window allowed in one opened the other's.
 """
-from ao import lib as A, storage
+from polyctl import lib as A, storage
 from tests.test_project_key import _project, home  # noqa: F401  (the fixture)
 
 
@@ -24,7 +24,7 @@ def test_a_name_the_registry_recorded_stands_when_only_the_projects_own_mark_can
 
     def replace(path, data, *args, **kwargs):
         if path.endswith(A.PROJECT_KEY_FILE):
-            raise OSError("the project's .ao is read-only")
+            raise OSError("the project's .polyctl is read-only")
         return real(path, data, *args, **kwargs)
 
     monkeypatch.setattr(storage, "replace_file_durably", replace)

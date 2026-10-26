@@ -4,20 +4,20 @@ import pathlib
 import re
 from types import SimpleNamespace
 
-from ao import cli, language, lib as A, watchdog as W
+from polyctl import cli, language, lib as A, watchdog as W
 
 
 def _stored(root):
-    return json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))
+    return json.load(open(os.path.join(root, ".polyctl", "config.json"), encoding="utf-8"))
 
 
 def _write(root, cfg):
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in cfg.items() if key != "root"}, fh)
 
 
 def _board_running(root, line):
-    path = os.path.join(root, ".ao", "board.md")
+    path = os.path.join(root, ".polyctl", "board.md")
     text = open(path, encoding="utf-8").read()
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(text.replace("## running\n", f"## running\n{line}\n", 1))
@@ -43,7 +43,7 @@ def test_the_role_table_reassigns_on_the_next_slice_and_refuses_self_review(proj
     assert "takes effect once S1 leaves running" in capsys.readouterr().out
     assert A.load_config(root)["implementer"]["actor"] == "kiro"
 
-    path = os.path.join(root, ".ao", "board.md")
+    path = os.path.join(root, ".polyctl", "board.md")
     text = open(path, encoding="utf-8").read().replace("- [S1] a slice in flight · since: 2026-09-16 09:00\n", "")
     open(path, "w", encoding="utf-8").write(text.replace("## done\n", "## done\n- [S1] a slice in flight\n"))
 

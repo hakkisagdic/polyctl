@@ -4,34 +4,34 @@ The observation layer, working today. Standard library Python only — no instal
 no dependencies, in keeping with `docs/surfaces.md`.
 
 ```bash
-bin/ao projects        # workspaces with a local agent session
-bin/ao status          # one-shot summary
-bin/ao watch           # live panel; leave it in a background terminal
-bin/ao tail -n 5       # recent messages from the implementer's transcript
-bin/ao mail list|read|send
-bin/ao adapters        # registry and verification status
-bin/ao verify          # run the declared gates yourself and record the numbers
-bin/ao doctor          # check this workspace's wiring
+bin/polyctl projects        # workspaces with a local agent session
+bin/polyctl status          # one-shot summary
+bin/polyctl watch           # live panel; leave it in a background terminal
+bin/polyctl tail -n 5       # recent messages from the implementer's transcript
+bin/polyctl mail list|read|send
+bin/polyctl adapters        # registry and verification status
+bin/polyctl verify          # run the declared gates yourself and record the numbers
+bin/polyctl doctor          # check this workspace's wiring
 
-scripts/ao-watchdog --root ~/work/project   # restart a stalled agent, cheaply
+scripts/polyctl-watchdog --root ~/work/project   # restart a stalled agent, cheaply
 ```
 
 Run them from inside the project you are orchestrating, or point at one from
 anywhere with `-C`:
 
 ```bash
-bin/ao -C ~/work/acme-api watch
+bin/polyctl -C ~/work/acme-api watch
 ```
 
-Run from a directory with no project, `ao` says so and lists the workspaces it
+Run from a directory with no project, `polyctl` says so and lists the workspaces it
 can see rather than rendering an empty panel. With no configuration at
-all, `ao` discovers the implementer session by scanning local agent stores for one
-whose workspace matches the current repository — so `bin/ao status` works on the
+all, `polyctl` discovers the implementer session by scanning local agent stores for one
+whose workspace matches the current repository — so `bin/polyctl status` works on the
 first try.
 
 ## Configuration (optional)
 
-`.ao/config.json` in the project root. The documentation shows YAML for
+`.polyctl/config.json` in the project root. The documentation shows YAML for
 readability; these scripts read JSON so they stay dependency-free.
 
 ```json
@@ -70,9 +70,9 @@ Install it as a launchd job so it survives your terminal, your orchestrator
 session and a reboot:
 
 ```bash
-ao -C ~/work/project watchdog install     # every 120s, nudge after 6m idle
-ao -C ~/work/project watchdog status      # is it loaded? recent log lines
-ao -C ~/work/project watchdog uninstall
+polyctl -C ~/work/project watchdog install     # every 120s, nudge after 6m idle
+polyctl -C ~/work/project watchdog status      # is it loaded? recent log lines
+polyctl -C ~/work/project watchdog uninstall
 ```
 
 Run it by hand, or every couple of minutes from launchd/cron. Idle threshold
@@ -83,14 +83,14 @@ defaults to six minutes; `--dry-run` prints the decision without acting.
 A blocked slice must not stop the run: the architect can hit a quota limit and the
 human can be away. Two pieces make that safe.
 
-**A pre-authorised backlog** (`.ao/backlog.md`) lists work whose acceptance
+**A pre-authorised backlog** (`.polyctl/backlog.md`) lists work whose acceptance
 boundary was written in advance. When the implementer hits something needing an
 architectural decision, it parks that slice, leaves a `DECISION REQUIRED` message and
 takes the next backlog item — using authority that already exists rather than
 inventing any. The watchdog's default prompt carries this rule.
 
-**Declared gates** (`.ao/gates.json`) let `ao verify` execute the checks itself
-and write the numbers to `.ao/ledger/verifications.jsonl`. Commit authority is
+**Declared gates** (`.polyctl/gates.json`) let `polyctl verify` execute the checks itself
+and write the numbers to `.polyctl/ledger/verifications.jsonl`. Commit authority is
 granted against that record rather than against the implementer's report, so the
 gate does not depend on a human being awake — while push, PR and marking work
 complete stay human-only, permanently.

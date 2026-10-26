@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-from ao import cli, lib as A
-from ao import watchdog as W
+from polyctl import cli, lib as A
+from polyctl import watchdog as W
 from tests.scenarios import World
 
 
@@ -75,13 +75,13 @@ def test_a_nudge_that_was_never_answered_still_backs_off(world):
 
 def test_the_watchdogs_own_ledgers_are_not_work_and_product_edits_are(project):
     root = project["root"]
-    ledger = os.path.join(root, ".ao", "ledger")
+    ledger = os.path.join(root, ".polyctl", "ledger")
     for name in ("progress.jsonl", "notices.jsonl", "credits.jsonl", "mail.jsonl"):
         with open(os.path.join(ledger, name), "w", encoding="utf-8") as fh:
             fh.write("{}\n")
     with open(os.path.join(root, "product.py"), "w", encoding="utf-8") as fh:
         fh.write("x = 1\n")
-    _git(root, "add", "-f", ".ao/ledger", "product.py")
+    _git(root, "add", "-f", ".polyctl/ledger", "product.py")
     _git(root, "commit", "-q", "-m", "tracked ledgers, as in a project that commits them")
     before = A.work_fingerprint(root)
 
@@ -111,10 +111,10 @@ def test_progress_does_not_record_its_own_ledger_as_editing(project, tmp_path, m
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text("{}\n", encoding="utf-8")
     monkeypatch.setattr(A, "session_paths", lambda cfg: (str(transcript), None))
-    notices = os.path.join(root, ".ao", "ledger", "notices.jsonl")
+    notices = os.path.join(root, ".polyctl", "ledger", "notices.jsonl")
     with open(notices, "w", encoding="utf-8") as fh:
         fh.write("{}\n")
-    _git(root, "add", "-f", ".ao/ledger/notices.jsonl")
+    _git(root, "add", "-f", ".polyctl/ledger/notices.jsonl")
     _git(root, "commit", "-q", "-m", "tracked notices")
 
     A.record_progress(root, project)
@@ -124,16 +124,16 @@ def test_progress_does_not_record_its_own_ledger_as_editing(project, tmp_path, m
     os.utime(notices, (later, later))
     A.record_progress(root, project)
 
-    with open(os.path.join(root, ".ao", "ledger", "progress.jsonl"), encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "ledger", "progress.jsonl"), encoding="utf-8") as fh:
         assert len(fh.readlines()) == 1
 
 
 def test_a_modified_coordination_file_listed_first_is_not_product_dirt(project):
     root = project["root"]
-    notices = os.path.join(root, ".ao", "ledger", "notices.jsonl")
+    notices = os.path.join(root, ".polyctl", "ledger", "notices.jsonl")
     with open(notices, "w", encoding="utf-8") as fh:
         fh.write("{}\n")
-    _git(root, "add", "-f", ".ao/ledger/notices.jsonl")
+    _git(root, "add", "-f", ".polyctl/ledger/notices.jsonl")
     _git(root, "commit", "-q", "-m", "tracked notices")
     with open(notices, "a", encoding="utf-8") as fh:
         fh.write("{}\n")

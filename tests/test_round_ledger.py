@@ -3,13 +3,13 @@ import os
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 
 REVIEWS = "semantic-review"
 
 
 def _running(root, slice_id="R1", since="2026-09-16 09:00"):
-    path = os.path.join(root, ".ao", "board.md")
+    path = os.path.join(root, ".polyctl", "board.md")
     board = open(path, encoding="utf-8").read()
     board = "\n".join(line for line in board.splitlines() if not line.startswith("- ["))
     open(path, "w", encoding="utf-8").write(
@@ -137,10 +137,10 @@ def test_the_digest_counts_only_reviews_that_took_place(project, monkeypatch):
     assert counts == {"total": 2, "approved": 1, "changes": 1, "not_reviewed": 1}
 
 
-def test_only_an_implementer_granted_ao_decide_is_named():
-    from ao import allowlist as AL
-    grant = ["agent", "--allowedTools", "Read,Bash(ao decide:*)"]
+def test_only_an_implementer_granted_polyctl_decide_is_named():
+    from polyctl import allowlist as AL
+    grant = ["agent", "--allowedTools", "Read,Bash(polyctl decide:*)"]
 
     assert AL.problems(grant, role="implementer") == [
-        ("re-specifies a slice, restarting its round budget", "ao decide x --scope s", "Bash(ao decide:*)")]
+        ("re-specifies a slice, restarting its round budget", "polyctl decide x --scope s", "Bash(polyctl decide:*)")]
     assert AL.problems(grant, role="architect") == []

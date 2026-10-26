@@ -61,14 +61,14 @@ Marked from documented behaviour and one local inspection; correct any row you c
 ## The cloud lane
 
 A cloud lane is a lane whose workspace is remote and whose deliverable is a branch. Not built
-yet: ao's lanes are local worktrees ([parallel.md](parallel.md)), and what follows is the design:
+yet: polyctl's lanes are local worktrees ([parallel.md](parallel.md)), and what follows is the design:
 
-<!-- not built: cloud lanes are a design; ao lane start takes no --role or --cloud, and ao has no lanes or queue command -->
+<!-- not built: cloud lanes are a design; polyctl lane start takes no --role or --cloud, and polyctl has no lanes or queue command -->
 ```bash
-ao lane start impl-migrations --role implementer --cloud kiro \
+polyctl lane start impl-migrations --role implementer --cloud kiro \
    --brief "Epic 19 analytics migrations, fixture-only, no schema changes outside src/db"
-ao lanes                       # local and cloud lanes side by side
-ao queue                       # branches waiting to be verified and merged
+polyctl lanes                       # local and cloud lanes side by side
+polyctl queue                       # branches waiting to be verified and merged
 ```
 
 Lifecycle: **dispatch → poll → branch arrives → verify locally → merge queue.**
@@ -111,9 +111,9 @@ work to the cloud and keep the expensive local engine for the work that needs ju
 
 ## Dispatch brief
 
-<!-- not built: ao lane start --cloud belongs to the cloud-lane design above -->
+<!-- not built: polyctl lane start --cloud belongs to the cloud-lane design above -->
 A cloud agent cannot ask a follow-up question cheaply, so the brief carries what a
 conversation would have supplied: the exact acceptance boundary, the files it may touch,
 the gates that will judge it, and the explicit statement that fixture or partial evidence
-does not count as done. In the design, `ao lane start --cloud` refuses a brief without an
-acceptance boundary, for the same reason `ao source import` queues no tracker item without one.
+does not count as done. In the design, `polyctl lane start --cloud` refuses a brief without an
+acceptance boundary, for the same reason `polyctl source import` queues no tracker item without one.

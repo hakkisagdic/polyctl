@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, email
+from polyctl import cli, email
 
 
 @pytest.fixture
@@ -47,7 +47,7 @@ def test_smtp_sends_through_the_users_own_server(conf):
     assert email.send("red", "the queue is empty", root=None, opener=_Server) is True
 
     (message,) = _Server.sent
-    assert message["Subject"] == "[ao/ao] red" and message["To"] == "me@example.test"
+    assert message["Subject"] == "[polyctl/polyctl] red" and message["To"] == "me@example.test"
     assert _Server.instance.calls == [("connect", "smtp.example.test", 587), ("starttls",),
                                       ("login", "me@example.test", "pw")]
     if os.name == "nt":
@@ -70,14 +70,14 @@ def test_a_provider_that_fails_or_is_unknown_is_false_not_an_error(conf):
         email.save_provider("smtp", to="me@example.test")
 
 
-def test_ao_email_setup_saves_smtp_with_the_password_from_the_environment(project, conf, monkeypatch, capsys):
+def test_polyctl_email_setup_saves_smtp_with_the_password_from_the_environment(project, conf, monkeypatch, capsys):
     args = SimpleNamespace(action="setup", provider="smtp", token=None, to="me@example.test",
                            host="smtp.example.test", port=None, user="me@example.test",
-                           password_env="AO_TEST_SMTP_PASSWORD", sender=None, tls=None)
+                           password_env="POLYCTL_TEST_SMTP_PASSWORD", sender=None, tls=None)
     assert cli.cmd_email(project, args) == 2
-    assert "AO_TEST_SMTP_PASSWORD is not set" in capsys.readouterr().out
+    assert "POLYCTL_TEST_SMTP_PASSWORD is not set" in capsys.readouterr().out
 
-    monkeypatch.setenv("AO_TEST_SMTP_PASSWORD", "from-the-environment")
+    monkeypatch.setenv("POLYCTL_TEST_SMTP_PASSWORD", "from-the-environment")
     assert cli.cmd_email(project, args) == 0
 
     saved = json.loads(conf.read_text())
@@ -85,7 +85,7 @@ def test_ao_email_setup_saves_smtp_with_the_password_from_the_environment(projec
     assert email.config()["host"] == "smtp.example.test"
 
 
-def test_ao_email_setup_asks_for_an_account_s_password_at_the_terminal_and_never_without_one(project, conf,
+def test_polyctl_email_setup_asks_for_an_account_s_password_at_the_terminal_and_never_without_one(project, conf,
                                                                                            monkeypatch, capsys):
     """EMAIL-SETUP-PROMPT: the setup text had a person read the password into a variable first, a line that swallowed
     the command pasted after it as the password and left the variable set when it was cut short."""

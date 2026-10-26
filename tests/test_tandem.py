@@ -2,7 +2,7 @@ import json
 import os
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 ACTORS = {
     "kiro": {"adapter": "kiro", "session": "s1", "name": "kiro"},
@@ -17,7 +17,7 @@ def _table(project, kind=None):
     stored.update(actors=ACTORS, roles={"implementer": "kiro", "architect": "fable", "reviewer": "r1"})
     if kind:
         stored["repository"] = {"kind": kind}
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(stored, fh)
     return A.load_config(root)
 

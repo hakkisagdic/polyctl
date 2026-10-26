@@ -1,8 +1,8 @@
-"""ao owns session identity: `auto` resolves to the role's own session, or says why it cannot (SESSION-IDENTITY).
+"""polyctl owns session identity: `auto` resolves to the role's own session, or says why it cannot (SESSION-IDENTITY).
 
-Every `ao init --profile` wrote `session: auto`, and every reader took it for a session's id: right
-after a clean init `ao status` read no transcript, the watchdog had nothing to watch, and `ao tail`,
-`ao cost` and `ao fleet` were blind, while the same store read correctly once the implementer block
+Every `polyctl init --profile` wrote `session: auto`, and every reader took it for a session's id: right
+after a clean init `polyctl status` read no transcript, the watchdog had nothing to watch, and `polyctl tail`,
+`polyctl cost` and `polyctl fleet` were blind, while the same store read correctly once the implementer block
 was deleted. A Claude Code session was never discovered at all, and where the implementer and the
 architect ran Claude Code in one directory, a real wake resumed the implementer's own session as the
 architect, because the architect's session was the newest transcript there. The tests that covered
@@ -20,7 +20,7 @@ import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from ao import cli, language, lib as A, watchdog as W
+from polyctl import cli, language, lib as A, watchdog as W
 from tests.scenarios import World
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
@@ -75,9 +75,9 @@ def _claude_session(cwd, session, age, words=PROMPT, named=None):
 
 
 def _config(root, project, **blocks):
-    """Write the project's config with these role blocks, as a person or `ao init` leaves it on disk."""
+    """Write the project's config with these role blocks, as a person or `polyctl init` leaves it on disk."""
     stored = {key: value for key, value in dict(project, **blocks).items() if key != "root" and value is not None}
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(stored, fh)
 
 
@@ -96,7 +96,7 @@ def _wakes(world):
 
 
 def _init(tmp_path, monkeypatch, name, profile, implementer=None):
-    """`ao init --profile` in a fresh repository, its reviewer probe answering."""
+    """`polyctl init --profile` in a fresh repository, its reviewer probe answering."""
     root = tmp_path / name
     root.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
@@ -122,9 +122,9 @@ def _panel(cfg, monkeypatch, capsys):
 def test_a_kiro_profile_resolves_auto_to_the_workspaces_newest_session_and_status_reads_it(
         project, monkeypatch, tmp_path, capsys):
     root = _init(tmp_path, monkeypatch, "kiro-project", None, implementer="kiro")
-    stored = json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))
+    stored = json.load(open(os.path.join(root, ".polyctl", "config.json"), encoding="utf-8"))
     assert stored["implementer"]["session"] == "auto"
-    assert ".ao/sessions.json" in open(os.path.join(root, ".gitignore"), encoding="utf-8").read().split("\n")
+    assert ".polyctl/sessions.json" in open(os.path.join(root, ".gitignore"), encoding="utf-8").read().split("\n")
     _kiro_session(root, "s-earlier", 3600)
     current = _kiro_session(root, "s-current", 900)
     _kiro_session(str(tmp_path / "another-project"), "s-elsewhere", 5, folder="ws-2")
@@ -142,7 +142,7 @@ def test_a_claude_profile_reads_the_claude_code_session_and_the_architect_does_n
         project, monkeypatch, capsys):
     root = project["root"]
     _config(root, {"project": "proj", "round_budget": 5})
-    # The blocks `ao init --profile claude-codex` writes: implementer and architect both run Claude Code.
+    # The blocks `polyctl init --profile claude-codex` writes: implementer and architect both run Claude Code.
     args = SimpleNamespace(profile="claude-codex", implementer=None, model=None, effort=None, reviewer_model=None)
     assert cli._apply_profile(root, args) == ["implementer", "reviewer", "architect"]
     only = _claude_session(root, "s-only", 1800)
@@ -209,7 +209,7 @@ def test_a_pinned_id_wins_and_a_helpers_session_is_never_a_roles(project, tmp_pa
     _claude_session(root, "s-lead", 1800)
     _claude_session(root, "s-newest", 5)
     # A reviewer runs in a directory of its own outside the repository, however new its session.
-    _claude_session(str(tmp_path / "ao-reviewer-fixture"), "s-reviewer", 1)
+    _claude_session(str(tmp_path / "polyctl-reviewer-fixture"), "s-reviewer", 1)
     cfg = A.load_config(root)
 
     assert (cfg["implementer"]["session"], cfg["architect"]["session"]) == ("s-mine", "s-lead")
@@ -308,7 +308,7 @@ def test_the_recorded_ids_survive_a_new_process(project):
     assert A.load_config(root)["architect"]["session"] == "s-lead"
     assert A.session_records(root)["architect"]["session"] == "s-lead"
     _claude_session(root, "s-newer", 5)               # newer, and the implementer does not hold it either
-    script = ("import json, sys; sys.path.insert(0, sys.argv[1]); from ao import lib as A; "
+    script = ("import json, sys; sys.path.insert(0, sys.argv[1]); from polyctl import lib as A; "
               "cfg = A.load_config(sys.argv[2]); "
               "print(json.dumps([cfg['architect']['session'], cfg['architect']['_session']['how']]))")
 
@@ -346,7 +346,7 @@ def test_fleet_and_projects_list_the_workspaces_a_claude_code_store_keeps(projec
             architect=None)
     _claude_session(root, "s-work", 600)
     # A reviewer's temporary directory is gone once its review ends: no project to watch.
-    _claude_session(str(tmp_path / "ao-reviewer-gone"), "s-review", 5)
+    _claude_session(str(tmp_path / "polyctl-reviewer-gone"), "s-review", 5)
     # A directory whose records name another path is not that path's: its name does not escape from it.
     _claude_session(str(tmp_path / "somewhere-else"), "s-moved", 5, named=str(tmp_path))
     monkeypatch.setattr(A, "agent_pids", lambda root, adapter, headless_only=False: [])

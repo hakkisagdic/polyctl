@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage, watchdog as W
+from polyctl import cli, lib as A, storage, watchdog as W
 from tests.conftest import review_off
 from tests.scenarios import World
 from tests.test_outcomes import _review
@@ -19,7 +19,7 @@ from tests.test_outcomes import _review
     {"gates": {"bad": "x", "ok": {"run": "pytest"}}},
     {"gates": {"ok": {"run": "pytest"}}, "profiles": {"quick": ["missing"]}}])
 def test_c3_doctor_names_unusable_gates(project, spec):
-    path = Path(project["root"], ".ao", "gates.json")
+    path = Path(project["root"], ".polyctl", "gates.json")
     if spec is None:
         path.unlink(missing_ok=True)
     else:
@@ -66,14 +66,14 @@ def test_c3_commands_still_cover(run):
 @pytest.mark.parametrize("lengths", [(8, 12, 16), (8, 12, 16, 64)])
 def test_c4_hash_collisions_preserve_every_live_project(project, tmp_path, monkeypatch, lengths):
     registry = tmp_path / "registry.json"
-    monkeypatch.setenv("AO_PROJECT_REGISTRY", str(registry))
+    monkeypatch.setenv("POLYCTL_PROJECT_REGISTRY", str(registry))
     target = tmp_path / "new" / "api"
-    (target / ".ao").mkdir(parents=True)
+    (target / ".polyctl").mkdir(parents=True)
     digest = hashlib.sha256(os.path.realpath(target).encode("utf-8")).hexdigest()
     held = {}
     for index, key in enumerate(["api"] + ["api-" + digest[:n] for n in lengths]):
         root = tmp_path / str(index) / "api"
-        (root / ".ao").mkdir(parents=True)
+        (root / ".polyctl").mkdir(parents=True)
         held[key] = {"root": str(root)}
     registry.write_text(json.dumps(held), encoding="utf-8")
     key = A.project_key(str(target))
@@ -83,7 +83,7 @@ def test_c4_hash_collisions_preserve_every_live_project(project, tmp_path, monke
 
 def test_c4_retired_project_is_not_a_collision(project, tmp_path, monkeypatch):
     registry = tmp_path / "registry.json"
-    monkeypatch.setenv("AO_PROJECT_REGISTRY", str(registry))
+    monkeypatch.setenv("POLYCTL_PROJECT_REGISTRY", str(registry))
     registry.write_text(json.dumps({"live": {"root": project["root"]},
         "gone": {"root": str(tmp_path / "gone" / Path(project["root"]).name)}}), encoding="utf-8")
     assert A.project_key_collisions() == {}
@@ -97,7 +97,7 @@ def _grant(project, token="C-land"):
 
 def _land(root, token):
     subprocess.run([A.git_binary(), "-c", "core.hooksPath=", "commit", "--allow-empty", "-m",
-                    "land\n\nAo-Grant: " + token], cwd=root, check=True, capture_output=True)
+                    "land\n\nPolyctl-Grant: " + token], cwd=root, check=True, capture_output=True)
     return int(subprocess.check_output([A.git_binary(), "show", "-s", "--format=%ct", "HEAD"], cwd=root))
 
 
@@ -113,8 +113,8 @@ def test_c5_stats_names_an_unreadable_project_and_proposals_name_the_ledger(proj
     _grant(project)
     _land(project["root"], "C-land")
     broken = tmp_path / "broken"
-    (broken / ".ao" / "ledger").mkdir(parents=True)
-    broken_auth = broken / ".ao" / "ledger" / "authority.jsonl"
+    (broken / ".polyctl" / "ledger").mkdir(parents=True)
+    broken_auth = broken / ".polyctl" / "ledger" / "authority.jsonl"
     broken_auth.write_text("bad\n", encoding="utf-8")
     storage._record_committed_length(str(broken_auth), 1, None)
     monkeypatch.setattr(A, "recall_roots", lambda root: [("good", root), ("broken", str(broken))])
@@ -144,7 +144,7 @@ def test_c6_human_waits_are_delivered_without_a_session(project, monkeypatch, tm
 
 def test_c7_work_during_startup_is_not_an_idle_answer(project, monkeypatch, tmp_path):
     cfg = dict(project, implementer={"adapter": "claude-code", "session": "s1", "name": "claude"})
-    Path(project["root"], ".ao", "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    Path(project["root"], ".polyctl", "config.json").write_text(json.dumps(cfg), encoding="utf-8")
     world = World(cfg, monkeypatch, tmp_path)
     world.board("running", "- [S1] slice · since: 2026-09-16 09:00")
     world.transcript_age(900)
@@ -213,7 +213,7 @@ def test_c9_long_decision_request_is_classified(project):
 
 @pytest.mark.parametrize("row", [{}, [], {"item": "B1"}, {"item": [], "digest": "d"}])
 def test_c10_malformed_baseline_refuses_commit(project, monkeypatch, capsys, row):
-    path = Path(project["root"], ".ao", "ledger", "plans.jsonl")
+    path = Path(project["root"], ".polyctl", "ledger", "plans.jsonl")
     path.write_text(json.dumps(row) + "\n", encoding="utf-8")
     storage._record_committed_length(str(path), 1, storage.chained_row_digest(row, A.PLAN_CHAIN) if isinstance(row, dict) else None)
     monkeypatch.setattr(A, "hold_state", lambda root: None)
@@ -227,7 +227,7 @@ def test_c10_plan_chain_detects_tampering(project, damage):
     root = project["root"]
     A.record_plan(root, "B1", "first")
     A.record_plan(root, "B2", "second")
-    path = Path(root, ".ao", "ledger", "plans.jsonl")
+    path = Path(root, ".polyctl", "ledger", "plans.jsonl")
     content = path.read_text(encoding="utf-8")
     path.write_text(content.replace("first", "other") if damage == "edit" else "", encoding="utf-8")
     with pytest.raises(storage.LedgerCorruption):
@@ -236,7 +236,7 @@ def test_c10_plan_chain_detects_tampering(project, damage):
 
 def test_c10_re_admission_is_explicit_and_legacy_prefix_is_kept(project):
     root = project["root"]
-    path = Path(root, ".ao", "ledger", "plans.jsonl")
+    path = Path(root, ".polyctl", "ledger", "plans.jsonl")
     legacy = {"item": "B1", "digest": "first"}
     path.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
     storage._record_committed_length(str(path), 1, storage.chained_row_digest(legacy, A.PLAN_CHAIN))
@@ -250,7 +250,7 @@ def test_c10_re_admission_is_explicit_and_legacy_prefix_is_kept(project):
 def test_c5_no_corrupt_ledger_is_silently_omitted(project, ledger):
     _grant(project)
     _land(project["root"], "C-land")
-    path = Path(project["root"], ".ao", "ledger", ledger + ".jsonl")
+    path = Path(project["root"], ".polyctl", "ledger", ledger + ".jsonl")
     path.write_text("bad\n", encoding="utf-8")
     storage._record_committed_length(str(path), 1, None)
     with pytest.raises(storage.LedgerCorruption):
@@ -267,7 +267,7 @@ def test_c5_landing_time_is_not_grant_time(project, monkeypatch):
 
 
 def test_c10_duplicate_legacy_baseline_is_not_a_readmission(project):
-    path = Path(project["root"], ".ao", "ledger", "plans.jsonl")
+    path = Path(project["root"], ".polyctl", "ledger", "plans.jsonl")
     path.write_text('{"item":"B1","digest":"first"}\n{"item":"B1","digest":"second"}\n', encoding="utf-8")
     storage._record_committed_length(str(path), 2, None)
     with pytest.raises(storage.LedgerCorruption):
@@ -312,7 +312,7 @@ def test_c8_historical_ids_survive_without_a_view(project, source):
         for number in range(210):
             A.mail_ledger_append(root, {"event": "seen", "id": str(number)})
     elif source == "stored-body":
-        store = Path(root, ".ao", "mail", "store")
+        store = Path(root, ".polyctl", "mail", "store")
         store.mkdir(parents=True)
         (store / name).write_text("# first\n", encoding="utf-8")
     else:
@@ -340,7 +340,7 @@ def test_c3_init_refuses_unquotable_gates_cleanly_and_accepts_handwritten_gates(
     child = root / "cash$"
     child.mkdir()
     (child / "pyproject.toml").write_text("", encoding="utf-8")
-    gates = root / ".ao" / "gates.json"
+    gates = root / ".polyctl" / "gates.json"
     content = '{"gates":{"test":{"run":"pytest"}},"profiles":{"quick":["test"]}}\n'
     if existing:
         gates.parent.mkdir()
@@ -368,7 +368,7 @@ def test_c3_doctor_refuses_a_default_profile_with_no_gates(project, profiles, de
         spec["profiles"] = profiles
     if default is not None:
         spec["default_profile"] = default
-    Path(project["root"], ".ao", "gates.json").write_text(json.dumps(spec), encoding="utf-8")
+    Path(project["root"], ".polyctl", "gates.json").write_text(json.dumps(spec), encoding="utf-8")
     assert "gates-unusable" in dict(cli.doctor_problems(project))
 
 

@@ -4,12 +4,12 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
-from ao import cli, lib as A, tiers as T
+from polyctl import cli, lib as A, tiers as T
 from tests.standin import program
 
 
 def _bare(root):
-    json.dump({"project": "proj", "round_budget": 5}, open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8"))
+    json.dump({"project": "proj", "round_budget": 5}, open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8"))
 
 
 def test_profile_writes_role_blocks_and_keeps_existing(project):
@@ -17,16 +17,16 @@ def test_profile_writes_role_blocks_and_keeps_existing(project):
     _bare(root)
     args = SimpleNamespace(profile="claude-codex", implementer=None, model=None, effort=None, reviewer_model=None)
     assert cli._apply_profile(root, args) == ["implementer", "reviewer", "architect"]
-    cfg = json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))
+    cfg = json.load(open(os.path.join(root, ".polyctl", "config.json"), encoding="utf-8"))
     assert cfg["implementer"]["adapter"] == "claude-code" and cfg["implementer"]["model"] == "claude-sonnet-5"
     assert "--model" in cfg["reviewer"]["argv"] and "gpt-6-luna" in cfg["reviewer"]["argv"]
     grant = cfg["architect"]["argv"][-1]
-    assert cfg["architect"]["session"] == "auto" and "Bash(ao status:*)" in grant and "Bash(ao:*)" not in grant
+    assert cfg["architect"]["session"] == "auto" and "Bash(polyctl status:*)" in grant and "Bash(polyctl:*)" not in grant
     # second run: nothing overwritten
     cfg["implementer"]["model"] = "custom"
-    json.dump(cfg, open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8"))
+    json.dump(cfg, open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8"))
     assert cli._apply_profile(root, args) == []
-    assert json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))["implementer"]["model"] == "custom"
+    assert json.load(open(os.path.join(root, ".polyctl", "config.json"), encoding="utf-8"))["implementer"]["model"] == "custom"
 
 
 def test_agy_profile_with_effort(project):
@@ -34,7 +34,7 @@ def test_agy_profile_with_effort(project):
     _bare(root)
     args = SimpleNamespace(profile="agy-codex", implementer=None, model=None, effort="high", reviewer_model=None)
     cli._apply_profile(root, args)
-    cfg = json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))
+    cfg = json.load(open(os.path.join(root, ".polyctl", "config.json"), encoding="utf-8"))
     assert cfg["implementer"] == {
         "adapter": "antigravity",
         "session": "auto",
@@ -103,7 +103,7 @@ def test_every_profile_pairs_shipped_adapters_of_different_families_and_engines_
             fresh = tmp_path / f"fresh-{name}"
             fresh.mkdir()
             agent_argv, why = cli._reviewer_agent(str(fresh), cfg["reviewer"]["argv"])
-            assert why is None and agent_argv[-1].startswith("--agent=ao-reviewer-")
+            assert why is None and agent_argv[-1].startswith("--agent=polyctl-reviewer-")
 
         # Review-time independence check: different families and different engines, independent tier with no opt-in.
         assert roles["implementer"] != roles["reviewer"]
@@ -197,7 +197,7 @@ def test_init_plans_profile_and_failed_reviewer_probe_has_no_side_effects(
     assert _tree_state(root) == before
     assert (root / ".gitignore").read_text(encoding="utf-8") == "owner-rule\n"
     for relative in (
-        ".ao",
+        ".polyctl",
         cli.PROJECT_MARKER,
         ".githooks",
         ".kiro",
@@ -231,7 +231,7 @@ def test_manual_doctor_probes_reviewer_but_scheduled_check_does_not(
 
     monkeypatch.setattr(cli, "_reviewer_probe", failed_probe)
     monkeypatch.setattr(cli, "_doctor_check", lambda probe_cfg: 0)
-    # Nothing installed, as on CI: with an `ao` on PATH the doctor runs every copy of the
+    # Nothing installed, as on CI: with a `polyctl` on PATH the doctor runs every copy of the
     # architect's harness it finds with --version, on whichever machine runs this.
     monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)
 
@@ -276,7 +276,7 @@ def test_init_rejects_oversized_planned_profile_before_probe_or_write(
         cwd=root,
         capture_output=True,
     ).returncode == 1
-    assert not (root / ".ao" / "board.md").exists()
+    assert not (root / ".polyctl" / "board.md").exists()
 
 
 
@@ -337,7 +337,7 @@ def test_init_real_failed_probe_contains_version_discovery_side_effects(
     assert _tree_state(root) == before
     assert tracked.read_text(encoding="utf-8") == "unstaged owner change\n"
     assert not (root / "reviewer-local-write").exists()
-    assert not (root / ".ao").exists()
+    assert not (root / ".polyctl").exists()
     assert not (root / cli.PROJECT_MARKER).exists()
 
 
@@ -356,7 +356,7 @@ def test_init_revalidates_marker_and_config_after_successful_probe(
                     cli.PROJECT_MARKER_BYTES
                 )
             else:
-                config = root / ".ao" / "config.json"
+                config = root / ".polyctl" / "config.json"
                 config.parent.mkdir()
                 config.write_text('{"project":"other"}\n', encoding="utf-8")
             return {
@@ -375,23 +375,23 @@ def test_init_revalidates_marker_and_config_after_successful_probe(
         output = capsys.readouterr().out
 
         expected = (
-            ".ao-project changed while reviewer probe ran"
+            ".polyctl-project changed while reviewer probe ran"
             if changed == "marker"
-            else ".ao/config.json appeared while reviewer probe ran"
+            else ".polyctl/config.json appeared while reviewer probe ran"
         )
         assert expected in output
-        assert not (root / ".ao" / "board.md").exists()
-        assert not (root / ".ao" / "backlog.md").exists()
-        assert not (root / ".ao" / "authority.md").exists()
+        assert not (root / ".polyctl" / "board.md").exists()
+        assert not (root / ".polyctl" / "backlog.md").exists()
+        assert not (root / ".polyctl" / "authority.md").exists()
         assert not (root / ".githooks").exists()
         assert not (root / ".gitignore").exists()
         if changed == "marker":
             assert (root / cli.PROJECT_MARKER).read_bytes() == (
                 cli.PROJECT_MARKER_BYTES
             )
-            assert not (root / ".ao").exists()
+            assert not (root / ".polyctl").exists()
         else:
             assert not (root / cli.PROJECT_MARKER).exists()
-            assert (root / ".ao" / "config.json").read_text(
+            assert (root / ".polyctl" / "config.json").read_text(
                 encoding="utf-8"
             ) == '{"project":"other"}\n'

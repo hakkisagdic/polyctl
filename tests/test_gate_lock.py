@@ -1,12 +1,12 @@
 """The machine gate lock is waited for whoever holds it, except by the run it is held for (GATE-LOCK-SAME-ROOT).
 
-`ao verify` and `ao merge-check` waited for the lock only when another project held it. Held for
-their own project - an implementer's `ao lock -- <suite>` beside the architect's `ao verify` in one
+`polyctl verify` and `polyctl merge-check` waited for the lock only when another project held it. Held for
+their own project - an implementer's `polyctl lock -- <suite>` beside the architect's `polyctl verify` in one
 checkout - they tried to take it, ignored that the take failed and ran a second suite anyway; and two
 runs that looked at a free lock at the same moment both went on the same way
 (docs/audit/2026-09-08-adversarial.md). Now the lock is taken before it is looked at, and a holder is
 waited for whichever project it runs for. The one holder a run goes ahead under is its own: this
-process, already holding it, or a process that started this one, as `ao lock -- ao verify` does.
+process, already holding it, or a process that started this one, as `polyctl lock -- polyctl verify` does.
 """
 import json
 import os
@@ -18,8 +18,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
-from tests.conftest import CALM_AO
+from polyctl import cli, lib as A
+from tests.conftest import CALM_POLYCTL
 
 
 def _git(root, *args):
@@ -33,7 +33,7 @@ def _gates(root):
     command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
     spec = {"gates": {"smoke": {"run": command, "expect": "exit_zero", "timeout": 60}},
             "profiles": {"quick": ["smoke"], "full": ["smoke"]}, "default_profile": "quick"}
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         json.dump(spec, fh)
 
 
@@ -87,7 +87,7 @@ def test_verify_waits_for_a_run_in_its_own_project_and_refuses_when_it_does_not_
                                                                                     other_process, capsys):
     root = project["root"]
     _gates(root)
-    _held(lock, root, other_process)                 # an `ao lock -- <suite>` in this checkout, say
+    _held(lock, root, other_process)                 # a `polyctl lock -- <suite>` in this checkout, say
 
     assert cli.cmd_verify(project, SimpleNamespace(profile="quick", wait=60)) == 2
 
@@ -142,7 +142,7 @@ def test_merge_check_waits_for_a_run_in_its_own_project_and_refuses_when_it_does
     _git(root, "checkout", "-q", "-b", "feature")
     with open(os.path.join(root, "feature.txt"), "w", encoding="utf-8") as fh:
         fh.write("feature\n")
-    _git(root, "add", "feature.txt", ".ao/gates.json")
+    _git(root, "add", "feature.txt", ".polyctl/gates.json")
     _git(root, "commit", "-q", "-m", "feature")
     _git(root, "checkout", "-q", base)
     _held(lock, root, other_process)
@@ -168,22 +168,22 @@ def test_a_verify_inside_a_hold_this_process_already_has_runs_and_leaves_the_loc
     assert not lock.exists()
 
 
-def test_a_verify_started_under_ao_lock_runs_inside_the_lock_its_parent_holds(project):
+def test_a_verify_started_under_polyctl_lock_runs_inside_the_lock_its_parent_holds(project):
     root = project["root"]
     _gates(root)
     # Both processes find their home, and the machine lock in it, in this test's directory.
     env = A.self_child_env(dict(os.environ, HOME=A.HOME, USERPROFILE=A.HOME))
-    ao = [sys.executable, "-m", "ao", "-C", root]
-    # `ao lock` reads the machine, calm as every test's (MACHINE-PRESSURE); the verify under its lock reads none.
-    held = CALM_AO + ["-C", root, "lock", "--wait", "0", "--"]
+    polyctl = [sys.executable, "-m", "polyctl", "-C", root]
+    # `polyctl lock` reads the machine, calm as every test's (MACHINE-PRESSURE); the verify under its lock reads none.
+    held = CALM_POLYCTL + ["-C", root, "lock", "--wait", "0", "--"]
 
-    done = subprocess.run(held + ao + ["verify", "--wait", "0"], cwd=root, env=env,
+    done = subprocess.run(held + polyctl + ["verify", "--wait", "0"], cwd=root, env=env,
                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
 
     assert done.returncode == 0, done.stdout + done.stderr
     assert "waiting up to" not in done.stdout        # it did not wait for the lock its own parent holds
     assert A.latest_verification(root)["passed"] is True
-    assert not os.path.exists(os.path.join(A.HOME, ".ao", "gate.lock"))    # `ao lock` let it go at the end
+    assert not os.path.exists(os.path.join(A.HOME, ".polyctl", "gate.lock"))    # `polyctl lock` let it go at the end
 
 
 def test_only_this_process_and_those_that_started_it_count_as_the_run_a_lock_is_held_for(other_process):
@@ -205,7 +205,7 @@ def test_a_verify_with_no_gates_declared_says_so_without_waiting_for_the_lock(pr
     assert cli.cmd_verify(project, SimpleNamespace(profile=None, wait=60)) == 1
 
     out = capsys.readouterr().out
-    assert "No .ao/gates.json" in out and "waiting up to" not in out
+    assert "No .polyctl/gates.json" in out and "waiting up to" not in out
     assert clock.slept == 0                          # told at once, not after the wait
     assert json.loads(lock.read_text(encoding="utf-8"))["pid"] == other_process
 
@@ -237,7 +237,7 @@ def test_a_verify_with_gates_to_run_still_waits_for_the_lock(project, lock, cloc
 # ---- ANCESTOR-WINDOWS ---------------------------------------------------------------------------
 
 def test_the_platform_names_the_process_that_started_this_one():
-    from ao import procs
+    from polyctl import procs
     assert procs.ppid(os.getpid()) == os.getppid()
     assert A.ancestry(os.getpid()) == (True, None)
     assert A.ancestry("not a pid") == (False, None)
@@ -245,13 +245,13 @@ def test_the_platform_names_the_process_that_started_this_one():
 
 @pytest.mark.skipif(os.name != "nt", reason="Toolhelp is Windows' process list")
 def test_windows_reads_a_parent_from_toolhelp_without_powershell():
-    from ao import procs
+    from polyctl import procs
     assert procs._backend().ppid(os.getpid()) == os.getppid()
 
 
 def test_a_parent_the_platform_does_not_give_is_said_before_the_holder_is_waited_for(
         project, lock, clock, other_process, capsys, monkeypatch):
-    from ao import procs
+    from polyctl import procs
     root = project["root"]
     _gates(root)
     _held(lock, root, other_process)

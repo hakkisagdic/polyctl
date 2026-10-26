@@ -1,10 +1,10 @@
 """The bug hunter's leads on the review pipeline, each read against the code and fixed (LEADS-REVIEW).
 
-ao's read-only bug hunter read src/ao/parts/cli_review.py and left nine leads; every one held:
+polyctl's read-only bug hunter read src/polyctl/parts/cli_review.py and left nine leads; every one held:
 
 - A candidate's diff was decoded with replacement characters, so every byte of it that is not UTF-8 read
   as one U+FFFD and a reviewer approved bytes it was never shown. Such a diff is shown escaped now, whole.
-- `ao ci review` found the review it had recorded by counting the ledger's rows before it ran, which could
+- `polyctl ci review` found the review it had recorded by counting the ledger's rows before it ran, which could
   take another review of the same range, and a ledger it could not read afterwards left the exit at the
   review's, APPROVED among them, with no verdict shown. cmd_review hands back the row it recorded, and
   what cannot be shown is no verdict. The detached run of a submitted review, and a collect of a stand-in's
@@ -15,7 +15,7 @@ ao's read-only bug hunter read src/ao/parts/cli_review.py and left nine leads; e
   two submits at once both counted the reviews in flight before either wrote its own.
 - A reviewer's time was its timeout less the waits asked for, not the time that passed, and a route's time
   was read before it waited for quota headroom: both ran past their deadline.
-- What a reviewer left running when it exited was never stopped, and a version probe ran in ao's own
+- What a reviewer left running when it exited was never stopped, and a version probe ran in polyctl's own
   process group, so its timeout stopped the probe and not what it had started.
 """
 import os
@@ -28,8 +28,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, procs, storage
-from ao.storage import read_chained_jsonl
+from polyctl import cli, lib as A, procs, storage
+from polyctl.storage import read_chained_jsonl
 from tests.standin import program
 from tests.test_ci_review import _ci, _stand_in, repository  # noqa: F401  (repository is a fixture these tests use)
 from tests.test_review_chain import _fake, _repo_with_change
@@ -91,7 +91,7 @@ def test_a_diff_that_is_not_utf8_is_shown_escaped_and_no_two_such_diffs_read_ali
     shown = kept.read_text(encoding="utf-8")
     assert "\ufffd" not in shown
     assert '+x = "\\xff" + "\\\\xfe"' in shown
-    assert shown.index("\n--- ESCAPED") < shown.index("\n--- CANDIDATE DIFF ---\n")    # above it, where ao writes
+    assert shown.index("\n--- ESCAPED") < shown.index("\n--- CANDIDATE DIFF ---\n")    # above it, where polyctl writes
     artefact = os.path.join(root, "semantic-review", _rows(root)[-1]["artefact"])
     with open(artefact, encoding="utf-8") as fh:
         assert A.review_evidence(fh.read())["diff_escaped"] is True
@@ -116,7 +116,7 @@ def test_a_person_is_shown_a_diff_that_is_not_utf8_as_a_reviewer_is(project, cap
     assert "the diff is not UTF-8: it is shown escaped, whole" in out
 
 
-# ---- 6d2874cf711ec870, b7aa9b6736749904: `ao ci review` shows the review it recorded, or gives no verdict -------------
+# ---- 6d2874cf711ec870, b7aa9b6736749904: `polyctl ci review` shows the review it recorded, or gives no verdict -------------
 
 def _record_beside(cfg, args, verdict):
     """Another review of the range `args` names, as the same author's, recorded as a review run beside it would be."""
@@ -164,7 +164,7 @@ def test_ci_gives_no_verdict_for_a_review_it_recorded_and_cannot_show(repository
                                  "--author-family", "writers")
 
     assert code == 3 and outputs["verdict"] == "none"
-    assert "**no verdict**" in summary and "not the file ao recorded" in summary
+    assert "**no verdict**" in summary and "not the file polyctl recorded" in summary
 
 
 def test_an_approved_exit_in_ci_comes_with_the_verdict_it_recorded(repository, monkeypatch, tmp_path):
@@ -429,7 +429,7 @@ def test_a_link_where_the_submission_lock_is_kept_is_refused(project, tmp_path):
     through no link, and nothing is made where it points (LEADS-REVIEW, LOCK-LINKS)."""
     outside = tmp_path / "outside"
     outside.mkdir()
-    reviews = os.path.join(project["root"], ".ao", "reviews")
+    reviews = os.path.join(project["root"], ".polyctl", "reviews")
     os.makedirs(reviews, exist_ok=True)
     try:
         os.symlink(str(outside / "made"), os.path.join(reviews, "submitted.lock"))
@@ -458,14 +458,14 @@ def test_what_a_reviewer_leaves_running_when_it_exits_is_stopped(project, tmp_pa
         child = int(marker.read_text())
         assert attempt["kind"] == "success"
         assert _until(lambda: not A._pid_alive(child)), "the reviewer's child outlived the review"
-        assert f"left 1 process(es) of its group running after it ended: [{child}]; ao stopped them" in _plain(capsys)
+        assert f"left 1 process(es) of its group running after it ended: [{child}]; polyctl stopped them" in _plain(capsys)
     finally:
         _kill_if_left(marker)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a stop signal sent to this process is POSIX's")
 def test_a_stop_signal_during_the_cleanup_waits_for_it_and_comes_after(project, tmp_path, monkeypatch):
-    """The signal handlers were put back before the reviewer's leftovers were stopped: a SIGTERM in between ended ao
+    """The signal handlers were put back before the reviewer's leftovers were stopped: a SIGTERM in between ended polyctl
     with the reviewer's child running. A stop now waits while the leftovers are stopped, and comes after
     (LEADS-REVIEW)."""
     marker = tmp_path / "child.pid"
@@ -501,7 +501,7 @@ def test_a_stop_signal_during_the_cleanup_waits_for_it_and_comes_after(project, 
 @pytest.mark.skipif(os.name == "nt", reason="Windows has no process groups; there taskkill /T stops a probe's tree")
 def test_a_version_probe_that_does_not_answer_is_stopped_with_what_it_started(project, tmp_path):
     marker = tmp_path / "child.pid"
-    probe = program(tmp_path / "bin", "ao-leads-probe",
+    probe = program(tmp_path / "bin", "polyctl-leads-probe",
                     "import subprocess, sys, time\n"
                     "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
                     f"open({str(marker)!r}, 'w').write(str(child.pid))\n"

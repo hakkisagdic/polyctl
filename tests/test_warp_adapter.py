@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from ao import cli, lib as A, skillkit, watchdog as W
+from polyctl import cli, lib as A, skillkit, watchdog as W
 from tests.standin import program
 
 # The two system events a real run wrote first, ids stood in: the failed turn of 2026-10-15 ended on
@@ -30,7 +30,7 @@ FAILED_TURN = ('Error: Response stream finished unexpectedly with internal error
                '"...","code":"daily_token_limit_exceeded"}')
 
 # The run record `oz run get <the id the stream named> --output-format json` printed, its ids stood in:
-# state, duration and usage are what ao reads from it; its words are not in it - `status_message` is
+# state, duration and usage are what polyctl reads from it; its words are not in it - `status_message` is
 # the harness's own summary of the turn.
 RUN_RECORD = {
     "run_id": "run-0001", "task_id": "run-0001",
@@ -80,18 +80,18 @@ def test_the_oz_command_line_is_warp_and_a_run_started_without_a_person_reads_as
     assert A.command_adapter(["oz", "agent", "run", "-p", "the next slice"])["id"] == "warp"
     assert A._headless_argv(["oz", "agent", "run", "-p", "x"]), warp["detect"]["headless"]
     assert A._headless_argv(["oz", "agent", "run", "--prompt=x"]), "a flag with its value attached is the same run"
-    # `oz run list` and `oz run get` read the server's run list: not turns, and `ao hold` and the reaper
+    # `oz run list` and `oz run get` read the server's run list: not turns, and `polyctl hold` and the reaper
     # stop what this answers True for, so a subcommand named `run` must never make one.
     assert not A._headless_argv(["oz", "run", "list"])
     assert not A._headless_argv(["oz", "run", "get", "run-0001"])
 
 
-def test_ao_neither_widens_a_warp_turn_nor_claims_to():
+def test_polyctl_neither_widens_a_warp_turn_nor_claims_to():
     """The adapter names no approval flag, because the CLI has none, so a composed command stays as it was."""
     warp = A.load_adapter("warp")
     assert A.reviewer_eligibility(warp)[0] is False, warp["options"]["trust_none_why"]
     argv = list(warp["send"]["argv"])
-    assert A.pinned_argv(argv, "implementer", adapter=warp) == (argv, []), "ao adds no grant it cannot name"
+    assert A.pinned_argv(argv, "implementer", adapter=warp) == (argv, []), "polyctl adds no grant it cannot name"
 
 
 def test_a_completed_warp_turn_is_read_from_the_run_record_its_stream_names():
@@ -135,7 +135,7 @@ def test_what_was_never_measured_stays_declared_unread():
     assert "record" not in warp["transcript"] and "sessions" not in warp
     assert A.session_store_reachable(warp) is False
     assert A.store_sessions("warp", "/tmp/any-checkout") == []
-    assert "answer_record" not in warp["options"], "the review path's reader would read what ao never saw"
+    assert "answer_record" not in warp["options"], "the review path's reader would read what polyctl never saw"
     shape = A.transcript_shape(warp)
     for line in (RUN_EVENTS + "\n" + AGENT_EVENT).splitlines():
         event = json.loads(line)
@@ -148,7 +148,7 @@ def test_what_was_never_measured_stays_declared_unread():
                               RUN_EVENTS + "\n" + AGENT_EVENT) is None
 
 
-def test_the_store_ao_mapped_belongs_to_the_app_and_not_to_a_run_ao_started():
+def test_the_store_polyctl_mapped_belongs_to_the_app_and_not_to_a_run_polyctl_started():
     """The app's own conversations are a different surface from a CLI run's, and no store is declared over them."""
     warp = A.load_adapter("warp")
     assert "warp.sqlite" in warp["notes"], "the mapped store is written down, not quietly dropped"
@@ -182,7 +182,7 @@ def test_init_with_only_oz_uses_the_files_only_setup(project, tmp_path, monkeypa
     output = capsys.readouterr().out
     assert "No MCP-capable agent detected" in output
     assert "registered:" not in output
-    assert (Path(project["root"]) / ".ao" / "PLAYBOOK.md").is_file()
+    assert (Path(project["root"]) / ".polyctl" / "PLAYBOOK.md").is_file()
     assert not (Path(project["root"]) / ".warp").exists()
     assert not (Path(project["root"]) / ".mcp.json").exists()
     assert "warp" not in dict(skillkit.setup_adapters(project["root"]))
@@ -238,7 +238,7 @@ def test_warp_skills_are_harness_files_and_product_changes_remain_reviewable(pro
 @pytest.mark.parametrize("directory", ["/Applications/Warp.app/Contents/Resources/bin",
                                       "~/Applications/Warp.app/Contents/Resources/bin"])
 def test_adapters_reports_the_off_path_warp_bundle_as_installed(project, tmp_path, monkeypatch, capsys, directory):
-    """Availability must search where ao starts programs, including bundles (WARP-ADAPTER)."""
+    """Availability must search where polyctl starts programs, including bundles (WARP-ADAPTER)."""
     bundle = tmp_path / "Warp.app" / "Contents" / "Resources" / "bin"
     executable = program(bundle, "oz", "raise AssertionError('oz must never run')\n")
     expanduser = os.path.expanduser

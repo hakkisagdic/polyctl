@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 
 NAMES = ["20260916-0900-fable-to-kiro-NOTE-a.md", "20260916-0901-fable-to-kiro-NOTE-b.md",
          "20260916-0902-fable-to-kiro-NOTE-c.md"]
@@ -15,7 +15,7 @@ def _mode(project, mode):
     root = project["root"]
     stored = {key: value for key, value in project.items() if key != "root"}
     stored["mail"] = {"store": mode}
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(stored, fh)
     return A.load_config(root)
 
@@ -44,8 +44,8 @@ def test_the_derived_queue_answers_exactly_as_deletion_did(project, mode):
     assert sorted(os.listdir(os.path.join(root, "agent-mail"))) == [NAMES[0], NAMES[2]]
 
 
-def test_mail_ao_writes_is_in_the_store_before_any_reconcile(project):
-    """MESSAGE-STORE-2: mail ao wrote reached the store at the next reconcile, and a view file removed before then
+def test_mail_polyctl_writes_is_in_the_store_before_any_reconcile(project):
+    """MESSAGE-STORE-2: mail polyctl wrote reached the store at the next reconcile, and a view file removed before then
     took its message with it."""
     root = project["root"]
     cfg = _mode(project, "append-only")
@@ -58,7 +58,7 @@ def test_mail_ao_writes_is_in_the_store_before_any_reconcile(project):
 def test_a_body_stored_without_its_row_is_taken_in_at_the_next_reconcile(project, monkeypatch):
     """MESSAGE-STORE-3: the body was stored and its row's append failed; with the view removed before the next
     reconcile, the message was gone from the queue and its body orphaned in the store."""
-    from ao import storage
+    from polyctl import storage
     root = project["root"]
     cfg = _mode(project, "append-only")
     append = A._mail_store_append
@@ -81,7 +81,7 @@ def test_a_body_stored_without_its_row_is_taken_in_at_the_next_reconcile(project
 def test_a_compaction_cut_short_keeps_the_body_and_writes_its_archive_durably(project, monkeypatch):
     """MESSAGE-STORE-2: the archive was written without reaching the disk before the body became its stub, and a
     compaction whose record did not land left a stub the next one wrote over the archive."""
-    from ao import storage
+    from polyctl import storage
     root = project["root"]
     cfg = _mode(project, "append-only")
     _write(root, cfg, NAMES[0], body="# the words\n\nthe original words\n")
@@ -113,7 +113,7 @@ def test_the_doctor_names_a_mail_store_it_cannot_read(project):
     for name in NAMES[:2]:
         _write(root, cfg, name)
     _ack(cfg, NAMES[0])
-    ledger = os.path.join(root, ".ao", "ledger", "mail-store.jsonl")
+    ledger = os.path.join(root, ".polyctl", "ledger", "mail-store.jsonl")
     lines = open(ledger, encoding="utf-8").readlines()
     with open(ledger, "w", encoding="utf-8") as fh:
         fh.writelines(lines[:-1])
@@ -150,7 +150,7 @@ def test_a_compacted_stub_still_answers_unhandled_and_brings_its_body_back(proje
 
     assert sorted(A.compact_messages(root, 0, now=time.time() + 10)) == sorted(NAMES[:2])
 
-    assert open(A._store_path(root, NAMES[0]), "rb").read().startswith(b"ao-mail-stub v1\n")
+    assert open(A._store_path(root, NAMES[0]), "rb").read().startswith(b"polyctl-mail-stub v1\n")
     assert A.mailbox(root, "agent-mail") == [NAMES[0]]
     os.remove(os.path.join(root, "agent-mail", NAMES[0]))
     A.reconcile_mail_ledger(root, cfg)
@@ -165,7 +165,7 @@ def test_a_handling_record_cut_from_the_store_fails_closed(project):
         _write(root, cfg, name)
     A.reconcile_mail_ledger(root, cfg)
     _ack(cfg, NAMES[0])
-    ledger = os.path.join(root, ".ao", "ledger", "mail-store.jsonl")
+    ledger = os.path.join(root, ".polyctl", "ledger", "mail-store.jsonl")
     lines = open(ledger, encoding="utf-8").readlines()
 
     with open(ledger, "w", encoding="utf-8") as fh:

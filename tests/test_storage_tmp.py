@@ -1,7 +1,7 @@
-"""ao writes a file whole through a temporary beside it, and an agent can leave a link where that temporary goes.
+"""polyctl writes a file whole through a temporary beside it, and an agent can leave a link where that temporary goes.
 
 `replace_file_durably` without a mode named its temporary `.<name>.<pid>.tmp` and opened it to truncate, following a
-link: an agent that put a link at that name for a likely pid in a folder ao writes - `.ao/` among them - had ao
+link: an agent that put a link at that name for a likely pid in a folder polyctl writes - `.polyctl/` among them - had polyctl
 truncate and write the link's target. Every temporary is now made under a name no file had, with O_EXCL and, where
 the platform has it, O_NOFOLLOW, as one for a credential already was (STORAGE-TMP).
 """
@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from ao import lib as A, storage
+from polyctl import lib as A, storage
 
 
 def _link(target, at):
@@ -65,12 +65,12 @@ def test_a_file_keeps_the_mode_it_had(tmp_path):
 
 @pytest.mark.skipif(not hasattr(os, "symlink") or os.name == "nt", reason="a link the test makes needs POSIX symlinks")
 def test_the_notice_times_fold_writes_through_no_link_left_at_its_old_temporary_name(project, tmp_path):
-    """The fold of notice times wrote `.ao/ledger/.notice-times.json.<pid>.tmp`, opened to truncate: a link an agent left
+    """The fold of notice times wrote `.polyctl/ledger/.notice-times.json.<pid>.tmp`, opened to truncate: a link an agent left
     there for this pid had its target - a file of the person's - written over (STORAGE-TMP)."""
     root = project["root"]
     victim = tmp_path / "persons-file"
     victim.write_text("the person's own\n", encoding="utf-8")
-    link = os.path.join(root, ".ao", "ledger", f".notice-times.json.{os.getpid()}.tmp")
+    link = os.path.join(root, ".polyctl", "ledger", f".notice-times.json.{os.getpid()}.tmp")
     os.symlink(str(victim), link)
 
     A.record_notice(root, "a notice", "body", sent=False, key="k")
@@ -82,10 +82,10 @@ def test_the_notice_times_fold_writes_through_no_link_left_at_its_old_temporary_
 @pytest.mark.skipif(not hasattr(os, "symlink") or os.name == "nt", reason="a link the test makes needs POSIX symlinks")
 def test_the_checkpoint_store_writes_through_no_link_left_at_its_old_temporary_name(tmp_path, monkeypatch):
     """The ledger checkpoint store was written through `<store>.<pid>.tmp`, opened to truncate: with
-    AO_LEDGER_CHECKPOINTS naming a store in a folder an agent writes, a link left at that name had its target - a file
+    POLYCTL_LEDGER_CHECKPOINTS naming a store in a folder an agent writes, a link left at that name had its target - a file
     of the person's - written over (STORAGE-TMP)."""
     store = tmp_path / "checkpoints.json"
-    monkeypatch.setenv("AO_LEDGER_CHECKPOINTS", str(store))
+    monkeypatch.setenv("POLYCTL_LEDGER_CHECKPOINTS", str(store))
     victim = tmp_path / "persons-file"
     victim.write_text("the person's own\n", encoding="utf-8")
     os.symlink(str(victim), f"{store}.{os.getpid()}.tmp")

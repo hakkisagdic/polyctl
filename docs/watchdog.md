@@ -1,6 +1,6 @@
 # The watchdog, on the operating table
 
-The watchdog is the part of ao that runs when nobody is looking, so every one of
+The watchdog is the part of polyctl that runs when nobody is looking, so every one of
 its faults is a stall nobody notices. This page is the surgery: what it
 guarantees, how it decides, every fault it has had, and the instruments for
 looking inside a running one.
@@ -13,7 +13,7 @@ nothing else:
 1. **It never nudges an implementer that is working, waiting, or held.** Working
    is measured by live turns (not processes, not shells that mention the agent).
    Waiting is a standing request with nothing newer addressed to the implementer
-   and nothing queued. Held is `.ao/hold`. Where the platform cannot read its
+   and nothing queued. Held is `.polyctl/hold`. Where the platform cannot read its
    process table nothing is measured, so the cycle starts no turn, wakes nobody and
    reaps nothing, and tells a person which platform and why.
 2. **It counts only agents.** A candidate process is a writer only when an agent
@@ -33,19 +33,19 @@ nothing else:
    remembered pid, lock file, or declaration. Absence the process table could not
    measure is not absence: no architect is woken, and a notice that would wait for
    one goes to a person instead, saying why (`architect_hold_reason` answers with
-   the code `process-table`). Headless and AO-helper trees do
-   not count as human presence; a fresh process-start-validated AO helper tree
+   the code `process-table`). Headless and POLYCTL-helper trees do
+   not count as human presence; a fresh process-start-validated polyctl helper tree
    registered specifically as `architect` prevents two watchdog helpers. Process
    exit releases both checks on the next tick, and dry-run reports the same
    suppression decision as a live cycle.
 6. **It refills.** An empty queue with an idle implementer wakes the architect
    to refill, with or without a source bound, at most every thirty minutes.
 7. **Every decision is traceable.** Each cycle records its measurements and the
-   ordered verdicts to `~/.ao/cycles-<project>.jsonl`; `ao watchdog explain`
+   ordered verdicts to `~/.polyctl/cycles-<project>.jsonl`; `polyctl watchdog explain`
    shows the same for a dry cycle now.
 8. **Alarms follow a policy**, not a mood — see below and [alarms.md](alarms.md).
 9. **It proves it is alive.** A heartbeat every cycle; siblings check each
-   other's; `ao doctor` shows the last tick. The doctor job pages a heartbeat that
+   other's; `polyctl doctor` shows the last tick. The doctor job pages a heartbeat that
    stopped, and gives a watchdog whose job came back with its own one cycle first.
 10. **It comes back quietly.** A cycle that follows more than
     `watchdog.resume_gap_hours` without one is a resume: what stands is named once, in
@@ -65,7 +65,7 @@ Order matters: each guard sees only what the ones above left standing.
 
 | # | guard | measures | verdict when it fires |
 |---|---|---|---|
-| −1 | hold | `.ao/hold` | stand down; red after four hours |
+| −1 | hold | `.polyctl/hold` | stand down; red after four hours |
 | −1b | slice budget | the running run's minutes, and the implementer's spend in the unit its adapter records, since its newest recorded move to running | past `slice_budget_minutes` or `slice_budget_spend`, or missing a reading it needs: park the implementer's running items with `needs: budget (…)` and tell the architect — see [below](#a-slice-past-its-budget) |
 | 0 | working here | orphans swept, live turns counted by root | stand down while a turn is live; reap a turn silent past 3× idle, by process group, and stand down and tell a person while what it reaped still runs (`reap-survived`); where the process table cannot be read, stand down and tell a person (`process-table-unreadable`) |
 | 1 | idle | the implementer's last write, a subagent's included, vs `--idle-minutes` | not idle yet: stand down |
@@ -88,24 +88,24 @@ condition be reported again with a new mail ID. Its envelope keeps the anomaly's
 identity, so a delivery suffix such as `-2.md` does not produce another report on
 every cycle while it remains unprocessed (TRIAGE-2-MEDIUM).
 
-*In ao since slice HARNESS-CONFIG: a cycle names to a person each change to what a harness reads from
+*In polyctl since slice HARNESS-CONFIG: a cycle names to a person each change to what a harness reads from
 the tree that nobody has seen, under one alarm, `harness-config`, that rings once for what the changes
 hold and climbs the ladder while they stand, whether or not the tree is held. Reports and alarms go on
 as before; only what would start a harness here waits: the architect's wake and refill, the nudge and
 the bug hunt each read the changes again right before they start, and stand down while one stands
 unseen or cannot be read, with the reason in the cycle's trace. A person reads them with
-`ao harness seen --by <name>` ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).
+`polyctl harness seen --by <name>` ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).
 The architect's own sessions are safest in a checkout of their own, where no agent writes.*
 
-*In ao since slice TURN-ARGV: the nudge is composed from the adapter the package ships, never from a user's or
+*In polyctl since slice TURN-ARGV: the nudge is composed from the adapter the package ships, never from a user's or
 a project's layer, and each wake, refill and nudge is checked against that adapter before it starts - its
 program found as that harness's, no value from the role's block or session that reads as a flag, no grant
-beyond the one ao composes for the role from it. A refused turn starts nothing and is named to a person once,
+beyond the one polyctl composes for the role from it. A refused turn starts nothing and is named to a person once,
 `turn-refused:<role>`; a change to what a role's block says of its command holds every turn as harness
 configuration nobody has seen, judged by the command the cycle composed
 ([safety.md](safety.md#the-command-a-turn-starts-with-is-the-packages-not-the-trees)).*
 
-*In ao since slice ROUTE-ARGV: a change to the reviewer's routes or to `hunter.argv` is harness
+*In polyctl since slice ROUTE-ARGV: a change to the reviewer's routes or to `hunter.argv` is harness
 configuration nobody has seen too, and holds every turn and the hunt until a person reads it. A wake and a
 refill ask whether their command is accepted, and refuse a program inside the repository, before they look
 for the program, which asks each candidate its version and so runs it; no candidate inside the tree is
@@ -130,13 +130,13 @@ invariant; the old oracle incorrectly rejected that healthy cycle (TRIAGE-3-LOW)
 ## One agent, more than one queue
 
 An implementer can hold work in two projects: a primary one and a secondary one named in
-the primary's config, `"secondary": [{"root": "…", "name": "ao"}]`. Three rules follow
+the primary's config, `"secondary": [{"root": "…", "name": "polyctl"}]`. Three rules follow
 from the agent being one agent.
 
 - **Presence is the agent's.** When the implementer's transcript in a secondary project
   moved within the idle window, it is working, whatever this tree's transcript says: the
   watchdog does not nudge it back. When several secondary transcripts are fresh, the
-  most recently written one is named; ties keep configuration order. `ao status`
+  most recently written one is named; ties keep configuration order. `polyctl status`
   names it while the primary session is slowing, stopped or idle. On
   2026-09-07 the primary's watchdog nudged an agent that was working elsewhere.
 - **An empty queue here is not an empty queue.** With nothing READY in the primary and no
@@ -155,7 +155,7 @@ one second still reset backoff.
 
 ## A slice parked on quota
 
-*In ao since slice QUOTA-PARK: a usage limit that stops the implementer mid-slice parks the
+*In polyctl since slice QUOTA-PARK: a usage limit that stops the implementer mid-slice parks the
 slice; it used to read as an agent ignoring its nudges. Two readings say the implementer stopped
 on its limit, and the newer decides: its transcript, when its newest words are a reply its
 harness wrote in the model's place (`transcript.messages.harness_replies` in the adapter), and
@@ -190,7 +190,7 @@ The board is the park's face and the watchdog's state its memory, and the board 
 the memory is lost: items blocked on quota with no park in the state - a state file torn or
 deleted - are parked again on the stop read now, and resumed when nothing read says the limit
 stands.
-`ao board` shows the parked items and when they come back, and `ao watchdog explain` names the
+`polyctl board` shows the parked items and when they come back, and `polyctl watchdog explain` names the
 park as the verdict. An item someone takes off `blocked` ends the park, and nothing is moved back
 for it. The nudges that died on the limit before it was read no longer count toward "agent
 stuck": a park that ends forgets the backoff they ran up, a nudge that dies on the limit is told
@@ -199,29 +199,29 @@ restart. The park's alarm is raised every cycle it stands and climbs the ladder
 ([alarms.md](alarms.md)). The quota guard (4) still reads the provider's window through keyflip
 where it is installed; a park needs no keyflip.
 
-*In ao since slice QUOTA-PARK-2: a parked item keeps the `needs:` it had before the park on its board line,
+*In polyctl since slice QUOTA-PARK-2: a parked item keeps the `needs:` it had before the park on its board line,
 as `held-needs:`, and gets it back when the park ends, where only the watchdog's state kept it: a park the
 state lost - torn or deleted - and read back from the board resumed its items without it. A park made
 again on a fresh stop after the state lost it keeps the `held-needs:` its items' lines hold.*
 
-*In ao since slice SLICE-LIFECYCLE: each move a park makes, and each one its end makes, is a line in
+*In polyctl since slice SLICE-LIFECYCLE: each move a park makes, and each one its end makes, is a line in
 the slice ledger by `watchdog`, with why ([ledger.md](ledger.md#slices)). The park moves on the reading
 of the board it was decided on: a board a hand changed meanwhile - a slice landed by hand while keyflip
 was asked - moves nothing, and the cycle stands down, saying so, and decides again on the next.*
 
 ## A slice past its budget
 
-*In ao since slice SLICE-BUDGET: a slice can be given a budget - minutes of one run
+*In polyctl since slice SLICE-BUDGET: a slice can be given a budget - minutes of one run
 (`slice_budget_minutes`) and implementer spend (`slice_budget_spend`, in the unit the adapter's
 transcript records) - and a run that spends past either, or is missing a reading its budget needs,
-is parked once `.ao/hold` is clear, before an active turn, idleness, or a missing session, and
+is parked once `.polyctl/hold` is clear, before an active turn, idleness, or a missing session, and
 nothing after it in the cycle runs for a parked slice.
 Because the implementer runs in the project worktree, the guard reads the tightest positive cap
-fresh each cycle across `.ao/config.json`, committed `HEAD:.ao/config.json` (a git read that fails
+fresh each cycle across `.polyctl/config.json`, committed `HEAD:.polyctl/config.json` (a git read that fails
 reads as no committed cap), and the machine settings: a person widens a cap, or switches it off
 with `0`, where it is set. A cap the implementer cannot move is the machine settings' cap (outside
-the tree); as a known limit, when the only cap is in an uncommitted `.ao/config.json` the
-implementer can widen or zero it, and a cap committed in `.ao/config.json` counts while `HEAD`
+the tree); as a known limit, when the only cap is in an uncommitted `.polyctl/config.json` the
+implementer can widen or zero it, and a cap committed in `.polyctl/config.json` counts while `HEAD`
 shows it and is no guard against an implementer that moves `HEAD` or breaks the git read (a budget
 is a cost guard, not a gate, and neither reaches a gate outcome under
 [threat-model.md](threat-model.md)). The run starts at the
@@ -235,8 +235,8 @@ spend that overlapping running slices make unattributable (`spend cannot be attr
 usage the adapter does not report for a spend cap (`adapter … declares no transcript usage telemetry`).
 It never reads a missing reading as zero or as within budget. The park writes
 `needs: budget (31m of 30m)` or `needs: budget (spent 7.5 credit of 5)` - or the missing reading -
-moves the item to `blocked` by the watchdog, and tells the architect. ao never resumes it: the
-implementer may not lift a watchdog's block, and only the architect's or a person's `ao slice start`
+moves the item to `blocked` by the watchdog, and tells the architect. polyctl never resumes it: the
+implementer may not lift a watchdog's block, and only the architect's or a person's `polyctl slice start`
 gives it more, starting the run the budget counts from anew. A spend budget reads the implementer's
 transcript from the slice's start, counting per-response and per-step usage records written from that
 start onwards and charging in full a whole-turn usage summary whose turn opened before the start and
@@ -246,7 +246,7 @@ Until a spend budget is set, and when no budget is set, no transcript is read.*
 
 ## The architect at its usage limit
 
-*In ao since slice ARCHITECT-WAKE-QUOTA: a wake that stopped on the architect's usage limit is not
+*In polyctl since slice ARCHITECT-WAKE-QUOTA: a wake that stopped on the architect's usage limit is not
 started again before that limit resets, read the way the implementer's quota handling reads it,
 and the one notice a report wake's stop rings says when the wakes start again, with the date when
 that is a day or more away.*
@@ -264,7 +264,7 @@ until the reset, and a refill's holds the refills. The block ends at the later o
   block at once, and the architect could be woken again within minutes, days before its week was
   over.
 - **What the machine reads of the provider.** The implementer's quota gate and an account rotation
-  read keyflip's window for a provider, kept in `~/.ao/quota.json` by the quota command the adapters
+  read keyflip's window for a provider, kept in `~/.polyctl/quota.json` by the quota command the adapters
   declare. The wake reads the same reading, for the provider its adapter's `quota` block names
   (`"quota": {"provider": "claude"}`). When that window is spent, at `quota.block_percent`, the reset
   it states - `resets in 3d 4h` for a week - holds the wake as well. A window with headroom stopped
@@ -274,7 +274,7 @@ With no reset known - a stop that names none, and no spent window read - the blo
 `architect.quota_window_hours` after the stop, as it always did: a reading only ever moves the end
 later.
 
-*In ao since slice ARCHITECT-WAKE-QUOTA-2: a weekly or monthly limit that names no reset held each wake
+*In polyctl since slice ARCHITECT-WAKE-QUOTA-2: a weekly or monthly limit that names no reset held each wake
 one short window, so the architect was woken again and again before its period was over. Each wake in a
 row that stops on one now waits twice as long as the one before - one window, then two, then four - and
 never longer than the period the stop names; a stop that names its reset breaks the run.*
@@ -283,7 +283,7 @@ A report wake's stop is told in one notice, `architect at quota`: "wakes are hel
 the clock time when that is within a day and the date as well when it is further away. It rings
 once, climbs the ladder and is held quiet until that end ([alarms.md](alarms.md)), and it is told
 again only when the end moves, as when a stop on the five-hour window is followed by the week's.
-`ao doctor` names the same end, and a refill that waits names its own in the cycle's trace.
+`polyctl doctor` names the same end, and a refill that waits names its own in the cycle's trace.
 
 ## Fault catalog
 
@@ -299,16 +299,16 @@ test that would fail if it came back.
 | F5 | spinning undetected | idle guard sees a busy transcript | progress ledger, `spinning()` | — | #11 |
 | F6 | notification storm; "reported to the architect" that never was | no rate limit, wrong audience | keyed windows, audience routing, honest text | test_watchdog_cycle (storm) | #12 |
 | F7 | architect never woken | gated on the implementer's pid and on the notify throttle | `arch_alive`, wake on unprocessed reports, `architect_present` | — | #13 |
-| F8 | woken architect edited ao and built a runaway | it had Write/Edit; watchdog read its own anomalies as reports | tool allowlist, `ao note`, exclude own outbox | test_mail (anomalies) | #19 |
-| F9 | `ao hold` killed the owner's live sessions | hold stopped every process in the tree | headless-only hold and reaper | — | #20 |
-| F10 | implementer refused to write for 3.5 h over four "writers" | reaper killed the wrapper only; children orphaned; single-writer rule counted them | kill by process group; orphans by shape; `ao writers` | test_processes | #21 |
+| F8 | woken architect edited polyctl and built a runaway | it had Write/Edit; watchdog read its own anomalies as reports | tool allowlist, `polyctl note`, exclude own outbox | test_mail (anomalies) | #19 |
+| F9 | `polyctl hold` killed the owner's live sessions | hold stopped every process in the tree | headless-only hold and reaper | — | #20 |
+| F10 | implementer refused to write for 3.5 h over four "writers" | reaper killed the wrapper only; children orphaned; single-writer rule counted them | kill by process group; orphans by shape; `polyctl writers` | test_processes | #21 |
 | F11 | eighty identical reports, eighty anomalies, forty failed wakes | stale `claude` first on PATH; wake output never read; own mail counted as open work; anomaly per file | `resolve_binary`; `wake_error`; filtered `open_work`; `waiting_on_architect`; report folding; grouped anomalies | test_wake, test_guards, test_mail | #22 |
 | F12 | thirteen minutes of "1 turn already running" with the implementer idle | the architect's own monitor shell, cwd in the repo, mentioned the agent | `_is_agent_process` on the exact argument vector: binary on the command line, not a mention; sibling binaries must be executables | test_processes | #23, #25 |
 | F13 | writer check timed out after 120 s | one `lsof` per candidate pid, hundreds of candidates | platform process API via ctypes (`procs.py`, psutil's method): whole table in 0.3 s | test_processes, test_procs | #25 |
 | F14 | round budget kept firing after the slice was re-specified | rounds counted from the board's `since:` only | budget restarts at the latest scoped architect decision | test_guards | — |
 | F15 | empty queue never triggered a refill | refill required a bound source | refill without a source when the queue is empty | — | — |
 | F16 | architect at quota: wakes failed, and the desktop app resumed the session on its own | no notion of the architect's quota; a second resume path nobody modelled | `wake_error` kind `quota` → wait until reset, orange once; resume rule in the architect's standing instructions | test_wake | — |
-| F17 | eleven hours of orange nobody saw | no channel beyond the desktop and an unconfigured bot | the ladder: orange → red (e-mail) after an hour; resolved notices; `ao doctor` warns on missing channels | test_guards (ladder) | — |
+| F17 | eleven hours of orange nobody saw | no channel beyond the desktop and an unconfigured bot | the ladder: orange → red (e-mail) after an hour; resolved notices; `polyctl doctor` warns on missing channels | test_guards (ladder) | — |
 | F18 | a dead watchdog is silent | nothing watched the watcher | heartbeat per cycle, sibling check, `last tick` in doctor | test_watchdog_cycle | — |
 | F19 | an old transcript caused a second live architect, while a fresh transcript or reused remembered pid kept a dead one "present" | transcript mtime/pid state was treated as liveness; refill lacked a guard; filtered PIDs broke ancestry; generic agent/Windows matching blurred role identity | exact configured launcher/runtime + cwd over full parent graph; interactive root only; cycle-safe helper exclusion; fresh process-start + `architect`-role duplicate guard; identical dry/live verdicts | test_processes, test_scenarios | — |
 | F20 | the first cycle after a two-week stop would mail an unread request red, ring an open decision, announce a standing red as no longer raised, mail credits whose snooze had ended and tell the phone of a wake | every record kept its date, and every check measured age as if the watchdog had been watching | a cycle after `watchdog.resume_gap_hours` of silence is a resume: one notice names what stands, carried episodes close unannounced, and ages count from the resume | test_resume_quiet | — |
@@ -319,16 +319,16 @@ test that would fail if it came back.
 | F25 | a session quiet while its subagent worked read as idle and its turn as ended: in 179 of the 444 closed turns a subagent wrote in, across 59 stores that delegate, the runtime waiting for the subagent would have been reaped at the idle window while the subagent went on | the idle guard, the reap and the spin check read the session transcript alone, and a subagent writes to a transcript of its own | the implementer's last write and the spin check's growth include the subagent transcripts the adapter declares, and a turn has not ended while one was written after the session transcript; read by modification time and size, none opened | test_subagent_liveness | — |
 | F26 | rehearsing the catch-up planned for 2026-10-01, a decision request nobody had been shown and no architect could act on was mailed eight times in a day, four times under its anomaly's "needs you" and four under its own unseen alarm | the unseen check rang every request by its age, whatever other alarm to a person already told it | a request an alarm to a person tells is told by that alarm alone, and a resume notice names it once; its own ladder counts from the last cycle such an alarm told it | test_catchup_polish | — |
 | F27 | in the same rehearsal, with the jobs back six hours after the plan reset and the usage unreadable, the resume notice named the credits as standing | the notice named each episode the silence carried and each snooze that ended in it, whatever its own known end | what the silence carried is not named once its known end has passed: an episode's own, or the reset the implementer's last reading named | test_catchup_polish | — |
-| F28 | installed from a package whose console scripts were not on PATH, launchd ran a missing file every two minutes while `ao watchdog install` said "installed" | install fell back to a clone's `scripts/ao-watchdog` and `bin/ao` whether or not there was a clone | each job names the console script on PATH, the clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao; install refuses when there is none, and exits 1 when `schtasks` fails | test_safe_remove | — |
-| F29 | after `ao remove --yes` the watchdog, doctor and telegram jobs ran on against the removed project, and the removal had taken the registry and other projects' logs with it | remove ran `python -m ao watchdog uninstall` without reading the result, and from a clone that interpreter has no ao; it never removed the telegram poller; it deleted every file in `~/.ao` whose name held the key | the jobs are removed in the removal's own process and checked gone before any state goes; then exactly the project's own files and its registry row | test_safe_remove | — |
+| F28 | installed from a package whose console scripts were not on PATH, launchd ran a missing file every two minutes while `polyctl watchdog install` said "installed" | install fell back to a clone's `scripts/polyctl-watchdog` and `bin/polyctl` whether or not there was a clone | each job names the console script on PATH, the clone's script, or `python -m polyctl.watchdog` from an interpreter that imports an installed polyctl; install refuses when there is none, and exits 1 when `schtasks` fails | test_safe_remove | — |
+| F29 | after `polyctl remove --yes` the watchdog, doctor and telegram jobs ran on against the removed project, and the removal had taken the registry and other projects' logs with it | remove ran `python -m polyctl watchdog uninstall` without reading the result, and from a clone that interpreter has no polyctl; it never removed the telegram poller; it deleted every file in `~/.polyctl` whose name held the key | the jobs are removed in the removal's own process and checked gone before any state goes; then exactly the project's own files and its registry row | test_safe_remove | — |
 | F30 | an implementer that stopped on its usage limit mid-slice read as stuck: every nudge died on the same limit until the backoff ran out and a person was told "agent stuck", and nothing resumed the slice when the limit reset | a usage limit was read only in an architect wake's log, in one harness's words; a nudge that died on one was a failure like any other, and the implementer's own transcript was not read for one | the stop is read from the harness's own reply or the nudge that died on it, in the words its adapter declares: the implementer's running items are parked `blocked`, `needs: quota (resets …)`, under an alarm that climbs the ladder, never nudged, and resumed once in the same session at the reset, at one retry where none was named, when the transcript goes on past the stop, or when keyflip rotates to headroom | test_quota_park | — |
 | F31 | a weekly limit whose stop named only a clock time could be woken again within minutes, days before its week was over, and a block's end was told as "04:00" whatever its day | the stop's reset was read within the five-hour window whatever limit it named, the spent window the machine reads for the provider was not read, and the end was told by its clock alone | a reset is read within the period the stop names; a spent window keyflip reports for the architect's provider holds the wake until the reset it states; the notice names the date beyond a day, and is told again when the end moves | test_architect_wake_quota | — |
-| F32 | a cycle cut off between starting the architect and recording it left a headless architect no record named, and the next cycle woke a second into the same session; a cycle killed while writing its state left it torn, and the markers that a park was resumed or a report handed were gone | the process started before anything said so, and the state was written over in place | the journal (`~/.ao/journal-<key>.db`, SQLite, written ahead and synced): a wake or refill is claimed under its session and reports before its process starts, with a lease, and its pid and start are written the moment it has them; a process the journal names holds its step past the lease while its start reads the same, and the next cycle registers it; a process of the architect's own harness already resuming the session is a wake under way; a journal that cannot be written leaves wakes to the process scan and tells a person; the state is replaced whole | test_journal | JOURNAL |
-| F33 | on Windows a PowerShell that was missing, failed or did not answer read as no process at all: the writer guard, the session guard and the presence check all passed, so a cycle could start a turn or wake an architect beside one it never saw, and `ao hold` stopped nothing | the process table was returned empty when it could not be read, on macOS, Linux and through `ps` as well | the readers raise `TableUnreadable`, naming the platform and why; a cycle that meets it starts, wakes and reaps nothing and raises `process-table-unreadable` for a person; presence it could not measure clears no quota block and holds no notice for the architect; a turn whose start cannot be read is believed for a bounded time | test_windows_table_closed | — |
-| F34 | a hook the implementer wrote into `.claude/settings.json` would have run in its own next nudge, outside the permissions that hold its commands, and in the architect's session when a wake started it in the same checkout, before any review saw it; Claude Code ran such a hook before it had even signed in | REVIEW-TREE-3 kept a candidate's configuration from its reviewer alone, and a harness's own folder is coordination state no candidate carries | each change to what an adapter declares its harness reads from a project is named to a person every cycle, and the wake, the refill, the nudge and the hunt each read them again before they start and stand down while one stands unseen, until `ao harness seen` records that a person read exactly those bytes | test_harness_config | HARNESS-CONFIG |
-| F35 | on Windows a hung turn taskkill could not stop - one an elevated prompt started, or a child its exited parent no longer led to - read as reaped, and a second turn was nudged beside it; `ao hold` said every tree was stopped | what a stop did was assumed, never read | every process of the tree is named to taskkill and asked afterwards; the reaper stands down and raises `reap-survived` while an unattended turn still runs; `ao hold` reads the table again, names what still runs and exits 1 | test_windows_stop_proven | WINDOWS-STOP-PROVEN |
-| F36 | an agent that wrote the project's own `.ao/adapters/` or a role's block in `.ao/config.json` chose the command the implementer's next nudge, or the architect's next wake or refill, started with: another program, a grant that admits `git commit --no-verify`, a model that reads as a flag | the nudge was composed from the adapter as every layer loads it, the wake and refill ran the block's argv as written, and only `ao doctor` named a grant that admitted a hook bypass | each turn is composed from the adapter the package ships and checked against it before it starts, or refused and a person told; a change to what a role's block says of its command holds every turn until `ao harness seen` | test_turn_argv | TURN-ARGV |
-| F37 | an agent that wrote the reviewer's routes or `hunter.argv` chose the command a review or a hunt started: another program under a shipped adapter's name, one left in the tree, or a stand-in that approves whatever it is shown; and a wake ran an architect program written into the tree for its version before its command was held | the routes were held to whether they could write, never to what they ran or to a person's sight, and a program was resolved, which runs it, before it was judged | a route runs the program of the shipped harness it names or runs, never one inside the repository or named from where it starts; a change to it holds the review or hunt until `ao harness seen`; and nothing is resolved before it is held or refused | test_route_argv | ROUTE-ARGV |
+| F32 | a cycle cut off between starting the architect and recording it left a headless architect no record named, and the next cycle woke a second into the same session; a cycle killed while writing its state left it torn, and the markers that a park was resumed or a report handed were gone | the process started before anything said so, and the state was written over in place | the journal (`~/.polyctl/journal-<key>.db`, SQLite, written ahead and synced): a wake or refill is claimed under its session and reports before its process starts, with a lease, and its pid and start are written the moment it has them; a process the journal names holds its step past the lease while its start reads the same, and the next cycle registers it; a process of the architect's own harness already resuming the session is a wake under way; a journal that cannot be written leaves wakes to the process scan and tells a person; the state is replaced whole | test_journal | JOURNAL |
+| F33 | on Windows a PowerShell that was missing, failed or did not answer read as no process at all: the writer guard, the session guard and the presence check all passed, so a cycle could start a turn or wake an architect beside one it never saw, and `polyctl hold` stopped nothing | the process table was returned empty when it could not be read, on macOS, Linux and through `ps` as well | the readers raise `TableUnreadable`, naming the platform and why; a cycle that meets it starts, wakes and reaps nothing and raises `process-table-unreadable` for a person; presence it could not measure clears no quota block and holds no notice for the architect; a turn whose start cannot be read is believed for a bounded time | test_windows_table_closed | — |
+| F34 | a hook the implementer wrote into `.claude/settings.json` would have run in its own next nudge, outside the permissions that hold its commands, and in the architect's session when a wake started it in the same checkout, before any review saw it; Claude Code ran such a hook before it had even signed in | REVIEW-TREE-3 kept a candidate's configuration from its reviewer alone, and a harness's own folder is coordination state no candidate carries | each change to what an adapter declares its harness reads from a project is named to a person every cycle, and the wake, the refill, the nudge and the hunt each read them again before they start and stand down while one stands unseen, until `polyctl harness seen` records that a person read exactly those bytes | test_harness_config | HARNESS-CONFIG |
+| F35 | on Windows a hung turn taskkill could not stop - one an elevated prompt started, or a child its exited parent no longer led to - read as reaped, and a second turn was nudged beside it; `polyctl hold` said every tree was stopped | what a stop did was assumed, never read | every process of the tree is named to taskkill and asked afterwards; the reaper stands down and raises `reap-survived` while an unattended turn still runs; `polyctl hold` reads the table again, names what still runs and exits 1 | test_windows_stop_proven | WINDOWS-STOP-PROVEN |
+| F36 | an agent that wrote the project's own `.polyctl/adapters/` or a role's block in `.polyctl/config.json` chose the command the implementer's next nudge, or the architect's next wake or refill, started with: another program, a grant that admits `git commit --no-verify`, a model that reads as a flag | the nudge was composed from the adapter as every layer loads it, the wake and refill ran the block's argv as written, and only `polyctl doctor` named a grant that admitted a hook bypass | each turn is composed from the adapter the package ships and checked against it before it starts, or refused and a person told; a change to what a role's block says of its command holds every turn until `polyctl harness seen` | test_turn_argv | TURN-ARGV |
+| F37 | an agent that wrote the reviewer's routes or `hunter.argv` chose the command a review or a hunt started: another program under a shipped adapter's name, one left in the tree, or a stand-in that approves whatever it is shown; and a wake ran an architect program written into the tree for its version before its command was held | the routes were held to whether they could write, never to what they ran or to a person's sight, and a program was resolved, which runs it, before it was judged | a route runs the program of the shipped harness it names or runs, never one inside the repository or named from where it starts; a change to it holds the review or hunt until `polyctl harness seen`; and nothing is resolved before it is held or refused | test_route_argv | ROUTE-ARGV |
 
 ## Scenarios: testing the decision, not the measurement
 
@@ -343,10 +343,10 @@ its fix, and the scenario stays.
 
 ## Installing and removing it
 
-`ao watchdog install` schedules two jobs, and each names a program the scheduler can start:
-the `ao-watchdog` and `ao` console scripts when they are on PATH; else a clone's
-`scripts/ao-watchdog` and `bin/ao`, run by the interpreter that ran the install; else that
-interpreter running `python -m ao.watchdog` and `python -m ao`, when it imports ao from its
+`polyctl watchdog install` schedules two jobs, and each names a program the scheduler can start:
+the `polyctl-watchdog` and `polyctl` console scripts when they are on PATH; else a clone's
+`scripts/polyctl-watchdog` and `bin/polyctl`, run by the interpreter that ran the install; else that
+interpreter running `python -m polyctl.watchdog` and `python -m polyctl`, when it imports polyctl from its
 own site directories, as a `pip install --user` whose scripts are not on PATH leaves it. When
 there is none, install refuses and writes nothing: a job naming a missing file fails every
 two minutes and says nothing. Windows tasks are resolved the same way, and install exits 1
@@ -354,105 +354,105 @@ when `schtasks` cannot create one.
 
 On Linux the two jobs are systemd user units in `~/.config/systemd/user/`, and nothing needs
 root. Each job is a oneshot service that runs it once and a timer that starts the service:
-`ao-watchdog-<project>` at once and then every `--interval` seconds, as the launchd job's
-RunAtLoad and StartInterval start it, and `ao-doctor-<project>` every fifteen minutes. A timer
+`polyctl-watchdog-<project>` at once and then every `--interval` seconds, as the launchd job's
+RunAtLoad and StartInterval start it, and `polyctl-doctor-<project>` every fifteen minutes. A timer
 fires to the second, not anywhere in the minute systemd allows by default. Install writes the
 four files and asks `systemctl --user`, by argument vector and never through a shell, to
 reload, enable and restart the timers; it exits 1 with what systemd said when a step fails or
 either timer is not active afterwards. The services keep `KillMode=process`: the watchdog
 starts each nudge in a session of its own and exits, and systemd's default would kill the nudge
 with the unit. An `--interval` below one second is refused, since it would start each cycle as
-the last one ends. The output goes to `~/.ao/watchdog-<project>.log` and
-`~/.ao/doctor-<project>.log`, as on macOS; a systemd older than 240 cannot append to a file,
+the last one ends. The output goes to `~/.polyctl/watchdog-<project>.log` and
+`~/.polyctl/doctor-<project>.log`, as on macOS; a systemd older than 240 cannot append to a file,
 ignores that line and keeps the output in its journal. A user's manager runs only while that
-user is logged in unless lingering is on: install and `ao watchdog status` say so when it is
+user is logged in unless lingering is on: install and `polyctl watchdog status` say so when it is
 off, and `loginctl enable-linger` keeps the timers running after a logout.
-`ao watchdog uninstall` disables and stops both timers, removes their files and the link
+`polyctl watchdog uninstall` disables and stops both timers, removes their files and the link
 `enable` made, and checks each timer is gone.
 
 Where no user systemd answers - a container, WSL without systemd, a `su` or `sudo -u` shell
 that cannot reach the user's manager - install writes nothing, says why, and prints the two
 crontab lines that would run the same jobs, and the command for one watchdog cycle by hand. A
 manager the shell cannot reach may still be running timers installed from a login session:
-uninstall and `ao remove --yes` leave those as they are and name them, so that a session that
+uninstall and `polyctl remove --yes` leave those as they are and name them, so that a session that
 reaches the manager can take them off.
 
-*In ao since slice LINUX-SCHEDULER: `ao watchdog install`, `ao watchdog status` and
-`ao watchdog uninstall` on Linux, through systemd user units where there was a launchd job
-Linux does not have. `ao remove --yes` takes the timers off in its own process and checks them
-gone, `ao doctor` shows the watchdog running from its timer, and the doctor's one cycle of
+*In polyctl since slice LINUX-SCHEDULER: `polyctl watchdog install`, `polyctl watchdog status` and
+`polyctl watchdog uninstall` on Linux, through systemd user units where there was a launchd job
+Linux does not have. `polyctl remove --yes` takes the timers off in its own process and checks them
+gone, `polyctl doctor` shows the watchdog running from its timer, and the doctor's one cycle of
 grace for a watchdog that came back is read from the timer's interval.*
 
-`ao remove --yes` takes the jobs off in its own process — the watchdog, the doctor and the
+`polyctl remove --yes` takes the jobs off in its own process — the watchdog, the doctor and the
 telegram poller on macOS, the two timers on Linux, the two tasks on Windows — and checks each
 is gone. While one is left, the removal stops with the project's state intact and names the job. Then it removes
-exactly the project's own files in `~/.ao/`: the names in one table the code that writes them
+exactly the project's own files in `~/.polyctl/`: the names in one table the code that writes them
 shares, such as `heartbeat-<project>`, `watchdog-<project>.log` and `push-<project>.ok`, under
 the project's key and nothing else, so another project whose name contains it, and the
-machine's own files, are not touched. It takes the project's row out of `~/.ao/projects.json`
-under the registry's lock, and the registry stays for every other project. What ao archived
-for the project under `~/.ao/archive/<project>/` is kept. The dry run lists each job, file and
+machine's own files, are not touched. It takes the project's row out of `~/.polyctl/projects.json`
+under the registry's lock, and the registry stays for every other project. What polyctl archived
+for the project under `~/.polyctl/archive/<project>/` is kept. The dry run lists each job, file and
 row by name, as the removal finds them, and a removal that leaves any of them exits 1.
 
-`ao uninstall --yes` takes every job off the machine the same way, one at a time and each checked
-gone: on macOS each launchd job whose label is in ao's namespace, the jobs of projects removed or
-never registered among them, on Linux each user unit in ao's namespace in `~/.config/systemd/user/`,
+`polyctl uninstall --yes` takes every job off the machine the same way, one at a time and each checked
+gone: on macOS each launchd job whose label is in polyctl's namespace, the jobs of projects removed or
+never registered among them, on Linux each user unit in polyctl's namespace in `~/.config/systemd/user/`,
 the same way, and on Windows the tasks of the projects the registry knows. The
 heartbeats of those projects go with the jobs, since one left behind reads as a dead watchdog
 ([getting started](getting-started.md#5-update-and-uninstall)).
 
-*In ao since slice LEADS-INSTALL: a job counts as gone only when its scheduler says it is. On Linux
+*In polyctl since slice LEADS-INSTALL: a job counts as gone only when its scheduler says it is. On Linux
 the service a timer starts is asked after as well as the timer: a watchdog cycle that a stop did not
 end ran on while the removal said its jobs were gone, and it is now named with the
 `systemctl --user stop` that ends it. A timer the user manager still runs after its files were
-deleted by hand is found by asking the manager - by `ao remove --yes`, and by `ao uninstall --yes`
+deleted by hand is found by asking the manager - by `polyctl remove --yes`, and by `polyctl uninstall --yes`
 for each project the registry knows - and stopped by name, since a disable finds no unit file to act
 on; only the files were looked at. On Windows every schtasks query that failed read as no task,
 whatever it failed for: a task is absent now only when Task Scheduler lists its tasks and schtasks
-fails for it as it fails for a name no task has, said in the machine's own language. `ao watchdog
+fails for it as it fails for a name no task has, said in the machine's own language. `polyctl watchdog
 uninstall` there checks each task gone as remove does, where it said "removed" whatever schtasks did,
-and `ao watchdog status` says when Task Scheduler cannot say. Every scheduler question has three
+and `polyctl watchdog status` says when Task Scheduler cannot say. Every scheduler question has three
 answers - the job is there, it is not, or the scheduler cannot be asked - and the last counts as
 there: a user manager this shell cannot reach, an answer that is not one state for each unit, a
 `launchctl list` that fails and a Task Scheduler that refuses every query alike (access denied, its
 service not running) each read as holding nothing, and the removal took the state of a project whose
-job ran on. `ao remove --yes` now names the job it could not ask about, keeps the project's state and
-exits 1, and `ao uninstall --yes` does the same for each project the registry knows: run either from
+job ran on. `polyctl remove --yes` now names the job it could not ask about, keeps the project's state and
+exits 1, and `polyctl uninstall --yes` does the same for each project the registry knows: run either from
 a login session of the user the jobs belong to, where the scheduler answers.*
 
-*In ao since slice LEADS-INSTALL: what `ao remove --yes` deletes in the project is checked gone too.
-Every error of deleting `.ao/`, the mailbox and the reviews was ignored, and a removal that left part
-of `.ao/` behind said that AO state was gone, while a harness file that could not be deleted ended it
+*In polyctl since slice LEADS-INSTALL: what `polyctl remove --yes` deletes in the project is checked gone too.
+Every error of deleting `.polyctl/`, the mailbox and the reviews was ignored, and a removal that left part
+of `.polyctl/` behind said that polyctl state was gone, while a harness file that could not be deleted ended it
 in a traceback; each path still there is named with why, and the removal exits 1. A link among them
 goes as a link, never what it points at, and a path whose directory a link takes outside the project
 is left where it is, named. On macOS and Linux each path is deleted through directories held open
 from the project down, each opened without following a link; Windows pins the folders with native
 handles that prevent their replacement. A platform with neither refuses the operation. Checked by
-path and deleted by path, a link swapped in between the two took the delete outside the project. A reviews directory of `..` or `.` in `.ao/config.json` named the directory above the project
+path and deleted by path, a link swapped in between the two took the delete outside the project. A reviews directory of `..` or `.` in `.polyctl/config.json` named the directory above the project
 or the project itself, and the removal deleted it whole; a path that names nothing inside the project
-is left, named. In `.gitignore` only the blocks `ao init` wrote go: its comment names how many lines it
+is left, named. In `.gitignore` only the blocks `polyctl init` wrote go: its comment names how many lines it
 added and a digest of them, and a block goes only when the lines under the comment are those. A
-person's own lines under a comment in ao's words went with ao's; a block an older ao wrote, which
+person's own lines under a comment in polyctl's words went with polyctl's; a block an older polyctl wrote, which
 names no lines, or one changed since stays, named, for the person to delete.*
 
 ## The instruments
 
 ```bash
-ao watchdog explain          # one dry cycle: every measurement, every verdict, in order
-ao watchdog trace --last 30  # the recorded cycles: time, verdict, the facts that decided it
-ao writers                   # who is writing (turns, not processes) and what is orphaned
-ao alarms                    # live alarm episodes, their level and age
-ao doctor                    # binaries, last wake, last tick, channels, live alarms
-ao doctor --check            # the same, quiet, exit 1 on problems — runs every 15 min from its own launchd job or systemd timer
-ao mail log                  # every message written and when it was consumed
+polyctl watchdog explain          # one dry cycle: every measurement, every verdict, in order
+polyctl watchdog trace --last 30  # the recorded cycles: time, verdict, the facts that decided it
+polyctl writers                   # who is writing (turns, not processes) and what is orphaned
+polyctl alarms                    # live alarm episodes, their level and age
+polyctl doctor                    # binaries, last wake, last tick, channels, live alarms
+polyctl doctor --check            # the same, quiet, exit 1 on problems — runs every 15 min from its own launchd job or systemd timer
+polyctl mail log                  # every message written and when it was consumed
 ```
 
-Over MCP: `ao_watchdog {action: explain|trace}` returns the same, read-only.
+Over MCP: `polyctl_watchdog {action: explain|trace}` returns the same, read-only.
 
-*In ao since slice LEADS-INSTALL: `ao doctor` shows the architect's binary, the last wake, the last
+*In polyctl since slice LEADS-INSTALL: `polyctl doctor` shows the architect's binary, the last wake, the last
 tick, the channels, the live alarms, the transcript, the credits, the ping and the switches whether
-or not an agent's PATH finds ao. Each was left out when it did not, where only the line that says
-whether agents find ao is about that.*
+or not an agent's PATH finds polyctl. Each was left out when it did not, where only the line that says
+whether agents find polyctl is about that.*
 
 When the watchdog "did nothing", run `explain`. The last decision line is the
 verdict; the lines above it are the guards that let it through; the
@@ -465,7 +465,7 @@ measurement function and there is a test file for each.
 Best practice, applied:
 
 - **Keyed.** Every alert has a stable key; the same condition never rings twice
-  inside its window, and its history is one line per raise in `ao notices`.
+  inside its window, and its history is one line per raise in `polyctl notices`.
 - **Leveled by who acts.** Yellow: the architect (anomaly + wake). Orange: a
   person (desktop + Telegram). Red: a person, now (e-mail). See alarms.md.
 - **Laddered.** An orange standing for `alarms.red_after_minutes` (60) rings
@@ -498,6 +498,6 @@ Best practice, applied:
   resume ages from the resume, and what the silence carried is not named once its own
   known end has passed.
 - **Actionable.** Every message names the project, what stands, since when, how
-  many times, and the `ao` command that shows more.
-- **Testable.** `ao alarms test --level red` rings every channel for real.
+  many times, and the `polyctl` command that shows more.
+- **Testable.** `polyctl alarms test --level red` rings every channel for real.
 - **Self-monitored.** Heartbeats, sibling checks, `last tick`.

@@ -55,10 +55,10 @@ $ keyflip usage --providers
 
 Never call this on every dashboard refresh. Cache for five minutes; quota windows move in
 hours, not seconds, and a slow subprocess in the render loop makes the panel feel broken.
-`ao` keeps a reading in `~/.ao/quota.json` under the command that took it, for the adapter's
-`cache_seconds`, so `ao status`, the live panel and every watchdog cycle inside that window read
+`polyctl` keeps a reading in `~/.polyctl/quota.json` under the command that took it, for the adapter's
+`cache_seconds`, so `polyctl status`, the live panel and every watchdog cycle inside that window read
 one answer instead of each starting the command again. A command that fails is not kept: the
-next read asks again. The command runs without a shell when its program is on ao's binary
+next read asks again. The command runs without a shell when its program is on polyctl's binary
 search path: PATH, then the directories tools are usually installed in. The provider window a
 fan-out verdict or an account rotation checks is read from the same reading, and a rotation
 drops it so the next read asks again. keyflip's budget status (`keyflip budget status --json`)
@@ -76,25 +76,25 @@ So there are exactly two supported answers, and the tool says which one is activ
 - **Transcript only** — context percentage, per-turn cost and burn rate, with no balance
   line at all. Zero install, entirely honest.
 
-`ao` never displays an estimated remaining balance.
+`polyctl` never displays an estimated remaining balance.
 
 ## Whose account
 
 A credit account belongs to a harness, and every reading of one is the implementer's own.
-`ao credits`, the credits section of `ao digest`, `ao handoff`, the account line of `ao cost`
+`polyctl credits`, the credits section of `polyctl digest`, `polyctl handoff`, the account line of `polyctl cost`
 and the watchdog's credit sampler each ask the lookup the implementer's adapter declares
 (`billing.api.driver`), and the offline estimate reads only that adapter's transcripts
-(`billing.fallback.transcripts`). Both are read from the adapters ao ships, never from a layer
+(`billing.fallback.transcripts`). Both are read from the adapters polyctl ships, never from a layer
 an agent can write, since a lookup runs the command its adapter names. Until 2026-09-17 every
-reader but `ao cost` read the first shipped adapter's account whatever the implementer ran, so
+reader but `polyctl cost` read the first shipped adapter's account whatever the implementer ran, so
 an implementer on a harness billed in tokens could be shown, sampled and alarmed on a credit
 account it never spends.
 
 An implementer whose adapter declares no lookup is told so where the figure would stand
-("… declares none ao can read"), and gets no credit samples and no credits alarm. Every sample
-in `.ao/ledger/credits.jsonl` names the account it is of and the adapter whose lookup took it.
+("… declares none polyctl can read"), and gets no credit samples and no credits alarm. Every sample
+in `.polyctl/ledger/credits.jsonl` names the account it is of and the adapter whose lookup took it.
 Only that adapter's samples give the implementer its burn rate, its exhaustion projection and
-the credits finding, page and line of `ao doctor`. A sample that names no adapter is nobody's,
+the credits finding, page and line of `polyctl doctor`. A sample that names no adapter is nobody's,
 and so is every sample written before samples named one.
 
 A declared usage lookup that returns no reading is a broken check. A missing token store
@@ -103,29 +103,29 @@ messages into the record. The watchdog records the attempt, waits half an hour b
 retrying, and doctor reports `credits-check` while that implementer is being driven
 (TRIAGE-3-MEDIUM).
 
-`ao cost` and `ao credits` compare transcript spend with the account only when its lookup
+`polyctl cost` and `polyctl credits` compare transcript spend with the account only when its lookup
 supplies `cycle_start` as epoch seconds. That share uses and names the account's cycle,
 regardless of the cost report's selected window. A reset date alone does not establish its
 start: the shipped lookup currently supplies no start, so no share percentage is printed.
-`ao credits` reuses the account it already read. With `--local`, its additional estimate
+`polyctl credits` reuses the account it already read. With `--local`, its additional estimate
 names the calendar month and reports a subtotal without an account-share percentage;
 daily local totals do not establish a matching account cycle (TRIAGE-1-MEDIUM).
 
-`ao credits --all` reads every shipped adapter that declares a lookup, one request each, and
+`polyctl credits --all` reads every shipped adapter that declares a lookup, one request each, and
 the local estimate where an adapter declares its transcripts; an adapter that declares neither
 is named rather than shown another harness's figure or a zero (CREDITS-ALL).
 
 ## In US dollars: an estimate
 
-`ao cost` counts spend in the unit the implementer's harness bills - credits, or tokens - and a
+`polyctl cost` counts spend in the unit the implementer's harness bills - credits, or tokens - and a
 token count weighs every token alike, though Anthropic, for one, prices a cache read at a tenth of
 an input token - a fortieth on Claude Fable 5.1 and Claude Mythos 5.1, and a twentieth on Claude Opus
-5.5, as its pricing page's footnotes say - and an output token at five times one. `ao cost --usd` prices the same turns'
-tokens by model and by kind, from a price table ao ships:
+5.5, as its pricing page's footnotes say - and an output token at five times one. `polyctl cost --usd` prices the same turns'
+tokens by model and by kind, from a price table polyctl ships:
 
 ```bash
-ao cost --usd                # the whole transcript
-ao cost --usd --since 24h    # the turns `ao cost --since 24h` counts
+polyctl cost --usd                # the whole transcript
+polyctl cost --usd --since 24h    # the turns `polyctl cost --since 24h` counts
 ```
 
 ```text
@@ -139,11 +139,11 @@ implementer spend in US dollars: an estimate  (list prices, not a bill; last 24h
   unknown is never counted as zero: a model, a kind of token or a rate the table does not price
 ```
 
-**Where the tokens come from.** Beside the usage `ao cost` already reads (`telemetry.cost`), the
+**Where the tokens come from.** Beside the usage `polyctl cost` already reads (`telemetry.cost`), the
 implementer's adapter declares the path to the model that answered (`model`), the path to its count
 of each kind of token the table prices (`tokens`), and the fields whose values say a response was
 billed at list prices (`priced_when`). They are read from the same records, under the same reading
-(`billing.fallback.reading`) and in the same window as `ao cost`, subagents included, so a response
+(`billing.fallback.reading`) and in the same window as `polyctl cost`, subagents included, so a response
 counts once however many records repeat it. A kind may name a list of paths, and the first that
 holds a count is read: Claude Code breaks its cache writes down by how long the cache lives, and a
 record written without that breakdown is read as five-minute writes, the default duration.
@@ -166,12 +166,12 @@ record written without that breakdown is read as five-minute writes, the default
 ]
 ```
 
-**The table** is `src/ao/prices.json`. Each price is a vendor's published list price in US dollars
+**The table** is `src/polyctl/prices.json`. Each price is a vendor's published list price in US dollars
 for `per_tokens` (a million) tokens of one kind `kinds` names: `input`, `cache_write_5m`,
 `cache_write_1h`, `cache_read` and `output`. Each vendor says when its prices were read (`as_of`),
 where (`source`) and what they do not cover (`scope`); each model lists its price for each kind, and
 `ids` names the other ids a transcript may write it as, such as a dated snapshot. `version` counts
-the table's changes. ao refuses a table holding any mistake - a negative price, a kind `kinds` does
+the table's changes. polyctl refuses a table holding any mistake - a negative price, a kind `kinds` does
 not name, an id priced twice, a vendor without its day or its source - and then prints no figure.
 
 ```json
@@ -190,7 +190,7 @@ for, and a response billed at a rate `priced_when` does not list - fast mode, an
 US-only inference - each make a row that reads `unknown`, and says why. The total is then unknown
 too, and says what the priced rows add up to, as a floor: *at least $11.55*. A model served free - a
 free tier, a local model - is priced at zero only by an entry that lists it at zero, whose `note`
-says why; ao never reads the cost a harness writes into its own records, such as the 0.0 of a
+says why; polyctl never reads the cost a harness writes into its own records, such as the 0.0 of a
 provider that bills elsewhere. An implementer billed in credits gets no dollar figure at all: a
 credit's price in dollars is its plan's, and no table here holds one.
 
@@ -201,11 +201,11 @@ credit's price in dollars is its plan's, and no table here holds one.
    written as, and set the vendor's `as_of` to the day you read the page. A new vendor needs its
    `as_of`, `source` and `scope` too.
 3. Raise `version` by one.
-4. Run `tests/test_usd_cost.py`: it refuses a table ao could not quote from, and one that leaves a
+4. Run `tests/test_usd_cost.py`: it refuses a table polyctl could not quote from, and one that leaves a
    model a shipped adapter runs by default without a price.
 
-*In ao since slice USD-COST: `ao cost --usd` prices the implementer's tokens from src/ao/prices.json,
-by model and kind, under the reading and in the window `ao cost` counts them, and labels the figure an
+*In polyctl since slice USD-COST: `polyctl cost --usd` prices the implementer's tokens from src/polyctl/prices.json,
+by model and kind, under the reading and in the window `polyctl cost` counts them, and labels the figure an
 estimate at list prices, naming the table's version and each vendor's as-of day and source. What the
 table does not price is unknown, never zero, and a model is free only where the table lists it at
 zero. Claude Code's adapter declares its tokens (`telemetry.cost.model`, `tokens`, `priced_when`); a
@@ -237,18 +237,18 @@ panel degrades, it does not break.
 4. **Give it a threshold.** A number without a threshold is decoration. Context gets a bar
    that turns yellow at 70% and red at 85%; burn rate gets compared against the budget.
 
-## One surface: `ao gain`
+## One surface: `polyctl gain`
 
-`ao stats` reads outcomes, `ao cost` reads spend and `ao credits` reads one account.
-`ao gain` reads them together, with the board, the review ledger, the watchdog's own
-logs and the platform runs recorded in `.ao/ledger/platform-runs.jsonl`, and prints a
+`polyctl stats` reads outcomes, `polyctl cost` reads spend and `polyctl credits` reads one account.
+`polyctl gain` reads them together, with the board, the review ledger, the watchdog's own
+logs and the platform runs recorded in `.polyctl/ledger/platform-runs.jsonl`, and prints a
 daily spend and landing trend:
 
 ```bash
-ao gain                     # everything recorded here
-ao gain --since 7d --slices --sources
-ao gain --all --json        # every registered project, one JSON document
-ao gain --quota             # also ask the implementer's account, one request
+polyctl gain                     # everything recorded here
+polyctl gain --since 7d --slices --sources
+polyctl gain --all --json        # every registered project, one JSON document
+polyctl gain --quota             # also ask the implementer's account, one request
 ```
 
 Nothing in it is estimated: a count that has no store is left out, and a store that
@@ -257,38 +257,38 @@ numbers for another program; `--sources` names the files they came from. A platf
 run appears once one is recorded there, with how many commits HEAD has added since the
 commit it ran at.
 
-`ao evidence record` reads a lane's CI run through `gh` and writes what the run says — its
-status and conclusion, the commit it ran on, its repository and its jobs — and `ao evidence show`
+`polyctl evidence record` reads a lane's CI run through `gh` and writes what the run says — its
+status and conclusion, the commit it ran on, its repository and its jobs — and `polyctl evidence show`
 reads the newest row of each platform back with how far HEAD has moved since - or every row with
 `--all` ([commands.md](commands.md)). The ledger is chained and held to this machine's checkpoint
-store like `.ao/ledger/opt-ins.jsonl`: only the prefix this machine recorded ao appending counts,
+store like `.polyctl/ledger/opt-ins.jsonl`: only the prefix this machine recorded polyctl appending counts,
 a row past it - written by hand or on another machine - does not count and nothing is appended
 after it, and an edited attested row cannot be read. A run that is not on this repository, not
 finished, not successful, not on a commit HEAD holds as an ancestor, or more than
-`evidence.max_commits_behind` commits behind HEAD never reads as green and is a finding of `ao
+`evidence.max_commits_behind` commits behind HEAD never reads as green and is a finding of `polyctl
 doctor --check`; a project that recorded none is not told anything, and a green rerun clears what
 the run before it said.
 
-## OTLP/JSON trace export: `ao export otlp`
+## OTLP/JSON trace export: `polyctl export otlp`
 
-`ao export otlp` reads the project's ledgers and writes one OpenTelemetry `ExportTraceServiceRequest`
+`polyctl export otlp` reads the project's ledgers and writes one OpenTelemetry `ExportTraceServiceRequest`
 document in the OTLP/JSON encoding, for a person to hand to an OpenTelemetry collector, Langfuse or
-Jaeger themselves. `ao` sends nothing anywhere: it writes `--out <file>` or standard output, and
-touches nothing in the project or in `~/.ao`.
+Jaeger themselves. `polyctl` sends nothing anywhere: it writes `--out <file>` or standard output, and
+touches nothing in the project or in `~/.polyctl`.
 
 ```bash
-ao export otlp                     # write one ExportTraceServiceRequest to stdout
-ao export otlp --out traces.json   # write to a file instead
-ao export otlp --attested          # export only checkpoint-attested rows when a ledger has no/partial checkpoint
+polyctl export otlp                     # write one ExportTraceServiceRequest to stdout
+polyctl export otlp --out traces.json   # write to a file instead
+polyctl export otlp --attested          # export only checkpoint-attested rows when a ledger has no/partial checkpoint
 ```
 
-**Checkpoint attestation.** The export reads only what this machine's checkpoint store records `ao`
+**Checkpoint attestation.** The export reads only what this machine's checkpoint store records `polyctl`
 committing. A ledger the store does not cover — no entry for it (moved, reset, recorded elsewhere, or
 older than checkpoints), or rows past its recorded count — is refused naming the ledger and why, rather
 than exported as an empty or partial document with exit 0. Passing `--attested` exports only the
 checkpoint-attested rows and marks the document's `resource.attributes` with
-`ao.export.attested_only=true`, `ao.export.partial` (`true` when any ledger was uncovered or truncated)
-and `ao.export.unattested_ledgers`.
+`polyctl.export.attested_only=true`, `polyctl.export.partial` (`true` when any ledger was uncovered or truncated)
+and `polyctl.export.unattested_ledgers`.
 
 **What the export holds.** One trace per slice (its candidate) and one span per gate step the ledger
 records for it — `verification`, `review`, `grant` and `commit` — with the ledger's own timestamps in
@@ -299,23 +299,23 @@ characters) is derived from the ledger records' own SHA-256 digests, so the same
 exports the exact same ids. Span attributes use OTLP `AnyValue` fields (`stringValue`, `intValue` as
 a decimal string, `boolValue`) and carry only:
 
-- **Ids:** `ao.slice`, `ao.candidate`, `ao.verification.id`, `ao.review.id` (basename only),
-  `ao.waiver.id`, `ao.commit.sha` and `ao.commit.tree`.
-- **Step names:** `ao.step` (`verification`, `review`, `grant`, `commit`), `ao.verification.profile`
-  and `ao.review.kind`.
-- **Outcomes:** `ao.outcome` (`PASS`/`FAIL`, review verdict, `GRANTED`/`REFUSED`, `LANDED`),
-  `ao.review.tier`, `ao.authorizable` and `ao.granted`.
-- **Actors and model families:** `ao.implementer.actor` and `ao.reviewer.actor` (stable `sha256:`
+- **Ids:** `polyctl.slice`, `polyctl.candidate`, `polyctl.verification.id`, `polyctl.review.id` (basename only),
+  `polyctl.waiver.id`, `polyctl.commit.sha` and `polyctl.commit.tree`.
+- **Step names:** `polyctl.step` (`verification`, `review`, `grant`, `commit`), `polyctl.verification.profile`
+  and `polyctl.review.kind`.
+- **Outcomes:** `polyctl.outcome` (`PASS`/`FAIL`, review verdict, `GRANTED`/`REFUSED`, `LANDED`),
+  `polyctl.review.tier`, `polyctl.authorizable` and `polyctl.granted`.
+- **Actors and model families:** `polyctl.implementer.actor` and `polyctl.reviewer.actor` (stable `sha256:`
   identifiers derived from the actor or route value, never the raw string), and
-  `ao.implementer.family` and `ao.reviewer.family` (the adapter declaration's model family, or
+  `polyctl.implementer.family` and `polyctl.reviewer.family` (the adapter declaration's model family, or
   `unknown`).
-- **Counts:** `ao.gates.count`, `ao.gates.passed_count`, `ao.gates.failed_count`,
-  `ao.tests.pass_count`, `ao.tests.fail_count`, `ao.reviewers.count`, `ao.candidate.changed_count`
-  and `ao.reasons.count`.
+- **Counts:** `polyctl.gates.count`, `polyctl.gates.passed_count`, `polyctl.gates.failed_count`,
+  `polyctl.tests.pass_count`, `polyctl.tests.fail_count`, `polyctl.reviewers.count`, `polyctl.candidate.changed_count`
+  and `polyctl.reasons.count`.
 
 **What the export never holds.** Never transcript text, prompts, review prose, diffs, changed file
 paths, refusal reason strings, paths under the person's home (`~` or `$HOME`) or repository root,
-capability grant tokens (`C-…`), API keys, credentials or anything else `ao` keeps private
+capability grant tokens (`C-…`), API keys, credentials or anything else `polyctl` keeps private
 ([privacy.md](privacy.md)).
 
 ## Thresholds that earned their place
@@ -334,10 +334,10 @@ loop, and the tool-call list in `usage_summary` shows you which one.
 
 A desktop notification reaches the human and vanishes. The architect reading the
 panel — the participant who could act on a *pattern* of alerts — is then the only
-one who never sees what the human was told. `ao notices` closes that: every alert
-is written to `.ao/ledger/notices.jsonl` as it is raised. A scheduled doctor's exhausted-credit
+one who never sees what the human was told. `polyctl notices` closes that: every alert
+is written to `.polyctl/ledger/notices.jsonl` as it is raised. A scheduled doctor's exhausted-credit
 notice carries the newest account sample, and a red alert's `mail:` row keeps the same
-evidence; `ao notices <id>` shows the reading behind either row (TRIAGE-1-MEDIUM).
+evidence; `polyctl notices <id>` shows the reading behind either row (TRIAGE-1-MEDIUM).
 
 Alerts are rate-limited per key, default thirty minutes. The watchdog runs every
 two minutes, so a guard that notified on each run would turn one ongoing condition
@@ -346,15 +346,15 @@ alerting off while everyone still believes it works.
 
 Suppressed alerts are recorded too, with `sent: false`. A long run of them is
 itself the signal — it says the condition has held for a long time, which a single
-delivered notification cannot express. `ao notices --all` shows them.
+delivered notification cannot express. `polyctl notices --all` shows them.
 
-*In ao since slice JSON-OUTPUT: `ao notices --json` prints the list as one JSON document and nothing
+*In polyctl since slice JSON-OUTPUT: `polyctl notices --json` prints the list as one JSON document and nothing
 else on stdout, `{"notices": […], "include_suppressed": false}`, newest first, `-n` and `--all`
-choosing the rows as they do for the text. `ao notices <id> --json` prints `{"notice": {…}}`, and for
+choosing the rows as they do for the text. `polyctl notices <id> --json` prints `{"notice": {…}}`, and for
 an id no notice has, `{"notice": null, "error": "…"}` with exit status 1. A notice has `id`, `at`
 (epoch seconds), `title`, `msg`, `sent` (false for one the rate limit held), `key` and `evidence`
 (`check` and its `samples`, each a `value`, its `source` and `at`), null where a row recorded before
-ao kept it has none.*
+polyctl kept it has none.*
 
 ## Keeping the records small
 
@@ -363,9 +363,9 @@ of minutes, and one nudge log reached 295 KB overnight. Unbounded growth is how 
 tool becomes the thing someone turns off.
 
 ```bash
-ao prune                 # dry run: what would go
-ao prune --yes           # operational records older than 7 days, logs trimmed to 64KB tails
-ao prune --evidence --yes   # also seal the verification and authority ledgers past their bound
+polyctl prune                 # dry run: what would go
+polyctl prune --yes           # operational records older than 7 days, logs trimmed to 64KB tails
+polyctl prune --evidence --yes   # also seal the verification and authority ledgers past their bound
 ```
 
 Evidence is excluded by default and takes an explicit flag. Verification records
@@ -374,15 +374,15 @@ housekeeping would quietly remove the ability to answer "on what basis did this
 land". Log trimming keeps the tail rather than the head, because the last turn's
 output is the part anyone actually reads when diagnosing a failed nudge.
 
-The machine's event log, `~/.ao/events.jsonl`, needs no pruning: it holds itself to
+The machine's event log, `~/.polyctl/events.jsonl`, needs no pruning: it holds itself to
 `retention.events_kb` as it is written ([surfaces.md](surfaces.md#the-event-log)).
 
 Review artefacts are evidence too, and they are kept by reference. One that a grant, a
 verification, the board, a waiver or a decision names, one of a slice still open or of
 the candidate staged now, and one git tracks never moves. The rest leave once older than
-`review.prune_after_days` (30), to `~/.ao/archive/<project>/` rather than away, and
-`ao prune` says how many it kept and why; if any of those references cannot be read,
-nothing moves. `ao doctor` names a review a grant rests on that git does not hold -
+`review.prune_after_days` (30), to `~/.polyctl/archive/<project>/` rather than away, and
+`polyctl prune` says how many it kept and why; if any of those references cannot be read,
+nothing moves. `polyctl doctor` names a review a grant rests on that git does not hold -
 evidence on one disk is one disk failure from gone - so commit those.
 
 Pruning validates the grant, verification, waiver and decision chains and includes

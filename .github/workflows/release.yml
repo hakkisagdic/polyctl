@@ -10,7 +10,7 @@
 # hijacked, and the cheapest fix is not to have one.
 #
 # One-time setup on pypi.org → Publishing → Add a pending publisher:
-#   project: ao-orchestrator   owner: hakkisagdic   repo: agent-orchestrator
+#   project: polyctl   owner: hakkisagdic   repo: polyctl
 #   workflow: release.yml   environment: pypi
 name: release
 
@@ -72,8 +72,8 @@ jobs:
         # never lets that number be reused.
         run: |
           TAG="${GITHUB_REF_NAME#v}"
-          # pyproject.toml reads the version from src/ao/__init__.py; that line is the one to match.
-          PKG=$(python -c "import re;print(re.search(r'^__version__ = \"([^\"]+)\"', open('src/ao/__init__.py').read(), re.M).group(1))")
+          # pyproject.toml reads the version from src/polyctl/__init__.py; that line is the one to match.
+          PKG=$(python -c "import re;print(re.search(r'^__version__ = \"([^\"]+)\"', open('src/polyctl/__init__.py').read(), re.M).group(1))")
           echo "tag=$TAG package=$PKG"
           test "$TAG" = "$PKG"
 

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 NOISE = "\n".join(f"ok {n} - a passing case" for n in range(40))
 
@@ -46,7 +46,7 @@ def _verify(project, tmp_path, monkeypatch, script, **gate):
     command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
     spec = {"gates": {"test": {"run": command, "timeout": 30, **gate}},
             "profiles": {"quick": ["test"]}, "default_profile": "quick"}
-    open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8").write(json.dumps(spec))
+    open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8").write(json.dumps(spec))
     monkeypatch.setattr(A, "GATE_LOCK", str(tmp_path / "gate.lock"))
     code = cli.cmd_verify(project, SimpleNamespace(profile="quick", wait=0))
     return code, A.latest_verification(root)["gates"][0]

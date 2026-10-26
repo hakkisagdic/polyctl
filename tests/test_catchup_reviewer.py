@@ -1,13 +1,13 @@
 """A catch-up run may name its own reviewer, so runs over different slices go side by side (CATCHUP-REVIEWER).
 
-`ao catchup --reviewer <actor>` reviews a run with another reviewer actor of the project's table in place of
+`polyctl catchup --reviewer <actor>` reviews a run with another reviewer actor of the project's table in place of
 the reviewer role. Only an actor a reviewer composition made may stand in, never the implementer's, and the
 table is read, not changed.
 """
 import json
 import os
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 from tests.test_catchup_ready import APPROVED, PERSON, _catchup, _configure, _land, _legacy_waiver
 from tests.test_review_chain import _fake
 
@@ -25,7 +25,7 @@ def _table(project):
 
 
 def _roles(root):
-    with open(os.path.join(root, ".ao", "config.json"), encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), encoding="utf-8") as fh:
         return json.load(fh)["roles"]
 
 
@@ -66,7 +66,7 @@ def test_an_actor_that_may_not_review_is_refused_before_the_run_starts(project, 
 
     assert "the project's table has no such actor; its reviewer actors: first-reviewer, second-reviewer" \
         in refused["no-such-actor"]
-    assert "only an actor `ao role set reviewer` composed may review" in refused["hand-written"]
+    assert "only an actor `polyctl role set reviewer` composed may review" in refused["hand-written"]
     assert "builder is the implementer, and no actor reviews its own work" in refused["builder"]
     assert [w["slice"] for w in A.open_waivers(root)] == ["B1"]
 

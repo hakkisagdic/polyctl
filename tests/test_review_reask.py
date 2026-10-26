@@ -1,4 +1,4 @@
-"""An answer ao cannot read is asked for once more, saying what was wrong, before it is INVALID (REVIEW-REASK).
+"""An answer polyctl cannot read is asked for once more, saying what was wrong, before it is INVALID (REVIEW-REASK).
 
 A reviewer that left out its verdict line, or wrote a count twice, made the review INVALID at once, and a
 person submitted it again by hand. The same reviewer is now told which lines it missed and asked the same
@@ -9,19 +9,19 @@ import json
 import os
 import sys
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_review_chain import _args, _repo_with_change
 
-# A reviewer that counts its calls in AO_TEST_COUNT, keeps each prompt it is handed beside AO_TEST_PROMPTS, and
-# gives the answers AO_TEST_ANSWERS lists, one a call and the last one after that; an answer that is a number is
+# A reviewer that counts its calls in POLYCTL_TEST_COUNT, keeps each prompt it is handed beside POLYCTL_TEST_PROMPTS, and
+# gives the answers POLYCTL_TEST_ANSWERS lists, one a call and the last one after that; an answer that is a number is
 # the exit status of a reviewer that answers nothing.
 REVIEWER = """
 import json, os, sys
-count = os.environ["AO_TEST_COUNT"]
+count = os.environ["POLYCTL_TEST_COUNT"]
 n = (int(open(count).read()) if os.path.exists(count) else 0) + 1
 open(count, "w").write(str(n))
-open(os.environ["AO_TEST_PROMPTS"] + "." + str(n), "w", encoding="utf-8").write(sys.argv[1])
-answers = json.loads(os.environ["AO_TEST_ANSWERS"])
+open(os.environ["POLYCTL_TEST_PROMPTS"] + "." + str(n), "w", encoding="utf-8").write(sys.argv[1])
+answers = json.loads(os.environ["POLYCTL_TEST_ANSWERS"])
 answer = answers[min(n, len(answers)) - 1]
 if isinstance(answer, int):
     sys.exit(answer)
@@ -33,9 +33,9 @@ TWO_HIGHS = "VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nHIGH: 1\nMEDIUM: 0\nLOW: 0"
 
 
 def _reviewing(project, tmp_path, monkeypatch, *answers):
-    monkeypatch.setenv("AO_TEST_COUNT", str(tmp_path / "calls"))
-    monkeypatch.setenv("AO_TEST_PROMPTS", str(tmp_path / "prompt"))
-    monkeypatch.setenv("AO_TEST_ANSWERS", json.dumps(list(answers)))
+    monkeypatch.setenv("POLYCTL_TEST_COUNT", str(tmp_path / "calls"))
+    monkeypatch.setenv("POLYCTL_TEST_PROMPTS", str(tmp_path / "prompt"))
+    monkeypatch.setenv("POLYCTL_TEST_ANSWERS", json.dumps(list(answers)))
     monkeypatch.setattr(cli, "_review_retry_wait", lambda seconds: None)
     _repo_with_change(project["root"])
     return dict(project, reviewer={"id": "r1", "family": "x", "argv": [sys.executable, "-c", REVIEWER, "{prompt}"]})
@@ -63,7 +63,7 @@ def test_an_answer_without_a_verdict_line_is_asked_for_again_and_the_second_is_r
     assert _calls(tmp_path) == 2
     first, second = _prompt(tmp_path, 1), _prompt(tmp_path, 2)
     assert second.startswith(first)
-    assert ("--- ao COULD NOT READ YOUR ANSWER: `VERDICT: …` did not stand once each at the start of a line."
+    assert ("--- polyctl COULD NOT READ YOUR ANSWER: `VERDICT: …` did not stand once each at the start of a line."
             in second[len(first):])
     name, body = _artefact(project["root"])
     assert A.reviews(project["root"], "semantic-review") == [(name, "APPROVED")]
@@ -128,7 +128,7 @@ def test_a_turkish_project_is_told_in_turkish(project, tmp_path, monkeypatch):
 
     assert cli.cmd_review(cfg, _args()) == 0
 
-    assert "--- ao CEVABINI OKUYAMADI: `VERDICT: …` satır başında birer kez yer almadı." in _prompt(tmp_path, 2)
+    assert "--- polyctl CEVABINI OKUYAMADI: `VERDICT: …` satır başında birer kez yer almadı." in _prompt(tmp_path, 2)
 
 
 def test_a_summary_verdict_line_after_the_findings_is_asked_away(project, tmp_path, monkeypatch):

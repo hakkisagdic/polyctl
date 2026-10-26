@@ -1,12 +1,12 @@
-"""`ao remove` takes one project's things and nothing else; ao's jobs and hooks name programs that exist (SAFE-REMOVE).
+"""`polyctl remove` takes one project's things and nothing else; polyctl's jobs and hooks name programs that exist (SAFE-REMOVE).
 
-A product review found four defects. `ao remove --yes` deleted every file in ~/.ao whose name held the
+A product review found four defects. `polyctl remove --yes` deleted every file in ~/.polyctl whose name held the
 project's key: removing `proj` took the machine registry and its lock with the logs and push windows of
 `bigproject` and `myproj`, and a project called `email` would take the e-mail channel's settings. It
-removed its jobs through `python -m ao watchdog uninstall`, which from a clone has no ao module, read no
-result, never removed the telegram poller and said everything was gone. A commit hook looked ao up with
-`command -v ao` under /bin/sh, which cannot see the alias the README set up, so every commit failed with
-"ao not found". And `ao watchdog install` scheduled a clone's script from a package that has none.
+removed its jobs through `python -m polyctl watchdog uninstall`, which from a clone has no polyctl module, read no
+result, never removed the telegram poller and said everything was gone. A commit hook looked polyctl up with
+`command -v polyctl` under /bin/sh, which cannot see the alias the README set up, so every commit failed with
+"polyctl not found". And `polyctl watchdog install` scheduled a clone's script from a package that has none.
 """
 import importlib.util
 import json
@@ -22,10 +22,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage, watchdog as W
+from polyctl import cli, lib as A, storage, watchdog as W
 from tests.test_docs_names import _code_paths
 
-SRC = str(Path(__file__).resolve().parent.parent / "src" / "ao")
+SRC = str(Path(__file__).resolve().parent.parent / "src" / "polyctl")
 REMOVE = SimpleNamespace(yes=True, allow_shared_hooks=False)
 LAUNCHD_ONLY = "the jobs here are launchd's; Windows tasks have their own test"
 
@@ -35,24 +35,24 @@ def _plain(capsys):
 
 
 def _home(tmp_path, monkeypatch):
-    """A scratch home whose ~/.ao also holds the machine registry, as it does outside the tests."""
+    """A scratch home whose ~/.polyctl also holds the machine registry, as it does outside the tests."""
     home = tmp_path / "home"
-    (home / ".ao").mkdir(parents=True)
+    (home / ".polyctl").mkdir(parents=True)
     monkeypatch.setattr(A, "HOME", str(home))
-    monkeypatch.setattr(W, "STATE_DIR", str(home / ".ao"))
-    monkeypatch.setenv("AO_PROJECT_REGISTRY", str(home / ".ao" / "projects.json"))
+    monkeypatch.setattr(W, "STATE_DIR", str(home / ".polyctl"))
+    monkeypatch.setenv("POLYCTL_PROJECT_REGISTRY", str(home / ".polyctl" / "projects.json"))
     return home
 
 
 def _project(parent, name):
-    """An ao project that never adopted the marker: its removal goes straight to the second phase."""
+    """A polyctl project that never adopted the marker: its removal goes straight to the second phase."""
     root = parent / name
-    (root / ".ao" / "ledger").mkdir(parents=True)
+    (root / ".polyctl" / "ledger").mkdir(parents=True)
     (root / "agent-mail").mkdir()
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"],
                    cwd=root, check=True)
-    (root / ".ao" / "config.json").write_text(json.dumps({"project": name}), encoding="utf-8")
+    (root / ".polyctl" / "config.json").write_text(json.dumps({"project": name}), encoding="utf-8")
     return str(root)
 
 
@@ -86,7 +86,7 @@ def _launchd(monkeypatch, stuck=()):
 
 
 def _jobs(home, loaded, key, jobs=cli.LAUNCHD_JOBS):
-    """What `ao watchdog install` and `ao telegram install` leave: loaded labels, and their plists."""
+    """What `polyctl watchdog install` and `polyctl telegram install` leave: loaded labels, and their plists."""
     agents = home / "Library" / "LaunchAgents"
     agents.mkdir(parents=True, exist_ok=True)
     labels = [cli._launchd_label(job, key) for job in jobs]
@@ -103,13 +103,13 @@ def _executable(path, body):
     return path
 
 
-# ---- the files a project keeps in ~/.ao --------------------------------------------------------
+# ---- the files a project keeps in ~/.polyctl --------------------------------------------------------
 
 def test_the_remove_table_holds_every_name_a_writer_gives_a_projects_file_in_home():
-    # Read from the code as tests/test_docs_names.py reads it: every name built directly under ~/.ao from a
+    # Read from the code as tests/test_docs_names.py reads it: every name built directly under ~/.polyctl from a
     # piece the code computes. A writer that named a project's file itself would show here, outside the table.
-    built = {pattern[len("~/.ao/"):] for pattern in _code_paths(SRC)
-             if pattern.startswith("~/.ao/") and pattern.count("/") == 2 and "*" in pattern and pattern != "~/.ao/*"}
+    built = {pattern[len("~/.polyctl/"):] for pattern in _code_paths(SRC)
+             if pattern.startswith("~/.polyctl/") and pattern.count("/") == 2 and "*" in pattern and pattern != "~/.polyctl/*"}
     table = {template.replace("{key}", "*") for template in A.PROJECT_FILES.values()}
 
     assert {"heartbeat-*", "push-*.ok", "watchdog-*.log", "nudge-*.log", "escalate-*.log", "doctor-*.json",
@@ -123,7 +123,7 @@ def test_the_remove_table_holds_every_name_a_writer_gives_a_projects_file_in_hom
 @pytest.mark.skipif(os.name == "nt", reason=LAUNCHD_ONLY)
 def test_remove_takes_exactly_this_projects_files_and_jobs_and_leaves_every_other(tmp_path, monkeypatch, capsys):
     home = _home(tmp_path, monkeypatch)
-    state = home / ".ao"
+    state = home / ".polyctl"
     loaded, asked = _launchd(monkeypatch)
     real_run = subprocess.run
 
@@ -166,14 +166,14 @@ def test_remove_takes_exactly_this_projects_files_and_jobs_and_leaves_every_othe
     assert gone == set(A.project_file_names(keys[root])) & before and len(gone) >= 10
     assert after == before - gone
     assert machine | {"projects.json", "projects.json.lock"} <= after
-    assert {f"   ~/.ao/{name}" for name in gone} == {line for line in listed if line.startswith("   ~/.ao/")
+    assert {f"   ~/.polyctl/{name}" for name in gone} == {line for line in listed if line.startswith("   ~/.polyctl/")
                                                         and ": the `" not in line}
     assert {f"   launchd job {label}" for label in labels} == {line for line in listed if "launchd job" in line}
     assert loaded == set(neighbour)
     assert all(["launchctl", "bootout", f"gui/501/{label}"] in asked for label in labels)
     assert not any((home / "Library" / "LaunchAgents" / f"{label}.plist").exists() for label in labels)
     assert set(json.load(open(state / "projects.json", encoding="utf-8"))) == {keys[path] for path in others}
-    assert f"removed the `{keys[root]}` entry from ~/.ao/projects.json" in out and "phase 2/2 complete" in out
+    assert f"removed the `{keys[root]}` entry from ~/.polyctl/projects.json" in out and "phase 2/2 complete" in out
 
 
 def test_the_registry_loses_only_this_projects_row_under_its_lock_and_stays(tmp_path, monkeypatch):
@@ -182,7 +182,7 @@ def test_the_registry_loses_only_this_projects_row_under_its_lock_and_stays(tmp_
     one, two = A.project_key(first), A.project_key(second)
     registry = A.project_registry_path()
     rows = json.load(open(registry, encoding="utf-8"))
-    rows["unread"] = "a row ao does not read is written back as it was"
+    rows["unread"] = "a row polyctl does not read is written back as it was"
     with open(registry, "w", encoding="utf-8") as fh:
         json.dump(rows, fh)
     taken, real_lock = [], storage._exclusive_lock
@@ -218,26 +218,26 @@ def test_a_job_left_installed_is_named_and_the_removal_stops_with_state_intact(t
 
     out = _plain(capsys)
     assert f"removed launchd job {watchdog}" in out and f"removed launchd job {doctor}" in out
-    assert f"left launchd job {stuck}: still loaded" in out and "AO state kept intact" in out
+    assert f"left launchd job {stuck}: still loaded" in out and "polyctl state kept intact" in out
     assert "phase 2/2 complete" not in out
     assert loaded == {stuck}
-    assert os.path.isdir(os.path.join(root, ".ao")) and os.path.exists(A.heartbeat_path(root))
+    assert os.path.isdir(os.path.join(root, ".polyctl")) and os.path.exists(A.heartbeat_path(root))
     assert A.registered_key(root) == key
 
 
 @pytest.mark.skipif(os.name == "nt", reason=LAUNCHD_ONLY)
-def test_remove_takes_aos_mcp_entry_and_leaves_one_whose_program_is_another_ao(tmp_path, monkeypatch, capsys):
-    """UPDATE-UNINSTALL-2: `ao remove` took any MCP entry named ao; it takes one only when it runs ao's server."""
+def test_remove_takes_aos_mcp_entry_and_leaves_one_whose_program_is_another_polyctl(tmp_path, monkeypatch, capsys):
+    """UPDATE-UNINSTALL-2: `polyctl remove` took any MCP entry named polyctl; it takes one only when it runs polyctl's server."""
     _home(tmp_path, monkeypatch)
     _launchd(monkeypatch)
     root = _project(tmp_path, "svc")
-    theirs = {"mcpServers": {"ao": {"command": "/usr/local/bin/ao", "args": ["daemon", "start"]}}}
+    theirs = {"mcpServers": {"polyctl": {"command": "/usr/local/bin/polyctl", "args": ["daemon", "start"]}}}
     kiro = Path(root) / ".kiro" / "settings" / "mcp.json"
     kiro.parent.mkdir(parents=True)
     kiro.write_text(json.dumps(theirs), encoding="utf-8")
-    ours = {"command": "/opt/ao/bin/ao", "args": ["-C", root, "mcp", "serve", "--role", "implementer"]}
+    ours = {"command": "/opt/polyctl/bin/polyctl", "args": ["-C", root, "mcp", "serve", "--role", "implementer"]}
     mcp = Path(root) / ".mcp.json"
-    mcp.write_text(json.dumps({"mcpServers": {"ao": ours, "other": {"command": "y"}}}), encoding="utf-8")
+    mcp.write_text(json.dumps({"mcpServers": {"polyctl": ours, "other": {"command": "y"}}}), encoding="utf-8")
     cfg = {"root": root, "reviews": "semantic-review"}
 
     assert cli.cmd_remove(cfg, SimpleNamespace(yes=False, allow_shared_hooks=False)) == 0
@@ -245,15 +245,15 @@ def test_remove_takes_aos_mcp_entry_and_leaves_one_whose_program_is_another_ao(t
     assert cli.cmd_remove(cfg, REMOVE) == 0
 
     out = _plain(capsys)
-    assert "   .mcp.json: the `ao` server entry (other entries stay)" in listed
-    assert listed.count("the `ao` server entry") == 1                    # the other program's is not listed
+    assert "   .mcp.json: the `polyctl` server entry (other entries stay)" in listed
+    assert listed.count("the `polyctl` server entry") == 1                    # the other program's is not listed
     assert json.loads(mcp.read_text(encoding="utf-8")) == {"mcpServers": {"other": {"command": "y"}}}
     assert json.loads(kiro.read_text(encoding="utf-8")) == theirs
-    assert "removed the `ao` entry from .mcp.json" in out and "phase 2/2 complete" in out
+    assert "removed the `polyctl` entry from .mcp.json" in out and "phase 2/2 complete" in out
 
 
 def test_windows_tasks_are_deleted_in_this_process_and_a_task_left_is_named(monkeypatch):
-    tasks, asked = {"ao-watchdog-svc", "ao-doctor-svc"}, []
+    tasks, asked = {"polyctl-watchdog-svc", "polyctl-doctor-svc"}, []
 
     def schtasks(*args):
         asked.append(args)
@@ -262,7 +262,7 @@ def test_windows_tasks_are_deleted_in_this_process_and_a_task_left_is_named(monk
         name = args[args.index("/TN") + 1]
         if args[0] == "/Query":
             return ("Ready", 0) if name in tasks else ("ERROR: The system cannot find the file specified.", 1)
-        if name == "ao-doctor-svc":
+        if name == "polyctl-doctor-svc":
             return "ERROR: Access is denied.", 1
         tasks.discard(name)
         return "SUCCESS: The scheduled task was successfully deleted.", 0
@@ -270,24 +270,24 @@ def test_windows_tasks_are_deleted_in_this_process_and_a_task_left_is_named(monk
     monkeypatch.setattr(cli, "_schtasks", schtasks)
     monkeypatch.setattr(cli.os, "name", "nt")
 
-    assert cli._installed_jobs("Svc") == [("scheduled task", "ao-watchdog-svc"), ("scheduled task", "ao-doctor-svc")]
-    assert cli._unschedule("ao-watchdog-svc") is None and tasks == {"ao-doctor-svc"}
-    assert "Access is denied" in cli._unschedule("ao-doctor-svc")
-    assert ("/Delete", "/TN", "ao-watchdog-svc", "/F") in asked
+    assert cli._installed_jobs("Svc") == [("scheduled task", "polyctl-watchdog-svc"), ("scheduled task", "polyctl-doctor-svc")]
+    assert cli._unschedule("polyctl-watchdog-svc") is None and tasks == {"polyctl-doctor-svc"}
+    assert "Access is denied" in cli._unschedule("polyctl-doctor-svc")
+    assert ("/Delete", "/TN", "polyctl-watchdog-svc", "/F") in asked
 
 
-# ---- the hook's ao -----------------------------------------------------------------------------
+# ---- the hook's polyctl -----------------------------------------------------------------------------
 
 @pytest.mark.skipif(os.name == "nt", reason="the hook runs under a POSIX shell here, and Windows names no fallback")
-def test_the_hook_runs_the_ao_that_installed_it_only_when_path_has_none_and_that_file_is_there(tmp_path):
+def test_the_hook_runs_the_polyctl_that_installed_it_only_when_path_has_none_and_that_file_is_there(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     (root / cli.PROJECT_MARKER).write_bytes(cli.PROJECT_MARKER_BYTES)
     subprocess.run(["git", "add", cli.PROJECT_MARKER], cwd=root, check=True)
-    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "adopt ao"], cwd=root,
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "adopt polyctl"], cwd=root,
                    check=True)
-    installed = _executable(tmp_path / "clone" / "bin" / "ao", '#!/bin/sh\necho "installed ao $*"\nexit 7\n')
+    installed = _executable(tmp_path / "clone" / "bin" / "polyctl", '#!/bin/sh\necho "installed polyctl $*"\nexit 7\n')
     hook = root / ".git" / "hooks" / "pre-commit"
     hook.parent.mkdir(parents=True, exist_ok=True)
     hook.write_bytes(cli._render_local_hook("pre-commit", ".", str(installed)))
@@ -295,38 +295,38 @@ def test_the_hook_runs_the_ao_that_installed_it_only_when_path_has_none_and_that
     bindir.mkdir()
     env = {"HOME": str(tmp_path), "PATH": os.pathsep.join([str(bindir), os.path.dirname(A.git_binary()), "/usr/bin",
                                                            "/bin"])}
-    if shutil.which("ao", path=env["PATH"]):
-        pytest.skip("an ao is installed beside git or in /usr/bin")
+    if shutil.which("polyctl", path=env["PATH"]):
+        pytest.skip("a polyctl is installed beside git or in /usr/bin")
     here = os.path.realpath(root)
 
     def commit():
         return subprocess.run(["/bin/sh", str(hook)], cwd=root, env=env, capture_output=True, text=True, timeout=60)
 
     ran = commit()
-    assert (ran.returncode, ran.stdout.strip()) == (7, f"installed ao -C {here} commit-check"), ran.stderr
+    assert (ran.returncode, ran.stdout.strip()) == (7, f"installed polyctl -C {here} commit-check"), ran.stderr
 
-    _executable(bindir / "ao", '#!/bin/sh\necho "path ao $*"\n')
+    _executable(bindir / "polyctl", '#!/bin/sh\necho "path polyctl $*"\n')
     ran = commit()
-    assert (ran.returncode, ran.stdout.strip()) == (0, f"path ao -C {here} commit-check"), ran.stderr
+    assert (ran.returncode, ran.stdout.strip()) == (0, f"path polyctl -C {here} commit-check"), ran.stderr
 
-    os.remove(bindir / "ao")
+    os.remove(bindir / "polyctl")
     os.remove(installed)
     ran = commit()
-    assert ran.returncode == 1 and ran.stdout == "" and "agent-orchestrator: ao not found" in ran.stderr
+    assert ran.returncode == 1 and ran.stdout == "" and "polyctl: polyctl not found" in ran.stderr
     assert cli._hook_portable(hook.read_bytes()) == cli._render_local_hook("pre-commit", ".")
 
 
-def test_install_names_the_installing_ao_in_the_git_directory_and_never_in_the_tree(project, monkeypatch):
+def test_install_names_the_installing_polyctl_in_the_git_directory_and_never_in_the_tree(project, monkeypatch):
     root = project["root"]
-    monkeypatch.setattr(cli, "_hook_fallback", lambda: "/opt/ao tool/bin/ao")
+    monkeypatch.setattr(cli, "_hook_fallback", lambda: "/opt/polyctl tool/bin/polyctl")
     install = SimpleNamespace(action="install", allow_shared_hooks=False)
 
     assert cli.cmd_hooks(project, install) == 0
 
     hooks = os.path.join(root, ".git", "hooks")
     assert open(os.path.join(hooks, "pre-commit"), "rb").read() == \
-        cli._render_local_hook("pre-commit", ".", "/opt/ao tool/bin/ao")
-    active = {t["role"]: t for t in cli._ao_hook_inventory(root)["targets"] if t["active"]}
+        cli._render_local_hook("pre-commit", ".", "/opt/polyctl tool/bin/polyctl")
+    active = {t["role"]: t for t in cli._polyctl_hook_inventory(root)["targets"] if t["active"]}
     assert active["pre-commit"]["static_state"] == "current-local (behavior unverified)"
     assert active["pre-push"]["static_state"] == "current-local (behavior unverified)"
 
@@ -337,48 +337,48 @@ def test_install_names_the_installing_ao_in_the_git_directory_and_never_in_the_t
     assert open(os.path.join(root, ".githooks", "pre-commit"), "rb").read() == cli._render_local_hook("pre-commit", ".")
 
 
-def test_status_doctor_and_prove_say_plainly_that_bin_sh_finds_no_ao_and_how_to_fix_it(project, monkeypatch, capsys):
+def test_status_doctor_and_prove_say_plainly_that_bin_sh_finds_no_polyctl_and_how_to_fix_it(project, monkeypatch, capsys):
     root = project["root"]
     with open(os.path.join(root, ".git", "hooks", "pre-commit"), "wb") as fh:
         fh.write(cli._render_local_hook("pre-commit", "."))
     os.chmod(os.path.join(root, ".git", "hooks", "pre-commit"), 0o755)     # as install writes it (LEADS-GATE)
-    detail = f"the hook exited 1 without AO's nonce-bound refusal proof: {cli.HOOK_AO_NOT_FOUND}"
+    detail = f"the hook exited 1 without polyctl's nonce-bound refusal proof: {cli.HOOK_POLYCTL_NOT_FOUND}"
     monkeypatch.setattr(cli, "_hook_execution_probe",
                         lambda inv: {"installed": False, "state": "not installed", "detail": detail, "exit": 1})
     monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)
-    fix = cli._ao_link_fix()
+    fix = cli._polyctl_link_fix()
 
     assert cli.cmd_hooks(project, SimpleNamespace(action="status", allow_shared_hooks=False)) == 0
     status = _plain(capsys)
-    assert f'ao for hooks: {cli.HOOK_AO_NOT_FOUND} (a shell alias is invisible to it); a commit fails with ' \
-           f'"ao not found"' in status
+    assert f'polyctl for hooks: {cli.HOOK_POLYCTL_NOT_FOUND} (a shell alias is invisible to it); a commit fails with ' \
+           f'"polyctl not found"' in status
     assert f"  fix: {fix}" in status
     assert dict(cli.doctor_problems(project))["commit-hook"].endswith(f" — {fix}")
     assert cli.cmd_prove(project, SimpleNamespace(no_review=True)) == 1
     assert f"{detail} — {fix}" in _plain(capsys)
     if os.name != "nt":
-        assert "ln -s " in fix and fix.endswith("~/.local/bin/ao and put ~/.local/bin on PATH")
+        assert "ln -s " in fix and fix.endswith("~/.local/bin/polyctl and put ~/.local/bin on PATH")
 
 
 # ---- the program a scheduled job starts --------------------------------------------------------
 
 def test_a_scheduled_job_names_a_program_that_exists_or_nothing(tmp_path, monkeypatch):
-    console = {name: str(_executable(tmp_path / "console" / name, "#!/bin/sh\n")) for name in ("ao", "ao-watchdog")}
+    console = {name: str(_executable(tmp_path / "console" / name, "#!/bin/sh\n")) for name in ("polyctl", "polyctl-watchdog")}
     on_path = dict(console)
     monkeypatch.setattr(cli.shutil, "which", lambda name, *args, **kwargs: on_path.get(name))
-    watchdog = ("ao-watchdog", ("scripts", "ao-watchdog"), "ao.watchdog")
+    watchdog = ("polyctl-watchdog", ("scripts", "polyctl-watchdog"), "polyctl.watchdog")
 
     # A console script on PATH carries its own interpreter.
-    assert cli._scheduled_argv(*watchdog) == [console["ao-watchdog"]]
+    assert cli._scheduled_argv(*watchdog) == [console["polyctl-watchdog"]]
     # A clone's script is started by this interpreter.
     on_path.clear()
-    assert cli._scheduled_argv(*watchdog) == [sys.executable, os.path.join(A.REPO, "scripts", "ao-watchdog")]
+    assert cli._scheduled_argv(*watchdog) == [sys.executable, os.path.join(A.REPO, "scripts", "polyctl-watchdog")]
     # An installed package has no clone beside it: this interpreter runs the module it imports.
     monkeypatch.setattr(A, "REPO", str(tmp_path / "lib"))
     monkeypatch.setattr(cli, "_package_installed", lambda: True)
-    assert cli._scheduled_argv(*watchdog) == [sys.executable, "-m", "ao.watchdog"]
-    assert cli._scheduled_argv("ao", ("bin", "ao"), "ao") == [sys.executable, "-m", "ao"]
-    assert importlib.util.find_spec("ao.watchdog") is not None
+    assert cli._scheduled_argv(*watchdog) == [sys.executable, "-m", "polyctl.watchdog"]
+    assert cli._scheduled_argv("polyctl", ("bin", "polyctl"), "polyctl") == [sys.executable, "-m", "polyctl"]
+    assert importlib.util.find_spec("polyctl.watchdog") is not None
     # Nothing a scheduler could start.
     monkeypatch.setattr(cli, "_package_installed", lambda: False)
     assert cli._scheduled_argv(*watchdog) is None
@@ -392,19 +392,19 @@ def test_a_program_found_only_through_a_relative_path_entry_is_not_the_one_a_job
     """SAFE-REMOVE-2 made a console script found through a relative PATH entry absolute, since a job starts from
     `/`. WINDOWS-NO-CWD-EXEC searches no relative entry: it names a directory under wherever install ran, a tree an
     agent writes among them, so the job starts the clone's own script instead."""
-    _executable(tmp_path / "console" / "ao-watchdog", "#!/bin/sh\n")
+    _executable(tmp_path / "console" / "polyctl-watchdog", "#!/bin/sh\n")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PATH", "console")
 
-    assert cli._scheduled_argv("ao-watchdog", ("scripts", "ao-watchdog"), "ao.watchdog") == \
-        [sys.executable, os.path.join(A.REPO, "scripts", "ao-watchdog")]
+    assert cli._scheduled_argv("polyctl-watchdog", ("scripts", "polyctl-watchdog"), "polyctl.watchdog") == \
+        [sys.executable, os.path.join(A.REPO, "scripts", "polyctl-watchdog")]
 
 
 @pytest.mark.skipif(os.name == "nt", reason=LAUNCHD_ONLY)
 def test_the_telegram_job_names_a_program_a_scheduler_can_start(project, tmp_path, monkeypatch, capsys):
-    """SAFE-REMOVE-2: the poller's job named this process's argv[0], under `python -m ao` a module file launchd
+    """SAFE-REMOVE-2: the poller's job named this process's argv[0], under `python -m polyctl` a module file launchd
     cannot run, and install said "installed"."""
-    from ao import telegram
+    from polyctl import telegram
     _launchd(monkeypatch)
     monkeypatch.setattr(telegram, "config", lambda *args, **kwargs: {"token": "t", "chats": ["1"]})
     monkeypatch.setattr(cli.shutil, "which", lambda name, *args, **kwargs: None)
@@ -421,7 +421,7 @@ def test_the_telegram_job_names_a_program_a_scheduler_can_start(project, tmp_pat
     assert cli.cmd_telegram(project, install) == 0
     (plist,) = list(agents.iterdir())
     with open(plist, "rb") as fh:
-        assert plistlib.load(fh)["ProgramArguments"] == [sys.executable, "-m", "ao", "-C", project["root"],
+        assert plistlib.load(fh)["ProgramArguments"] == [sys.executable, "-m", "polyctl", "-C", project["root"],
                                                           "telegram", "poll"]
 
 
@@ -444,10 +444,10 @@ def test_install_refuses_a_missing_program_and_schedules_an_installed_packages_m
     assert cli.cmd_watchdog(project, install) in (None, 0)
 
     with open(agents / f"{cli._launchd_label('watchdog', key)}.plist", "rb") as fh:
-        assert plistlib.load(fh)["ProgramArguments"] == [sys.executable, "-m", "ao.watchdog", "--root", root,
+        assert plistlib.load(fh)["ProgramArguments"] == [sys.executable, "-m", "polyctl.watchdog", "--root", root,
                                                           "--idle-minutes", "6"]
     with open(agents / f"{cli._launchd_label('doctor', key)}.plist", "rb") as fh:
-        assert plistlib.load(fh)["ProgramArguments"] == [sys.executable, "-m", "ao", "-C", root, "doctor", "--check",
+        assert plistlib.load(fh)["ProgramArguments"] == [sys.executable, "-m", "polyctl", "-C", root, "doctor", "--check",
                                                           "--notify"]
     assert loaded == {cli._launchd_label("watchdog", key), cli._launchd_label("doctor", key)}
 
@@ -471,10 +471,10 @@ def test_windows_install_refuses_a_missing_program_and_fails_when_schtasks_does(
 
     monkeypatch.setattr(cli, "_package_installed", lambda: True)
     assert cli.cmd_watchdog(project, install) == 1
-    assert f"FAILED ao-watchdog-{key.lower()} (every 2m): ERROR: Access is denied." in _plain(capsys)
+    assert f"FAILED polyctl-watchdog-{key.lower()} (every 2m): ERROR: Access is denied." in _plain(capsys)
 
     status["code"], created[:] = 0, []
     assert cli.cmd_watchdog(project, install) == 0
-    command = next(args[args.index("/TR") + 1] for args in created if f"ao-watchdog-{key.lower()}" in args)
-    assert command == subprocess.list2cmdline([sys.executable, "-m", "ao.watchdog", "--root", root, "--idle-minutes",
+    command = next(args[args.index("/TR") + 1] for args in created if f"polyctl-watchdog-{key.lower()}" in args)
+    assert command == subprocess.list2cmdline([sys.executable, "-m", "polyctl.watchdog", "--root", root, "--idle-minutes",
                                                "6"])

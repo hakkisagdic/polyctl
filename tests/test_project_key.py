@@ -5,12 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 
 
 def _project(parent, name="api"):
     root = parent / name
-    (root / ".ao").mkdir(parents=True)
+    (root / ".polyctl").mkdir(parents=True)
     return str(root)
 
 
@@ -19,7 +19,7 @@ def home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setattr(A, "HOME", str(home))
-    monkeypatch.setattr(W, "STATE_DIR", str(home / ".ao"))
+    monkeypatch.setattr(W, "STATE_DIR", str(home / ".polyctl"))
     return home
 
 
@@ -29,7 +29,7 @@ def test_an_installed_project_keeps_the_name_its_files_already_have(tmp_path, ho
     assert A.project_key(root) == "api"
     assert A.project_key(root + "/") == "api"
     assert A.heartbeat_path(root).endswith("heartbeat-api")
-    mark = json.load(open(os.path.join(root, ".ao", A.PROJECT_KEY_FILE), encoding="utf-8"))
+    mark = json.load(open(os.path.join(root, ".polyctl", A.PROJECT_KEY_FILE), encoding="utf-8"))
     assert mark == {"key": "api", "root": os.path.realpath(root)}
 
 
@@ -75,12 +75,12 @@ def test_a_lost_registry_gives_each_project_its_own_name_back(tmp_path, home):
     assert (A.project_key(second), A.project_key(first)) == (names[1], names[0])
 
 
-def test_a_copied_ao_directory_does_not_claim_the_original_name(tmp_path, home):
+def test_a_copied_polyctl_directory_does_not_claim_the_original_name(tmp_path, home):
     original = _project(tmp_path / "work")
     assert A.project_key(original) == "api"
     copy = _project(tmp_path / "copy")
-    mark = open(os.path.join(original, ".ao", A.PROJECT_KEY_FILE), encoding="utf-8").read()
-    open(os.path.join(copy, ".ao", A.PROJECT_KEY_FILE), "w", encoding="utf-8").write(mark)
+    mark = open(os.path.join(original, ".polyctl", A.PROJECT_KEY_FILE), encoding="utf-8").read()
+    open(os.path.join(copy, ".polyctl", A.PROJECT_KEY_FILE), "w", encoding="utf-8").write(mark)
 
     assert A.project_key(copy).startswith("api-")
 
@@ -88,7 +88,7 @@ def test_a_copied_ao_directory_does_not_claim_the_original_name(tmp_path, home):
 def test_a_name_whose_project_is_gone_is_taken_by_the_next(tmp_path, home):
     retired = _project(tmp_path / "old")
     assert A.project_key(retired) == "api"
-    os.rename(os.path.join(retired, ".ao"), os.path.join(retired, "ao-was-here"))
+    os.rename(os.path.join(retired, ".polyctl"), os.path.join(retired, "polyctl-was-here"))
 
     assert A.project_key(_project(tmp_path / "new")) == "api"
 
@@ -101,7 +101,7 @@ def test_a_directory_that_is_not_a_project_is_named_but_not_recorded(tmp_path, h
     assert A.project_registry() == {}
 
 
-def test_ao_projects_names_the_projects_that_would_have_collided(tmp_path, home, capsys, monkeypatch):
+def test_polyctl_projects_names_the_projects_that_would_have_collided(tmp_path, home, capsys, monkeypatch):
     monkeypatch.setattr(A, "all_workspaces", lambda: [])
     first = _project(tmp_path / "work")
     second = _project(tmp_path / "personal")

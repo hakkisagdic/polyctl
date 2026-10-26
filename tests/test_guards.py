@@ -2,7 +2,7 @@
 import os
 import time
 
-from ao import lib as A, storage
+from polyctl import lib as A, storage
 
 
 def _write(root, name, body):
@@ -28,7 +28,7 @@ def test_unread_inbox_mail_overrides_waiting(project):
 def test_queued_work_means_not_waiting(project):
     root = project["root"]
     _write(root, "20260905-0631-kiro-to-fable-BLOCKED-queue.md", "# x\n\n## KARAR GEREKLİ\n")
-    b = os.path.join(root, ".ao", "board.md")
+    b = os.path.join(root, ".polyctl", "board.md")
     _t = open(b, encoding="utf-8").read()
     open(b, "w", encoding="utf-8").write(_t.replace("## queued\n", "## queued\n- [B7] next · acceptance: #7\n"))
     assert A.waiting_on_architect(root, project) is None
@@ -43,7 +43,7 @@ def test_status_report_is_not_waiting(project):
 def test_product_dirty_ignores_coordination_dirs(project):
     root = project["root"]
     _write(root, "20260905-0631-kiro-to-fable-BLOCKED-q.md", "# q\n")
-    open(os.path.join(root, ".ao", "x.json"), "w", encoding="utf-8").write("{}")
+    open(os.path.join(root, ".polyctl", "x.json"), "w", encoding="utf-8").write("{}")
     assert A.product_dirty(root, project) == []
     open(os.path.join(root, "src.py"), "w", encoding="utf-8").write("x")
     assert len(A.product_dirty(root, project)) == 1
@@ -79,7 +79,7 @@ def _round_review(root, name, slice_id, verdict, stamp, head, kind="index-candid
 
 def test_respecified_slice_restarts_round_budget(project):
     root = project["root"]
-    b = os.path.join(root, ".ao", "board.md")
+    b = os.path.join(root, ".polyctl", "board.md")
     _t = open(b, encoding="utf-8").read()
     open(b, "w", encoding="utf-8").write(
         _t.replace("## running\n", "## running\n- [B6] slice · since: 2026-09-04 10:00\n")
@@ -93,7 +93,7 @@ def test_respecified_slice_restarts_round_budget(project):
         )
     assert A.rounds(root, "semantic-review") == 3
     storage.append_chained_jsonl(
-        os.path.join(root, ".ao", "ledger", "decisions.jsonl"),
+        os.path.join(root, ".polyctl", "ledger", "decisions.jsonl"),
         {"id": "AD-1", "at": int(time.time() + 5), "scope": "B6", "by": "architect"},
         A.DECISION_CHAIN, legacy_prefix=True,
     )
@@ -102,7 +102,7 @@ def test_respecified_slice_restarts_round_budget(project):
 
 def test_rounds_are_scoped_to_running_slice_at_the_same_head(project):
     root = project["root"]
-    b = os.path.join(root, ".ao", "board.md")
+    b = os.path.join(root, ".polyctl", "board.md")
     _t = open(b, encoding="utf-8").read()
     open(b, "w", encoding="utf-8").write(
         _t.replace("## running\n", "## running\n- [B2] second slice · since: 2000-01-01\n")
@@ -174,10 +174,10 @@ def test_explicit_red_rings_immediately(project):
 
 
 def test_running_slice_is_open_work(project):
-    from ao import watchdog as W
+    from polyctl import watchdog as W
     root = project["root"]
     assert W.open_work(project, root) == []
-    b = os.path.join(root, ".ao", "board.md")
+    b = os.path.join(root, ".polyctl", "board.md")
     _t = open(b, encoding="utf-8").read()
     open(b, "w", encoding="utf-8").write(_t.replace("## running\n", "## running\n- [B7] slice · since: 2026-09-05 18:17\n"))
     assert "slice running" in W.open_work(project, root)

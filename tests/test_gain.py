@@ -1,4 +1,4 @@
-"""`ao gain` reads every store it shows, and names the ones it cannot (GAIN)."""
+"""`polyctl gain` reads every store it shows, and names the ones it cannot (GAIN)."""
 import json
 import os
 import subprocess
@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_evidence import FakeGh
 
 
@@ -41,8 +41,8 @@ def _landed(project):
     A.record_authority(root, True, [], "sha256:t", "V-1", "C-1", review="r1.md",
                        candidate={"digest": "sha256:c1"}, scope={})
     subprocess.run([A.git_binary(), "-c", "core.hooksPath=", "commit", "--allow-empty", "-m",
-                    "land\n\nAo-Grant: C-1"], cwd=root, check=True, capture_output=True)
-    path = os.path.join(root, ".ao", "board.md")
+                    "land\n\nPolyctl-Grant: C-1"], cwd=root, check=True, capture_output=True)
+    path = os.path.join(root, ".polyctl", "board.md")
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
     text = text.replace("## queued\n", "## queued\n\n- [S2] waiting · needs: S1\n", 1)
@@ -83,13 +83,13 @@ def test_gain_reads_slices_spend_reviews_and_evidence_from_their_stores(project,
     assert cli.cmd_gain(project, _args(slices=True, sources=True)) == 0
 
     out = capsys.readouterr().out
-    assert "ao gain" in out and "1 landed" in out
+    assert "polyctl gain" in out and "1 landed" in out
     assert "APPROVED" in out and "150 product lines" in out
     assert "6 credit in 2 turns" in out and "2 tool calls" in out
     assert "windows green" in out and "1 commit(s) behind HEAD" in out
     assert "queued 1" in out and "done 1" in out
     # The file is named as the platform writes its paths: os.path.join, as cli_gain builds it (WINDOWS-TESTS-10).
-    assert os.path.join(".ao", "ledger", "platform-runs.jsonl") in out and "transcript:" in out
+    assert os.path.join(".polyctl", "ledger", "platform-runs.jsonl") in out and "transcript:" in out
     assert datetime.now().strftime("%m-%d") in out
 
 
@@ -120,7 +120,7 @@ def test_gain_names_an_adapter_that_declares_no_account_rather_than_guessing(pro
     assert cli.cmd_gain(project, _args(quota=True)) == 0
 
     out = capsys.readouterr().out
-    assert "kiro: its adapter declares no account lookup ao can run" in out
+    assert "kiro: its adapter declares no account lookup polyctl can run" in out
     assert "% used" not in out
 
 
@@ -138,9 +138,9 @@ def test_gain_says_what_is_absent_instead_of_showing_zero(project, monkeypatch, 
 def test_gain_validates_the_evidence_chain_and_shows_whether_a_run_still_vouches(
     project, tmp_path, monkeypatch, capsys
 ):
-    """LANE-EVIDENCE, from the review: `ao gain` read platform-runs.jsonl as raw lines, so a stale or unplaced run
-    still printed as green and a chained row edited after recording still printed as green while `ao evidence show`
-    and `ao doctor --check` refused the broken chain."""
+    """LANE-EVIDENCE, from the review: `polyctl gain` read platform-runs.jsonl as raw lines, so a stale or unplaced run
+    still printed as green and a chained row edited after recording still printed as green while `polyctl evidence show`
+    and `polyctl doctor --check` refused the broken chain."""
     monkeypatch.setattr(A, "session_paths", lambda cfg: (None, None))
     root = project["root"]
     first = subprocess.run([A.git_binary(), "rev-parse", "HEAD"], cwd=root, check=True,
@@ -166,5 +166,5 @@ def test_gain_validates_the_evidence_chain_and_shows_whether_a_run_still_vouches
 
     assert cli.cmd_gain(project, _args()) == 0
     out = capsys.readouterr().out
-    assert "cannot read .ao/ledger/platform-runs.jsonl" in out and "broken hash chain" in out
+    assert "cannot read .polyctl/ledger/platform-runs.jsonl" in out and "broken hash chain" in out
     assert "windows green" not in out

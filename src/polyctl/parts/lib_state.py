@@ -1,0 +1,2377 @@
+"""State that must agree: consistency across stores, repository signals.
+
+A part of src/polyctl/lib.py (#44): moved out byte for byte and run in its namespace by `_part`,
+where it stood; it is not importable on its own.
+"""
+
+
+# ---- the stores agree with each other, and a repair is on the record (#47) --------------
+
+REPAIR_CHAIN = "polyctl-repair-row-v1"
+
+
+def archived_path(root):
+    return os.path.join(root, ".polyctl", "ledger", "archived.jsonl")
+
+
+def archived_artefacts(root):
+    """{artefact: archive directory} for review artefacts polyctl moved out of the repository (#38, #47)."""
+    from .storage import read_jsonl
+    if not os.path.exists(archived_path(root)):
+        return {}
+    try:
+        return {row["artefact"]: row.get("archive") for row in read_jsonl(archived_path(root))
+                if isinstance(row, dict) and row.get("artefact")}
+    except Exception:
+        return {}
+
+
+def record_archived(root, name, archive):
+    from .storage import append_jsonl
+    append_jsonl(archived_path(root), {"at": int(time.time()), "artefact": name, "archive": archive})
+
+
+def _in_archive(root, reviews_dir, name):
+    folder = os.path.join(HOME, ".polyctl", "archive", project_key(root))
+    try:
+        for entry in sorted(os.listdir(folder)):
+            if entry.startswith(os.path.basename(os.path.normpath(reviews_dir)) + "-") \
+                    and os.path.exists(os.path.join(folder, entry, name)):
+                return os.path.join(folder, entry)
+    except OSError:
+        pass
+    return None
+
+
+def consistency_findings(root, cfg):
+    """Every disagreement between the board, the ledgers, the review artefacts and git (#47).
+
+    On 2026-09-07 the architect hand-edited three state files with no way for the
+    tool to confirm the result was coherent. Each finding names both sides. A
+    finding carries a repair only when the state is mechanical - a checkpoint for a
+    ledger whose checkout is gone, a lock whose holder is dead, an archived review
+    with no pointer to where it went; what was authorised, reviewed or verified is
+    reported and never changed.
+    """
+    from .storage import _load_committed_lengths, read_chained_jsonl
+    out = []
+
+    def found(kind, text, repair=None):
+        out.append({"kind": kind, "text": text, "repair": repair})
+
+    reviews_dir = cfg.get("reviews", "semantic-review")
+    # What was ever granted and verified, the rows a seal retired included, held to the seal (LEDGER-HISTORY).
+    try:
+        grants = [row for row in authority_history(root) if isinstance(row, dict) and row.get("granted") is True]
+    except Exception as exc:
+        grants = []
+        found("authority", f"the authority ledger cannot be read: {exc}")
+    try:
+        verifications = {row.get("id") for row in verification_history(root) if isinstance(row, dict)}
+    except Exception as exc:
+        verifications = None
+        found("verifications", f"the verification ledger cannot be read: {exc}")
+    try:
+        waivers = {row.get("id") for row in waiver_rows(root) if isinstance(row, dict)}
+    except Exception as exc:
+        waivers = None
+        found("waivers", f"the waiver ledger cannot be read: {exc}")
+    archived = archived_artefacts(root)
+    for row in grants:
+        token = row.get("token") or "a grant"
+        review = row.get("review")
+        if review and not os.path.isfile(os.path.join(root, reviews_dir, review)) and not (
+                archived.get(review) and os.path.isfile(os.path.join(archived[review], review))):
+            found("grant-review", f"grant {token} rests on review {review}, which is neither in {reviews_dir}/ "
+                                  "nor present at its recorded archive")
+        if verifications is not None and row.get("verification") and row["verification"] not in verifications:
+            found("grant-verification", f"grant {token} names verification {row['verification']}, which the "
+                                        "verification ledger does not hold")
+        if waivers is not None and row.get("waiver") and row["waiver"] not in waivers:
+            found("grant-waiver", f"grant {token} stood on waiver {row['waiver']}, which the waiver ledger does not hold")
+    try:
+        review_rows = read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+    except Exception as exc:
+        review_rows = []
+        found("reviews", f"the review ledger cannot be read: {exc}")
+    for row in review_rows:
+        name = row.get("artefact") if isinstance(row, dict) else None
+        if not name:
+            continue
+        path = os.path.join(root, reviews_dir, name)
+        where = None
+        if not os.path.isfile(path):
+            where = archived.get(name) or _in_archive(root, reviews_dir, name)
+            if where:
+                path = os.path.join(where, name)
+        try:
+            with open(path, "rb") as fh:
+                digest = "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+        except OSError:
+            found("review-missing", f"{reviews_dir}/{name} has a review row but its file cannot be read at {path}; "
+                                    "restore the recorded bytes")
+            continue
+        if digest != row.get("sha256"):
+            found("review-bytes", f"{path} is not the bytes its review row recorded; restore the recorded bytes")
+        elif where and name not in archived:
+            found("archive-pointer", f"{name} was moved to {where} and nothing records where",
+                  repair=("archive-pointer", name, where))
+    for state, items in board(root).items():
+        for item in items:
+            for key in ("landed", "commit"):
+                sha = (item["notes"].get(key) or "").split(" ")[0].strip()
+                if re.fullmatch(r"[0-9a-f]{7,40}", sha) and \
+                        not git_text(root, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"):
+                    found("board-commit", f"the board says {item['id']} {key} {sha}, which is not a commit here")
+    for ledger in sorted(_load_committed_lengths()):
+        checkout = os.path.dirname(os.path.dirname(os.path.dirname(ledger)))
+        if os.path.basename(os.path.dirname(ledger)) == "ledger" and not os.path.isdir(checkout):
+            found("checkpoint", f"a committed length is recorded for {ledger}, whose checkout is gone",
+                  repair=("checkpoint", ledger))
+    lock = architect_lock_path(root)
+    try:
+        with open(lock, encoding=UTF8) as fh:
+            holder = json.load(fh)
+    except (OSError, ValueError):
+        holder = None
+    if isinstance(holder, dict) and holder.get("pid") and not _pid_alive(holder["pid"]):
+        found("architect-lock", f"the architect lock names pid {holder['pid']}, which is not running",
+              repair=("architect-lock", lock, holder))
+    return out
+
+
+def repair_consistency(root, findings):
+    """Apply only the mechanical repairs, and record each in .polyctl/ledger/repairs.jsonl (#47).
+
+    A repair is itself evidence. It never touches the authority, verification,
+    review or waiver ledgers.
+    """
+    from .storage import (_exclusive_lock, _load_committed_lengths, _write_committed_lengths, append_chained_jsonl,
+                          checkpoint_path, read_chained_jsonl)
+    ledger = os.path.join(root, ".polyctl", "ledger", "repairs.jsonl")
+    read_chained_jsonl(ledger, REPAIR_CHAIN)
+    done = []
+
+    def intent(finding, repair):
+        # An interrupted repair must leave its reason before it changes state (TRIAGE-1-MEDIUM).
+        append_chained_jsonl(ledger, {"at": int(time.time()), "event": "intent", "kind": repair[0],
+                                     "target": list(repair[1:]), "finding": finding["text"]}, REPAIR_CHAIN)
+
+    for finding in findings:
+        repair = finding.get("repair")
+        if not repair:
+            continue
+        kind = repair[0]
+        if kind == "checkpoint":
+            intent(finding, repair)
+            store = checkpoint_path()
+            with _exclusive_lock(store + ".lock"):
+                data = _load_committed_lengths()
+                if repair[1] not in data:
+                    continue
+                del data[repair[1]]
+                # The same replace every ledger append makes, retried where Windows holds the store (#71).
+                _write_committed_lengths(data)
+        elif kind == "architect-lock":
+            with _exclusive_lock(project_file(root, "architect-lock-guard")):
+                try:
+                    with open(repair[1], encoding=UTF8) as fh:
+                        holder = json.load(fh)
+                except (OSError, ValueError):
+                    continue
+                if len(repair) < 3 or holder != repair[2] or _pid_alive(holder["pid"]):
+                    continue
+                intent(finding, repair)
+                os.remove(repair[1])
+        elif kind == "archive-pointer":
+            intent(finding, repair)
+            record_archived(root, repair[1], repair[2])
+        else:
+            continue
+        done.append(finding)
+    return done
+
+
+def grant_artefacts_at_risk(root, cfg):
+    """(name, "untracked" or "missing") for each review a grant rests on that git does not hold (#38).
+
+    Every grant's, the sealed ones too (LEDGER-HISTORY).
+    """
+    granted = sorted({row["review"] for row in authority_history(root)
+                      if isinstance(row, dict) and row.get("granted") is True and row.get("review")})
+    if not granted:
+        return []
+    tracked = tracked_review_names(root, cfg["reviews"])
+    directory = os.path.join(root, cfg["reviews"])
+    return [(name, "untracked" if os.path.exists(os.path.join(directory, name)) else "missing")
+            for name in granted if name not in tracked]
+
+
+def candidate_review_decision(root, review_dir, candidate_digest):
+    """What the newest recorded review of one candidate decides (#63).
+
+    Returns ``{"match": (name, verdict, body, evidence) or None, "problem": text or None}``.
+    Reviews are taken in the order polyctl recorded them in the chained review ledger,
+    never by file time, which anyone can touch. A review that did not take place
+    (UNAVAILABLE) masks nothing. Otherwise the newest review of the candidate
+    decides: a missing, unreadable, emptied or rewritten artefact is a refusal and
+    never a step back to an older approval, and a fallback's approval cannot
+    supersede a completed rejection of the same candidate.
+    """
+    from .storage import read_chained_jsonl
+    rows = [row for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+            if isinstance(row, dict) and row.get("kind") == "index-candidate"
+            and row.get("candidate") == candidate_digest]
+    for position in range(len(rows) - 1, -1, -1):
+        row = rows[position]
+        if row.get("verdict") == "UNAVAILABLE":
+            continue
+        name = row.get("artefact")
+        try:
+            with open(os.path.join(root, review_dir, str(name)), "rb") as fh:
+                data = fh.read()
+        except OSError:
+            return {"match": None,
+                    "problem": f"the newest review of this candidate, {name}, cannot be read"}
+        if "sha256:" + hashlib.sha256(data).hexdigest() != row.get("sha256"):
+            return {"match": None,
+                    "problem": f"the newest review of this candidate, {name}, is not the file "
+                               "polyctl recorded: emptied, cut short or rewritten"}
+        body = data.decode(UTF8, "replace")
+        evidence = review_evidence(body)
+        verdict = _review_verdict(body)
+        if isinstance(evidence, dict) and "verdict" in evidence and evidence["verdict"] != verdict:
+            verdict = "INVALID"
+        if verdict != "APPROVED" or not isinstance(evidence, dict) \
+                or evidence.get("authorizable") is not True:
+            return {"match": None, "problem": None}
+        rejection = next((earlier for earlier in reversed(rows[:position])
+                          if earlier.get("verdict") == "NEEDS_CHANGES"), None)
+        if row.get("fallback") and rejection:
+            # A person's own review is not the configured reviewer either (REVIEW-TIERS).
+            who = "a person's" if row.get("tier") == "person" else "a fallback reviewer's"
+            return {"match": None,
+                    "problem": f"{name} is {who} approval; it cannot supersede "
+                               f"the rejection of this candidate in {rejection.get('artefact')}"}
+        return {"match": (name, verdict, body, evidence), "problem": None}
+    return {"match": None, "problem": None}
+
+
+def range_review(root, commits, since=0, author=None):
+    """The ledger row of a retrospective review of exactly this range, recorded after `since` rows, or None.
+
+    Given `author`, only a review of the range as that author's: another review of the same range that
+    ran meanwhile - `polyctl review --commits`, judged against the implementer configured now - recorded no
+    author, and a catch-up closed its waiver on it (CATCHUP-READY-2).
+    """
+    from .storage import read_chained_jsonl
+    rows = read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+    for row in reversed(rows[since:]):
+        if isinstance(row, dict) and row.get("kind") == "commit-range" \
+                and row.get("commits") == commits and (author is None or row.get("author") == author):
+            return row
+    return None
+
+
+def review_row_count(root):
+    """How many committed rows the review ledger holds when polyctl may append to it; refuses up front when rows past
+    the attested prefix or an in-tree checkpoint store would refuse the append, from one locked read of the
+    file with its handle closed (CATCHUP-ROW, LEDGER-ATTESTED)."""
+    from .storage import read_chained_jsonl
+    return len(read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN, for_append=True))
+
+
+def latest_candidate_review(root, review_dir, candidate_digest, limit=40):
+    """Return approval only when the newest recorded review of the candidate approves."""
+    return candidate_review_decision(root, review_dir, candidate_digest)["match"]
+
+
+AUTHORITY_CHAIN = "polyctl-authority-row-v1"
+
+
+def authority_rows(root):
+    """All committed authority rows after validating the complete hash chain.
+
+    A non-empty legacy ledger without predecessor fields is deliberately
+    unreadable. Rewriting old authority in place would turn an append-only audit
+    trail into evidence manufactured by the reader.
+    """
+    from .storage import read_chained_jsonl
+    path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
+    return read_chained_jsonl(path, AUTHORITY_CHAIN)
+
+
+def authority_history(root):
+    """Every authority row ever committed, oldest first: those a seal retired, then the live ones, as one chain.
+
+    What was ever granted is asked here - the candidates a waiver authorised, the trees and the
+    first head the landed-tree check measures from, the reviews a grant rests on - and the newest
+    decision from `authority_rows`. Asked of the live rows, a seal made a spent waiver look unused,
+    so it stood in for a review of other bytes, and moved the landed-tree check's first grant past
+    commits it had not measured (the review of BOUNDED-STORES, LEDGER-HISTORY).
+    """
+    from .storage import read_chained_history
+    return read_chained_history(os.path.join(root, ".polyctl", "ledger", "authority.jsonl"), AUTHORITY_CHAIN)
+
+
+def latest_authority_decision(root):
+    """Newest real boolean decision, only after the full chain validates."""
+    rows = authority_rows(root)
+    return next(
+        (row for row in reversed(rows)
+         if isinstance(row, dict) and type(row.get("granted")) is bool),
+        None,
+    )
+
+
+VERIFICATION_CHAIN = "polyctl-verification-row-v1"
+
+
+GATE_SUMMARY_TAIL_LINES = 30
+
+
+def gate_counts(output, summary=None):
+    """Pass and fail counts from the summary a test runner ends with, or None (#70).
+
+    Only the last lines are read, and the last summary in them counts: a test name,
+    a log line or a fixture the implementer wrote can print "# pass 900" anywhere
+    earlier. A gate can name its runner's summary with `summary`, a regex with `pass`
+    and `fail` groups. Nothing found is None - unparsed, never a number. Both groups
+    must capture numbers; an unmatched group is not zero. A pytest closing line with
+    errors alone counts them as failures (TRIAGE-2-LOW).
+    """
+    tail = "\n".join(str(output or "").splitlines()[-GATE_SUMMARY_TAIL_LINES:])
+    if summary:
+        try:
+            found = list(re.finditer(summary, tail, re.M))
+        except re.error:
+            return None
+        if not found:
+            return None
+        groups = found[-1].groupdict()
+        try:
+            return int(groups["pass"]), int(groups["fail"])
+        except (KeyError, TypeError, ValueError):
+            return None
+    # Each summary a runner closes with is found where it ends, and the one that ends last counts. A node
+    # pair was taken before any pytest line wherever it stood, so a `# pass 900` / `# fail 0` a test printed
+    # above pytest's own closing line was read as the run's result (GATE-SUMMARY-2).
+    found = []
+    # node --test closes with "# pass N" / "# fail N" (TAP) or "ℹ pass N" / "ℹ fail N".
+    for mark in ("#", "ℹ"):
+        passes = list(re.finditer(rf"^{mark} pass (\d+)[ \t]*$", tail, re.M))
+        fails = list(re.finditer(rf"^{mark} fail (\d+)[ \t]*$", tail, re.M))
+        if passes and fails:
+            found.append((max(passes[-1].end(), fails[-1].end()),
+                          (int(passes[-1].group(1)), int(fails[-1].group(1)))))
+    # pytest closes with "3 failed, 461 passed, 2 skipped in 12.30s".
+    for closing in re.finditer(r"^=*[ \t]*((?:\d+ [a-z]+(?:, )?)+) in [\d.]+s\b", tail, re.M):
+        counts = {word: int(n) for n, word in re.findall(r"(\d+) ([a-z]+)", closing.group(1))}
+        if {"passed", "failed", "error", "errors"}.intersection(counts):
+            found.append((closing.end(), (counts.get("passed", 0),
+                                          counts.get("failed", 0) + counts.get("error", 0) + counts.get("errors", 0))))
+    return max(found)[1] if found else None
+
+
+def gate_summary_line(output, summary=None):
+    """The closing line gate_counts read its numbers from, or None (#6).
+
+    Kept in the verification beside the exit code, so a report can quote what the
+    runner said rather than a number the reporter typed.
+    """
+    tail = str(output or "").splitlines()[-GATE_SUMMARY_TAIL_LINES:]
+    if summary:
+        try:
+            found = [line for line in tail if re.search(summary, line)]
+        except re.error:
+            return None
+        return found[-1].strip()[:200] if found else None
+    for line in reversed(tail):
+        text = line.strip()
+        if re.match(r"^[#ℹ] (pass|fail) \d+$", text) or \
+                re.match(r"^=*[ \t]*(?:\d+ [a-z]+(?:, )?)+ in [\d.]+s\b", text):
+            return text.strip("= ")[:200]
+    return None
+
+
+def verification_evidence(root):
+    """One line naming the newest verification: its id, each gate's exit and closing line (#6)."""
+    try:
+        record = latest_verification(root)
+    except Exception:
+        return None
+    if not record:
+        return None
+    gates = [f"{g.get('name')} exit {g.get('exit')}" + (f" ({g['summary']})" if g.get("summary") else "")
+             for g in record.get("gates") or [] if isinstance(g, dict)]
+    return (f"{record.get('id')} {'passed' if record.get('passed') else 'FAILED'}: "
+            + ("; ".join(gates) if gates else "no gates"))
+
+
+# Read in whichever language a report is written (LANGUAGE-FILES).
+_GREEN_CLAIM = re.compile(r"\b\d+\s+passed\b|\ball\s+(?:tests|gates|checks)\s+(?:pass|passed|green)\b|"
+                          + "|".join(rf"\b{re.escape(word)}\b" for word in language.words("green")), re.I)
+_RED_ADMISSION = re.compile(r"\b[1-9]\d*\s+(?:failed|errors?)\b|"
+                            + "|".join(rf"\b{re.escape(word)}\b" for word in language.words("red")))
+
+
+def report_inconsistency(root, text):
+    """Why a report that claims green contradicts the newest verification, or None (#6).
+
+    A report said "159 passed" while the suite had exited 1. The claim is read from
+    the report's words; the fact from the verification ledger. A report that admits
+    a failure, or a project with no verification, is not inconsistent.
+    """
+    body = str(text or "")
+    if not _GREEN_CLAIM.search(body) or _RED_ADMISSION.search(body):
+        return None
+    try:
+        record = latest_verification(root)
+    except Exception:
+        return None
+    if not record or record.get("passed") is not False:
+        return None
+    failed = [f"{g.get('name')} exit {g.get('exit')}" for g in record.get("gates") or []
+              if isinstance(g, dict) and not g.get("passed")]
+    return (f"the report claims green, but the newest verification {record.get('id')} failed"
+            + (f": {', '.join(failed)}" if failed else ""))
+
+
+def gate_definitions_digest_of(spec, profile):
+    """Canonical digest of the gate definitions one profile runs, or None when it has none (#61).
+
+    `.polyctl/gates.json` is a file the implementer can write. A verification that does
+    not name the definitions it ran lets a gate weakened after the run inherit the
+    pass measured under the stronger one.
+    """
+    try:
+        ran = [[name, spec["gates"][name]] for name in spec["profiles"][profile]]
+        canonical = json.dumps({"profile": profile, "gates": ran}, ensure_ascii=True,
+                               sort_keys=True, separators=(",", ":"))
+    except (KeyError, TypeError, ValueError):
+        return None
+    return "sha256:" + hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+def gate_definitions_digest(root, profile):
+    """The digest of the definitions in force now, read from `.polyctl/gates.json`."""
+    try:
+        with open(os.path.join(root, ".polyctl", "gates.json"), encoding=UTF8) as fh:
+            spec = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return gate_definitions_digest_of(spec, profile)
+
+
+def latest_verification(root):
+    """The newest complete, chained `polyctl verify` record, or None.
+
+    The ledger is chained like the authority ledger (#61), so a row appended
+    without a valid link makes it unreadable. Rows written before it was chained
+    carry no link; they stay readable as history and never count.
+    """
+    from .storage import CHAIN_PREVIOUS_FIELD, read_chained_jsonl
+    rows = read_chained_jsonl(os.path.join(root, ".polyctl", "ledger", "verifications.jsonl"),
+                              VERIFICATION_CHAIN, legacy_prefix=True)
+    chained = [row for row in rows if CHAIN_PREVIOUS_FIELD in row]
+    return chained[-1] if chained else None
+
+
+def verification_history(root):
+    """Every verification row ever committed, oldest first, the sealed ones held to their seal (LEDGER-HISTORY)."""
+    from .storage import read_chained_history
+    return read_chained_history(os.path.join(root, ".polyctl", "ledger", "verifications.jsonl"), VERIFICATION_CHAIN,
+                                legacy_prefix=True)
+
+
+def verification_by_id(root, vid):
+    """One verification row by id, the newest of that id, from the ledger or the rows a seal retired from it (#50).
+
+    The retired rows are held to their seal: an archived row edited after it was returned as edited (LEDGER-HISTORY).
+    """
+    return next((row for row in reversed(verification_history(root))
+                 if isinstance(row, dict) and row.get("id") == vid), None)
+
+
+def record_verification(root, record):
+    """Durably append one chained verification before reporting its result.
+
+    The machine's event log hears of it once the row is down (EVENTS-LOG).
+    """
+    from .storage import append_chained_jsonl
+    path = os.path.join(root, ".polyctl", "ledger", "verifications.jsonl")
+
+    def above_every_recorded(rows):
+        # Under the ledger's lock, where writers take turns: two runs that minted one id outside it - under one held
+        # machine lock, in one millisecond - recorded two verifications under it, which a grant names (LEADS-GATE).
+        taken = [int(found.group(1)) for found in (re.fullmatch(r"V-([0-9]+)", str(row.get("id") or ""))
+                                                   for row in rows if isinstance(row, dict)) if found]
+        mine = re.fullmatch(r"V-([0-9]+)", str(record.get("id") or ""))
+        return {"id": f"V-{max(taken) + 1}"} if mine and taken and int(mine.group(1)) <= max(taken) else {}
+
+    record.setdefault("slice", (running_slice(root) or {}).get("id"))
+    row = append_chained_jsonl(path, scan_record(record), VERIFICATION_CHAIN, legacy_prefix=True,
+                               prepare=above_every_recorded)
+    record["id"] = row.get("id")                        # the id it went under, which its caller reports
+    emit_event(root, "verification", {"id": row.get("id"), "passed": row.get("passed"), "profile": row.get("profile")})
+    return row
+
+
+def _granted_trees(root):
+    """The index trees authority was granted for, and the commit the first grant built on, from the whole history.
+
+    Read from the live rows, a seal moved the first grant forward, and every commit between the
+    two went unmeasured (the review of BOUNDED-STORES, LEDGER-HISTORY).
+    """
+    rows = [row for row in authority_history(root)
+            if isinstance(row, dict) and row.get("granted") is True]
+    trees = {(row.get("candidate") or {}).get("index_tree") for row in rows}
+    trees.discard(None)
+    base = next(((row.get("candidate") or {}).get("head") for row in rows
+                 if (row.get("candidate") or {}).get("head")), None)
+    return trees, base, rows
+
+
+def landed_commit_problem(root, commit="HEAD"):
+    """Why a landed commit is not the tree its grant bound, or None when it is (#64).
+
+    commit-check measures the index when the pre-commit hook runs, and Git writes
+    the commit's tree from the index after hooks return, so a process that stages
+    a path in between lands it inside an authorised commit. A hook cannot prevent
+    that; comparing the tree that landed with the tree that was granted detects it.
+    """
+    try:
+        sha = _git_output(root, "rev-parse", "--verify", commit).decode("ascii").strip()
+        tree = _git_output(root, "rev-parse", "--verify", f"{commit}^{{tree}}").decode("ascii").strip()
+    except (RuntimeError, UnicodeError) as exc:
+        return f"cannot read {commit}: {exc}"
+    # The newest grant is a newest decision, read from the live rows; the history only when a seal retired it
+    # with nothing but refusals after it, so a commit does not wait on reading every archive (LEDGER-HISTORY).
+    rows = [row for row in authority_rows(root) if isinstance(row, dict) and row.get("granted") is True] \
+        or _granted_trees(root)[2]
+    grant = rows[-1] if rows else None
+    granted = ((grant or {}).get("candidate") or {}).get("index_tree")
+    if not granted:
+        return f"commit {sha[:12]} landed with no grant on record"
+    if granted != tree:
+        return (f"commit {sha[:12]} landed tree {tree[:12]}, but grant "
+                f"{grant.get('token') or '<unnamed>'} bound tree {granted[:12]}")
+    return None
+
+
+def commits_without_grant(root, why=None):
+    """Landed commits, newest first, whose tree no grant bound (#64).
+
+    Only commits on top of the one the first grant was built on are measured;
+    history from before the authority ledger has nothing to be compared with.
+
+    Every one of them is measured. The doctor read the newest 50 and the watchdog the
+    newest 20, without merges: an ungranted commit with more granted ones on top fell
+    out of the window for good, and a merge whose tree was not its parents' - an edit
+    made while merging, or a tree committed with `git commit-tree` - was not read at
+    all (the reviews of LANDED-TREE and ATTACK-SUITE). A merge is named, whatever it
+    carries, as `polyctl commit-check --range` names it (`_merge_problems`): a grant binds one
+    parent, and polyctl lands no merge; nothing is merged to say so. The grants are every one
+    in the history, sealed ones too. `why`, a dict, is given the reason each commit is named. A ledger
+    or a git that cannot be read raises: a check that cannot run passes nothing
+    (LEDGER-HISTORY).
+
+    On polyctl's own history, 428 commits from the first grant's head with no merge, the
+    walk took about 25 ms of git.
+    """
+    trees, base, _ = _granted_trees(root)
+    if base is None:
+        return []
+    if not _OBJECT_ID.fullmatch(str(base)):
+        # A head comes from a ledger an agent can write; it reaches git as a revision, never as an option.
+        raise ValueError(f"the first grant names {str(base)[:80]!r} as the commit it was built on, which is no "
+                         "commit id")
+    stray = []
+    for commit in landed_commits(root, f"{base}..HEAD"):
+        if len(commit["parents"]) > 1:
+            reason = _merge_problems(commit)[0]
+        elif commit["tree"] in trees:
+            continue
+        else:
+            reason = "no grant bound its tree"
+        stray.append(commit["sha"])
+        if why is not None:
+            why[commit["sha"]] = reason
+    return stray[::-1]
+
+
+def landed_without_grant(root):
+    """What the landed-tree check finds, in the one line `polyctl doctor` and the watchdog say it in, or None (LEDGER-HISTORY).
+
+    The doctor names it as `landed-without-grant` and the watchdog raises the alarm of that name
+    with these words as what it says, so the one alarm both raise rings once for the commits it
+    names, and again when others land. A check that cannot run says so: it is never a pass.
+    """
+    why = {}
+    try:
+        stray = commits_without_grant(root, why)
+    except Exception as exc:
+        return ("the landed-tree check cannot run, so no commit since the first grant is known to have been granted: "
+                f"{' '.join(str(exc).split())[:300]} — polyctl doctor --consistency names what does not read")
+    if not stray:
+        return None
+    merges = sum(1 for sha in stray if why.get(sha) != "no grant bound its tree")
+    return (f"{len(stray)} commit(s) landed with a tree no grant bound: "
+            + ", ".join(sha[:12] for sha in stray[:5]) + (f" and {len(stray) - 5} more" if len(stray) > 5 else "")
+            + (f", {merges} of them a merge, which polyctl lands none of" if merges else "")
+            + " — made outside polyctl commit, or with a path staged after commit-check; read each with git show, then "
+            "revert it or have it reviewed (polyctl review --commits <sha>^..<sha>)")
+
+
+# ---- a commit names the grant it was made under (COMMIT-TRAILER) --------------------------------
+
+# The trailers `polyctl commit` ends a message with, in this order: the grant, the index tree it names, the
+# verification it stood on, and the review or the waiver it rested on. A grant made with the review
+# switch off rested on neither, and its Polyctl-Review says `off`. Git reads a trailer's key without case.
+COMMIT_TRAILERS = ("Polyctl-Grant", "Polyctl-Tree", "Polyctl-Verification", "Polyctl-Review", "Polyctl-Waiver")
+TRAILER_PREFIX = "polyctl-"
+REVIEW_OFF = "off"
+# A trailer as git finds one with its default separator: letters, digits and hyphens, then the colon,
+# spaces or tabs allowed before it.
+_TRAILER_LINE = re.compile(r"[A-Za-z0-9-]+[ \t]*:")
+_OBJECT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def grant_trailers(grant):
+    """[(key, value)] naming the grant a commit is made under, read from its authority row (COMMIT-TRAILER).
+
+    Nothing is worked out again: the tree is the candidate's index tree the grant names, and the review
+    or the waiver is the one it recorded resting on. ValueError when the row is not a grant, or holds a
+    value one line of a message cannot carry.
+    """
+    token = grant.get("token") if isinstance(grant, dict) else None
+    if not isinstance(grant, dict) or grant.get("granted") is not True:
+        raise ValueError(f"{token or 'the authority decision'} is not a grant")
+    candidate = grant.get("candidate") if isinstance(grant.get("candidate"), dict) else {}
+    named = [("Polyctl-Grant", token), ("Polyctl-Tree", candidate.get("index_tree")),
+             ("Polyctl-Verification", grant.get("verification"))]
+    rested = [(key, grant[field]) for key, field in (("Polyctl-Review", "review"), ("Polyctl-Waiver", "waiver"))
+              if grant.get(field)]
+    named += rested or [("Polyctl-Review", REVIEW_OFF)]
+    for key, value in named:
+        if not isinstance(value, str) or not value or value != value.strip() \
+                or any(ch in value for ch in "\r\n\0"):
+            raise ValueError(f"grant {token or '<unnamed>'} records no {key} a trailer can carry")
+    return named
+
+
+def _trailer_block(lines):
+    """Whether a paragraph is trailers alone as git reads them: each line one, or the continuation of one."""
+    return bool(lines) and bool(_TRAILER_LINE.match(lines[0])) \
+        and all(_TRAILER_LINE.match(line) or line[:1] in (" ", "\t") for line in lines[1:])
+
+
+def with_trailers(message, trailers):
+    """`message` ending with `trailers`, in git's conventions (COMMIT-TRAILER).
+
+    Git reads a message's trailers from its last paragraph, and never from the first, its subject. A
+    message whose last paragraph is trailers alone - the Co-Authored-By it ends with - takes these after
+    its own, in one block; any other gets them as a paragraph of their own. Either way every line of the
+    last paragraph is a trailer, so `git interpret-trailers --parse` and `%(trailers)` read each one.
+    Blank lines at either end are dropped, as git drops them. ValueError for a message with nothing in
+    it, and for one whose last paragraph already holds a Polyctl- trailer: that would be a second set.
+    """
+    lines = message.split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines:
+        raise ValueError("the message is empty")
+    blank = [at for at, line in enumerate(lines) if not line.strip()]
+    block = [line.rstrip() for line in lines[blank[-1] + 1:]] if blank else []
+    joined = _trailer_block(block)
+    keys = [line.split(":", 1)[0].strip() for line in block if joined and _TRAILER_LINE.match(line)]
+    carried = sorted({key for key in keys if key.lower().startswith(TRAILER_PREFIX)})
+    if carried:
+        raise ValueError(f"the message already ends with {', '.join(carried)}: polyctl commit writes the Polyctl- trailers "
+                         "itself, from the grant it checked, so take those lines out")
+    return "\n".join(lines + ([] if joined else [""]) + [f"{key}: {value}" for key, value in trailers]) + "\n"
+
+
+def _polyctl_trailers(trailers):
+    """{key: [values]} of the Polyctl- trailers among [(key, value)], each key spelled as polyctl writes it."""
+    carried = {}
+    for key, value in trailers:
+        if key.lower().startswith(TRAILER_PREFIX):
+            name = next((known for known in COMMIT_TRAILERS if known.lower() == key.lower()), key)
+            carried.setdefault(name, []).append(value)
+    return carried
+
+
+def landed_commits(root, revisions):
+    """[{sha, tree, parents, trailers, at}] of the commits `revisions` names, parents first (COMMIT-TRAILER).
+
+    Git reads the trailers itself, through `%(trailers)`: the last paragraph of the message, never its
+    subject, continuations unfolded, one (key, value) a trailer. `revisions` reaches git as one
+    argument. RuntimeError when git cannot list them.
+    """
+    raw = _git_output(root, "log", "--no-show-signature", "--topo-order", "--reverse", "-z",
+                      "--format=%H%n%T%n%P%n%ct%n%(trailers:only,unfold)", revisions, "--", timeout=300)
+    commits = []
+    for record in raw.decode(UTF8, "replace").split("\0"):
+        lines = record.lstrip("\n").split("\n")
+        if not lines[0]:
+            continue
+        if len(lines) < 4 or not lines[3].isdigit() or not _OBJECT_ID.fullmatch(lines[0]) or not _OBJECT_ID.fullmatch(lines[1]):
+            raise RuntimeError(f"git listed a commit polyctl cannot read: {lines[0][:40]!r}")
+        trailers = [(key.strip(), value.strip()) for key, colon, value in
+                    (line.partition(":") for line in lines[4:]) if colon and key.strip()]
+        commits.append({"sha": lines[0], "tree": lines[1], "parents": lines[2].split(), "trailers": trailers,
+                        "at": int(lines[3])})
+    return commits
+
+
+def ledger_grants(root):
+    """({token: authority row} this checkout's ledger holds, live and sealed, or None, why it cannot be read).
+
+    (None, None) where there is no authority ledger at all: a clone, as in CI (COMMIT-TRAILER).
+    """
+    path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
+    try:
+        # The sealed rows held to their seal: an archived grant edited after it was taken as recorded (LEDGER-HISTORY).
+        rows = authority_history(root)
+    except Exception as exc:
+        return None, str(exc)
+    if not rows and not os.path.exists(path):
+        return None, None
+    return {row["token"]: row for row in rows if isinstance(row, dict) and isinstance(row.get("token"), str)}, None
+
+
+def trailer_problems(commit, grants=None):
+    """Why a landed commit does not match the grant its Polyctl- trailers name; [] when it does (COMMIT-TRAILER).
+
+    Each trailer `polyctl commit` writes must be there once, and the commit's tree must be the tree Polyctl-Tree
+    names: a commit amended, rebased or rewritten after its grant has another. `grants`, {token: row},
+    is the checkout's authority ledger where it can be read, and a grant on record that names another
+    tree, verification, review or waiver fails the commit too. A grant it does not hold fails nothing:
+    a grant stays in the ledger of the checkout that made it, a lane's in the lane's own.
+    """
+    carried = _polyctl_trailers(commit["trailers"])
+    if not carried:
+        return ["carries no Polyctl- trailers, which polyctl commit writes"]
+    problems = [f"carries {len(values)} {key} trailers" for key, values in carried.items() if len(values) > 1]
+    problems += [f"has no {key} trailer" for key in COMMIT_TRAILERS[:3] if key not in carried]
+    if "Polyctl-Review" not in carried and "Polyctl-Waiver" not in carried:
+        problems.append("names no review or waiver its grant rested on")
+    problems += [f"carries {key}, which polyctl commit does not write"
+                 for key in sorted(set(carried) - set(COMMIT_TRAILERS))]
+    if problems:
+        return problems
+    said = {key: values[0] for key, values in carried.items()}
+    if said["Polyctl-Tree"] != commit["tree"]:
+        problems.append(f"its tree {commit['tree'][:12]} is not {said['Polyctl-Tree'][:12]}, the tree its grant names: "
+                        "it changed after the grant")
+    grant = (grants or {}).get(said["Polyctl-Grant"])
+    if grant is not None:
+        try:
+            recorded = dict(grant_trailers(grant))
+        except ValueError as exc:
+            problems.append(f"the ledger's record of it does not hold: {exc}")
+        else:
+            problems += [f"its {key} is {said.get(key) or 'missing'}, where the ledger's {said['Polyctl-Grant']} "
+                         f"records {recorded.get(key) or 'none'}"
+                         for key in COMMIT_TRAILERS if said.get(key) != recorded.get(key)]
+    return problems
+
+
+def trailer_audit(root, revisions, since_first=False):
+    """Each commit of a revision range held to the grant its Polyctl- trailers name (COMMIT-TRAILER).
+
+    Read-only, and it needs no .polyctl/: `revisions` is `<a>..<b>`, or one commit for all of its history,
+    and each commit in it is judged by `trailer_problems`, against the checkout's authority ledger where
+    one can be read - except a merge, which `_merge_problems` refuses whatever it carries, without
+    merging anything (LEADS-GATE). `since_first` leaves out the commits older than the
+    first one carrying Polyctl- trailers - those it descends from - and every commit while none carries them:
+    history from before polyctl wrote them. Returns {commits, end, first, ledger, unreadable}; each commit
+    also holds merge, exempt, grant, problems and on_record (None where no ledger was read).
+    ValueError for a range polyctl does not hand to git; RuntimeError when git cannot read it.
+    """
+    spec = str(revisions or "")
+    _, dots, end = spec.partition("..")
+    end = (end or "HEAD") if dots else spec
+    if not spec or "..." in spec or spec.startswith("-") or end.startswith("-") \
+            or any(ch.isspace() or ch == "\0" for ch in spec):
+        raise ValueError(f"{spec!r} is not a range polyctl reads: give <a>..<b>, or one commit for all of its history")
+    commits = landed_commits(root, spec)
+    first, older = None, set()
+    if since_first:
+        history = landed_commits(root, end)
+        first = next((commit["sha"] for commit in history if _polyctl_trailers(commit["trailers"])), None)
+        parents = {commit["sha"]: commit["parents"] for commit in history}
+        if first is None:
+            older = set(parents)
+        else:
+            reach = list(parents.get(first, ()))
+            while reach:
+                sha = reach.pop()
+                if sha not in older:
+                    older.add(sha)
+                    reach.extend(parents.get(sha, ()))
+    grants, unreadable = ledger_grants(root)
+    for commit in commits:
+        commit["merge"] = len(commit["parents"]) > 1
+        commit["exempt"] = commit["sha"] in older
+        held = not commit["exempt"] and not commit["merge"]
+        if held:
+            commit["problems"] = trailer_problems(commit, grants)
+        elif not commit["exempt"]:
+            commit["problems"] = _merge_problems(commit)
+        else:
+            commit["problems"] = []
+        commit["grant"] = (_polyctl_trailers(commit["trailers"]).get("Polyctl-Grant") or [None])[0]
+        commit["on_record"] = commit["grant"] in grants if held and grants is not None else None
+    return {"commits": commits, "end": end, "first": first, "ledger": grants is not None, "unreadable": unreadable}
+
+
+def _merge_problems(commit):
+    """Why a merge is no grant's: always, after the first commit that carries Polyctl- trailers, whatever it carries
+    (LEADS-GATE).
+
+    A merge was skipped as git's, and a merge's tree is whatever was committed: a conflict resolved by hand, or an
+    edit made while merging, landed unreviewed and passed the range check CI runs. Even git's own merge of two
+    reviewed parents is no grant's, since two changes each reviewed alone can act together where neither review
+    looked; and a grant binds one parent, the commit its candidate was built on, so trailers on a merge - copied, or
+    written by a commit of the granted tree - say nothing of what else it merges. A lane lands squashed
+    (`git merge --squash`), as one commit on one parent, which `polyctl commit` lands as any commit. Nothing is merged
+    again to say more: `git merge-tree` runs the merge drivers a repository configures, an implementer's choice among
+    them, and a range check reads and runs nothing.
+    """
+    return [f"it merges {len(commit['parents'])} parents, and a grant binds one: polyctl lands no merge - land a lane "
+            "squashed (git merge --squash), which polyctl commit lands as any commit"]
+
+
+def record_authority(root, granted, reasons, tree, verification, token=None,
+                     review=None, reviewer=None, candidate=None, scope=None,
+                     matrix=None, role_bindings=None, implementer_identity=None,
+                     reviewer_identity=None, waiver=None, author=None, move_only=None):
+    """Persist one hash-chained authority decision, raising on any broken prefix."""
+    from .storage import append_chained_jsonl
+    record = {"at": int(time.time()), "granted": bool(granted),
+              "token": token, "reasons": reasons, "tree": tree,
+              "verification": verification, "review": review,
+              "reviewer": reviewer}
+    if matrix is not None:
+        record.update({
+            "schema": 3,
+            "candidate": candidate,
+            "scope": scope,
+            "matrix": matrix,
+            "role_bindings": role_bindings,
+            "implementer_identity": implementer_identity,
+            "reviewer_identity": reviewer_identity,
+        })
+    elif candidate is not None:
+        record.update({"schema": 2, "candidate": candidate, "scope": scope})
+    if waiver is not None:
+        # The waiver a grant stood on; it covers no other candidate after this (#67).
+        record["waiver"] = waiver
+    if author is not None:
+        # Who landed work a waiver stood in for; its later review is held to that family (#65).
+        record["author"] = author
+    if move_only is not None:
+        # The move proof a move-only grant stood on; catch-up runs it again on what landed (#44).
+        record["move_only"] = move_only
+    path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
+    # Keep the reviewer's identity here, not only in the review file. A grant is
+    # not real until the chain prefix validates and the locked append, file
+    # fsync and (on first creation) directory fsync have all completed.
+    row = append_chained_jsonl(path, record, AUTHORITY_CHAIN)
+    if row.get("granted"):
+        # The machine's event log hears of a grant once it is real; a refusal stays in this ledger (EVENTS-LOG).
+        emit_event(root, "authority-granted", {
+            "token": token, "verification": verification, "review": review, "waiver": waiver,
+            "index_tree": candidate.get("index_tree") if isinstance(candidate, dict) else None})
+    return row
+
+
+GATE_LOCK = os.path.join(HOME, ".polyctl", "gate.lock")
+
+
+def gate_lock_holder():
+    """Which project is running its gates right now, if any."""
+    if not os.path.exists(GATE_LOCK):
+        return None
+    try:
+        st = json.load(open(GATE_LOCK, encoding=UTF8))
+    except Exception:
+        return None
+    if not _pid_alive(st.get("pid", -1)):            # stale lock from a killed run
+        try:
+            os.remove(GATE_LOCK)
+        except OSError:
+            pass
+        return None
+    st["minutes"] = int((time.time() - st.get("at", time.time())) / 60)
+    return st
+
+
+def acquire_gate_lock(root, timeout=0):
+    """Serialise the expensive work across every project on this machine.
+
+    Roles split who decides; this splits who spends the machine. Each project's
+    watchdog is independent, so without a machine-wide lock N projects run N test
+    suites at once — and on a shared laptop that is not N times the throughput, it
+    is one suite that no longer finishes. This project watched an agent burn five
+    review rounds walking a concurrency setting down from 8 to 1 while fighting
+    exactly that.
+
+    Advisory and best-effort: a lock nobody can steal becomes a lock that wedges
+    the machine, so a holder whose process is gone is cleared on sight.
+    """
+    os.makedirs(os.path.dirname(GATE_LOCK), exist_ok=True)
+    deadline = time.time() + timeout
+    while True:
+        holder = gate_lock_holder()
+        if not holder:
+            try:
+                fd = os.open(GATE_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                with os.fdopen(fd, "w", encoding=UTF8) as fh:
+                    json.dump({"root": root, "pid": os.getpid(),
+                               "at": int(time.time())}, fh)
+                return True
+            except FileExistsError:
+                pass
+        if time.time() >= deadline:
+            return False
+        time.sleep(2)
+
+
+def release_gate_lock():
+    holder = gate_lock_holder()
+    if holder and holder.get("pid") == os.getpid():
+        try:
+            os.remove(GATE_LOCK)
+        except OSError:
+            pass
+
+
+def self_or_ancestor(pid):
+    """Whether `pid` is this process or one of the processes that started it, parent after parent.
+
+    A process that holds the gate lock holds it for what it starts: `polyctl lock -- polyctl verify` runs
+    its verify as a child, and a child that waited for the lock its own parent holds would wait
+    until it gave up. Pid 1 is never counted, since every process descends from it; a walk that
+    meets a pid twice, or a parent the platform cannot read, stops there and answers no.
+    `ancestry` says which of the two it was.
+    """
+    return ancestry(pid)[0] is True
+
+
+def ancestry(pid):
+    """(True, None) when `pid` is this process or started it; (False, None) when the walk reached the
+    top without meeting it; (None, pid) naming the process whose parent the platform would not give,
+    where the answer is not known (ANCESTOR-WINDOWS).
+
+    On Windows a parent pid can outlive its process and be given to another one, so a walk there
+    can go on through a process that started nothing of this one; it still ends, at a pid met twice
+    or at the top.
+    """
+    try:
+        wanted = int(pid)
+    except (TypeError, ValueError):
+        return False, None
+    from . import procs
+    current, seen = os.getpid(), set()
+    while current > 1 and current not in seen:
+        if current == wanted:
+            return True, None
+        seen.add(current)
+        parent = os.getppid() if current == os.getpid() else procs.ppid(current)
+        if parent is None:
+            return None, current
+        current = parent
+    return False, None
+
+
+def process_trees(pids, parent=None):
+    """Group pids into independent trees — how many *turns*, not how many processes.
+
+    One turn is several processes: a wrapper spawns a runtime which spawns
+    children. Counting processes therefore reports four concurrent writers where
+    there is one, and an alarm that fires on normal operation is an alarm people
+    learn to ignore. Count only the roots: a pid whose parent is not itself in the
+    set.
+    """
+    if not pids:
+        return []
+    if parent is None:
+        # The platform's process table (procs.py), as writers() reads it: `ps` through a shell
+        # answered the same parents and does not exist on Windows.
+        parent = {pid: row[0] for pid, row in _proc_table().items()}
+    known = set(pids)
+    return sorted(p for p in pids if parent.get(p) not in known)
+
+
+def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
+    """Conditions a watchdog cannot resolve, reported as facts rather than verdicts.
+
+    A guard chain is good at mechanical questions — is a turn running, is there
+    quota, has this nudge already failed. It is bad at everything else, and the
+    failures of this project came from letting it try: it decided a provider
+    outage was a stuck agent, decided a hung process was a live writer, decided a
+    finished slice was work in progress. Each decision was defensible from the one
+    signal it had and wrong given the others.
+
+    So it stops deciding. It collects what it can see and hands that to the
+    architect, who has the context to weigh it. Crucially the facts carry no
+    conclusion — "four processes, transcript moved 12s ago, HEAD unchanged for
+    three hours" is useful; "there is a concurrent writer" is the guess that cost
+    seven hours the last time something made it.
+    """
+    out = []
+    groups = {}
+
+    # An explicit request outranks every heuristic here. When the implementer
+    # writes to the architect it has already decided it is blocked, and waiting
+    # for a detector to independently notice is absurd — this project spent half a
+    # day doing exactly that while a message saying "decision required" sat
+    # unread. Fire on the next cycle, not after a threshold.
+    for m in mailbox(root, cfg.get("mailbox", "agent-mail")):
+        if not to_architect(m, cfg):
+            continue
+        # The watchdog must not read its own outbox as an inbox. Its anomaly
+        # reports are addressed to the architect ("watchdog-to-<architect>-…"), so they
+        # matched this filter and were re-escalated as fresh "report-waiting"
+        # anomalies — each new report's name concatenating the last, a runaway
+        # that filled the mailbox with names hundreds of characters long. What
+        # needs a decision is what the implementer or a human sent, never what
+        # this detector emitted.
+        # The hunter's leads wait for triage; they are not the implementer asking (#45).
+        if m.startswith(("watchdog-to-", "hunter-to-")) or "-watchdog-to-" in m or "-hunter-to-" in m:
+            continue
+        # The architect's notes to itself are not the implementer asking (#18).
+        if from_architect(m, cfg):
+            continue
+        try:
+            body = open(os.path.join(root, cfg.get("mailbox", "agent-mail"), m),
+                        errors="replace", encoding=UTF8).read(4000)
+        except OSError:
+            continue
+        first = next((l for l in body.split("\n") if l.strip().startswith("#")), m)
+        # "I am blocked" and "I finished" both want the architect eventually, but
+        # only one of them stops work. Treating a completion report as urgent is
+        # how an urgent channel becomes background noise.
+        # Match structure, not substrings. The implementer's report template ends
+        # with a "Blockers:" line on every message, including "Blockers: none", so
+        # a bare `"blocker" in body` test classified every routine status report
+        # as urgent and re-raised it every ten minutes: twenty-eight false alarms
+        # in one hour, produced by a line that said the opposite of what matched.
+        # In every language a project may choose, whichever this one writes (LANGUAGE-FILES).
+        low = language.folded(body)
+        asking = any(h in low for h in language.lowered("decision", "urgent") + ("## blocked",))
+        if not asking:
+            for line in low.split("\n"):
+                t = line.strip().lstrip("-*# ").strip()
+                if not t.startswith(language.words("blockers")):
+                    continue
+                value = t.split(":", 1)[1].strip(" .`")
+                # An empty value, or one that opens by saying there are none, is
+                # the template reporting health — not a request for anything.
+                asking = bool(value) and not value.startswith(language.words("no-blockers"))
+                break
+        kind = "decision-requested" if asking else "report-waiting"
+        contradiction = report_inconsistency(root, body)
+        if contradiction:
+            out.append({"kind": "inconsistent-report", "key": m, "reports": [m],
+                        "facts": [f"{m}: {contradiction}"]})
+        g = groups.setdefault(kind, {"n": 0, "first": m, "reports": []})
+        g["n"] += 1
+        g["latest"] = m
+        g["title"] = first.lstrip("# ").strip()[:200]
+        g["reports"].append(m)
+    # A review that came back and nobody took is a slice left unattended (#28, W1).
+    waited = settings.get(cfg, "review.unhandled_minutes") * 60
+    for state in returned_reviews(root):
+        # Its own name: `age` is the transcript's, which the checks below read, and the loop wrote a returned
+        # review's wait over it (PIPELINE-HANDLE-2).
+        unattended = time.time() - float(state.get("finished_at") or time.time())
+        if unattended >= waited:
+            out.append({"kind": "review-returned", "key": state["id"],
+                        "facts": [f"{state['id']} for slice {state.get('slice')} "
+                                  + (f"returned {state['verdict']}" if state.get("verdict") else
+                                     f"ended {state.get('state')} with no verdict")
+                                  + f" {int(unattended / 60)}m ago and has not been collected"]})
+    # A question asked with `polyctl ask` wants the architect as much as a report does,
+    # and may have no mail at all (#20). Each open one is its own anomaly.
+    for decision in decisions(root, "open"):
+        asked = decision.get("asked_at") or 0
+        out.append({"kind": "decision-requested", "key": decision.get("id"),
+                    "facts": [f"{decision.get('id')} is open since "
+                              f"{time.strftime('%d %b %H:%M', time.localtime(asked)) if asked else '?'}",
+                              str(decision.get("question") or "")[:200]]})
+    # One anomaly per kind, however many reports carry it. Eighty "queue empty"
+    # reports in eleven hours became eighty anomaly files and forty wake attempts;
+    # the architect needed one line saying "eighty, since 06:31". It carries the
+    # reports it stands for, so what tells a person of it can name them and nothing
+    # else tells a person of them again (WAITING-ONE-ALARM).
+    for kind, g in groups.items():
+        since = g["first"][:13] if re.match(r"\d{8}-\d{4}", g["first"]) else g["first"][:20]
+        head = f"the implementer wrote {g['latest']}"
+        if g["n"] > 1:
+            head += f" — {g['n']} report(s) of this kind standing, the first since {since}"
+        out.append({"kind": kind, "key": "implementer", "reports": g["reports"],
+                    "facts": [head, g["title"],
+                              "an explicit request — not a symptom needing corroboration"
+                              if kind == "decision-requested" else "a report, not a blocker"]})
+
+    # Exclude pids the caller knows are not implementer writers — above all the
+    # architect the watchdog itself spawned, which resumes with this repo as its
+    # cwd and would otherwise read as a second turn. The watchdog knows its pid;
+    # the detector should not have to guess.
+    # What a finished turn left behind is not a turn. Orphans are cleared by the
+    # watchdog before it counts; here they are simply not counted.
+    # Where the process table cannot be read no turn is counted here, and none is
+    # guessed: the cycle's writer guard stands down on the same error and says why,
+    # and the other conditions are still reported (WINDOWS-TABLE-CLOSED).
+    from . import procs
+    try:
+        pids = [p for p in agent_pids(root, adapter) if p not in set(exclude_pids)]
+        trees = process_trees([p for p in pids if p not in set(orphans(root, adapter))])
+    except procs.TableUnreadable:
+        pids, trees = [], []
+    dirty = len([l for l in _git_text(root, "status", "--porcelain").split("\n") if l.strip()])
+    head = _git_text(root, "rev-parse", "--short", "HEAD")
+
+    if len(trees) > 1 and age < idle_seconds:
+        out.append({"kind": "several-turns-active", "roots": trees,
+                    "facts": [f"{len(trees)} independent process trees with this repo as "
+                              f"cwd, roots {trees} (of {len(pids)} processes)",
+                              f"transcript last written {int(age)}s ago",
+                              "separate roots mean separate turns, not one turn's children"]})
+    spin = spinning(root)
+    if spin:
+        out.append({"kind": "busy-without-progress",
+                    "facts": [f"transcript growing for {spin}m",
+                              f"HEAD unchanged at {head}", f"{dirty} files dirty, unchanged"]})
+    rn = rounds(root, cfg["reviews"])
+    budget = settings.get(cfg, "round_budget")
+    if rn > budget:
+        revs = reviews(root, cfg["reviews"], limit=3)
+        out.append({"kind": "over-round-budget",
+                    "facts": [f"round {rn} of {budget} on the current slice"] +
+                             [f"{f}: {v}" for f, v in revs]})
+    # The same finding returning review after review. A round count cannot see
+    # it; this is the actual shape of a slice that is not converging.
+    loops = review_loop(root, cfg.get("reviews", "semantic-review"))
+    if loops:
+        out.append({"kind": "review-loop",
+                    "facts": [f"[{l['sev']}] {l['file']} — \"{l['clause']}\" has come back "
+                              f"{l['count']} reviews running" for l in loops[:4]] +
+                             ["more rounds will not converge this; it needs re-specifying "
+                              "or a different actor"]})
+    err = last_nudge_error(root, parked=False)
+    if err and time.time() - err.get("at", 0) < 3600:
+        out.append({"kind": "restart-failed",
+                    "facts": [f"exit {err.get('code')} "
+                              f"{int((time.time() - err.get('at', 0)) / 60)}m ago",
+                              (err.get("tail") or "")[:300]]})
+    return out
+
+
+def write_report(root, cfg, kind, facts, key=None):
+    """A watchdog-to-architect message: observations, no interpretation.
+
+    Deduplicated by what the anomaly is *about*, not by wall-clock time. The name
+    once carried a minute stamp, so the exists-guard only caught collisions inside
+    the same minute and a standing condition produced a fresh file every cycle —
+    twenty-five copies of one unread status report in an hour. Key the filename on
+    (kind, source) instead: while an anomaly for that pair sits unprocessed, no
+    second one is written. The architect deleting it is what re-arms the report,
+    which is correct — a condition that recurs after it was judged is genuinely
+    new.
+    """
+    box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
+    try:
+        os.makedirs(box, exist_ok=True)
+        # A stable key from the source the facts name (e.g. "the implementer wrote
+        # X.md"), falling back to the kind alone for anomalies with no single
+        # source. This is what makes the exists-guard actually guard.
+        src = "-" + re.sub(r"[^A-Za-z0-9]+", "-", key).strip("-") if key else ""
+        for f in [] if key else facts:
+            mrk = re.search(r"wrote\s+(\S+\.md)", f)
+            if mrk:
+                src = "-" + re.sub(r"[^A-Za-z0-9]+", "-", mrk.group(1)[:-3]).strip("-")
+                break
+        _, arch = mail_names(cfg)
+        name = f"watchdog-to-{arch}-ANOMALY-{kind}{src}.md"
+        # A handled delivery keeps its ID; the next gets a suffix. Match the anomaly's
+        # original name, not that delivery's ID, without conflating numbered keys (TRIAGE-2-MEDIUM).
+        identities = {f"watchdog-to-{other}-ANOMALY-{kind}{src}.md" for other in architect_mail_names(cfg)}
+        if any(mail_meta(os.path.join(box, pending)).get("anomaly", pending) in identities
+               for pending in os.listdir(box) if pending.endswith(".md")):
+            return None
+        text = (f"# ANOMALY — {kind}\n\n"
+                f"Watchdog observation at {time.strftime('%Y-%m-%d %H:%M:%S')}. "
+                f"Facts only; the watchdog draws no conclusion and took no action "
+                f"beyond standing down.\n\n"
+                + "".join(f"- {f}\n" for f in facts)
+                + "\n## Asked of the architect\n\n"
+                "Decide whether this needs intervention, and what. If it is normal, "
+                "delete this message; if not, act and record what you did.\n")
+        return write_mail(root, cfg, name, text, {"kind": "anomaly", "from": "watchdog", "to": arch, "anomaly": name})
+    except OSError:
+        return None
+
+
+def usage_api(adapter_id):
+    """The account lookup the shipped adapter of this id declares, when polyctl has its driver; {} (#76).
+
+    Only that adapter's own lookup answers: an implementer whose harness bills no account
+    polyctl can read has none, not the first harness's that does. There is no first harness to
+    fall back on: a reader that names no adapter reads no account (ACCOUNT-READERS). Read
+    from the package's adapters only, since a lookup runs the command its adapter names,
+    and a layer an agent can write must not name that command.
+    """
+    from . import drivers
+    adapter = package_adapters().get(adapter_id) if isinstance(adapter_id, str) else None
+    api = ((adapter or {}).get("billing") or {}).get("api") or {}
+    return api if api.get("driver") in drivers.USAGE else {}
+
+
+def account_usage(timeout=20, adapter_id=None):
+    """Real usage from the provider, through the driver an adapter's billing names; None when none can.
+
+    The protocol lives in drivers.py and every path, key, command and endpoint in
+    the adapter, so this core function names no harness (#76). The account is the one
+    `adapter_id`'s own lookup reads (`usage_api`): a call that names no adapter, or an
+    adapter that declares no lookup, reads none (ACCOUNT-READERS).
+    """
+    from . import drivers
+    api = usage_api(adapter_id)
+    return drivers.USAGE[api["driver"]](api, timeout=timeout) if api else None
+
+
+def _marked_records(path, marks):
+    """The records of a transcript's lines that hold one of `marks`; a line holding none is never parsed."""
+    try:
+        with open(path, errors="replace", encoding=UTF8) as fh:
+            for line in fh:
+                if not any(mark in line for mark in marks):
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                yield rec
+    except OSError:
+        return
+
+
+def credit_usage(adapter_id, monthly_budget=None):
+    """Credit spend read from local transcripts, by billing month.
+
+    There is no endpoint for this. A Kiro API key authenticates the CLI
+    (`KIRO_API_KEY`); it is not a REST credential, and the published docs
+    describe no usage or quota route. The dashboard in the app is the authority.
+
+    The estimate stands in for one account: the one `adapter_id`'s shipped adapter bills.
+    Another harness's transcripts are not that account's spend, nor in its unit, and they
+    were added in whatever the implementer ran (ACCOUNT-READERS); a call that names no
+    adapter reads nothing.
+
+    Locally, a session's usage records are read through what that shipped adapter
+    declares (#76): which transcripts (`billing.fallback.transcripts`), which records
+    carry usage and where its values are (`telemetry.cost`, `transcript.record`), and
+    the reading that adds them up (`billing.fallback.reading`) - `sum` when a record is
+    the whole cost of the turn it reports, `peak-per-turn` when it is the running total
+    of the turn in progress, `per-response` when a response repeats its usage in several
+    records and is charged once, whichever of the adapter's transcripts holds a copy. A
+    fallback declaring no reading, or one polyctl does not implement, is not read rather than
+    misread. The turns are the ones `polyctl cost` counts (`next_turn`), under the reading it
+    applies too.
+
+    The reading is measured, not assumed. Kiro's records were once read as running
+    totals, with a drop between two records taken for a new turn; in one machine's
+    store (July to September 2026, 455 records) no turn wrote two, consecutive records
+    never shared a request id, and taking peaks merged every run of turns whose cost
+    rose into its last, reading 79% of what the records add up to. Every record there
+    is a whole turn's cost.
+
+    What a record adds is charged to the day it was written, not to whenever the session
+    was last touched: a long session crosses billing periods, and charging all of it to
+    its final month is how a month reads as full while the previous one reads as empty.
+
+    A subagent a session started is that session's spend (`transcript.subagents`): its
+    records are read after the record that starts it, charged to that turn and to the day
+    each was written, under the same reading. A reply the harness wrote in the model's place
+    with no usage (`in_place_reply`) is not read, so a turn holding no other is no session turn.
+    """
+    import glob
+    from collections import defaultdict
+    months, days, sessions = defaultdict(float), defaultdict(float), []
+    sources = []
+    for ident, adapter in sorted(package_adapters().items()):
+        if ident != adapter_id:
+            continue
+        fallback = (adapter.get("billing") or {}).get("fallback") or {}
+        shape = transcript_shape(adapter)
+        if fallback.get("transcripts") and fallback.get("reading") in USAGE_READINGS and shape["usage"]:
+            # A line naming neither the usage field nor a kind that opens or ends a turn is never parsed,
+            # unless it may start a subagent: a field that names one, or the kind of a tool call.
+            starts = [entry["named_by"] for entry in (shape["subagents"] or {}).get("transcripts") or []]
+            calls = [shape["tool"]["type"]] if shape["subagents"] and shape["tool"] else []
+            marks = sorted({'"' + field.split(".")[0].split("[")[0] + '"'
+                            for field in shape["usage"]["fields"] + [path for path in starts if path]}
+                           | {'"' + kind + '"' for kind in shape["start"] + shape["prompt"] + shape["end"]
+                              + [when["type"] for when in shape["end_when"]] + calls})
+            counted = {}                # one reading of this adapter's transcripts: a response is charged once
+            sources += [(path, shape, marks, counted) for path in glob.glob(_home_path(fallback["transcripts"]))]
+    for f, shape, marks, counted in sources:
+        usage, turn, turns, credits, day, month = shape["usage"], None, 0, 0.0, "", ""
+        for rec, subagent in with_subagents(_marked_records(f, marks), shape, f,
+                                            lambda path, marks=marks: _marked_records(path, marks)):
+            kind = record_kind(rec, shape)
+            turn, _ = next_turn(turn, rec, shape, subagent)
+            pl = record_body(rec, shape)
+            if pl is None or kind != usage["type"] or in_place_reply(rec, shape):
+                continue
+            turn = {} if turn is None else turn      # usage before any turn opens is a turn of its own
+            if "usage" not in turn:
+                turns += 1
+            grown = add_usage(turn, pl, usage, counted, subagent)
+            credits += grown
+            day = record_time(rec, shape)[:10] or day
+            if day:
+                days[day] += grown
+                months[day[:7]] += grown
+                month = day[:7]
+        if turns:
+            sessions.append({"session": os.path.basename(os.path.dirname(f)),
+                             "month": month, "turns": turns, "credits": round(credits, 2),
+                             "mtime": os.path.getmtime(f)})
+    sessions.sort(key=lambda r: r["mtime"], reverse=True)
+    this_month = time.strftime("%Y-%m")
+    # Billing periods are not calendar months — a subscription renews on its own
+    # day — so return the daily series and let the caller cut it wherever the
+    # user's period actually starts.
+    return {"sessions": sessions, "days": {d: round(v, 2) for d, v in sorted(days.items())},
+            "months": {m: round(v, 2) for m, v in sorted(months.items())},
+            "this_month": round(months.get(this_month, 0.0), 2),
+            "budget": monthly_budget,
+            "remaining": (round(monthly_budget - months.get(this_month, 0.0), 2)
+                          if monthly_budget else None)}
+
+
+# Every language's urgent and stop headings, whichever the project writes (LANGUAGE-FILES). Compared in
+# capitals, so `## ACİL` keeps its dotted İ.
+URGENT_MARKERS = language.forms("urgent", "stop")
+
+
+ROLES = ("implementer", "architect")
+
+
+def invoking_role():
+    """The role this polyctl process runs for, from POLYCTL_ROLE, or None for a person or an unknown caller (#29)."""
+    role = (os.environ.get("POLYCTL_ROLE") or "").strip().lower()
+    return role if role in ROLES else None
+
+
+def returned_reviews(root):
+    """Submitted reviews that have ended and that nobody has collected yet (#28)."""
+    directory = os.path.join(root, ".polyctl", "reviews")
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        if not (name.startswith("R-") and name.endswith(".json")):
+            continue
+        try:
+            with open(os.path.join(directory, name), encoding=UTF8) as fh:
+                state = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(state, dict) and state.get("state") not in (None, "running") \
+                and not state.get("collected_at"):
+            # Named by its file where the record names nothing: every reader indexes the id, and one record
+            # without it stopped `polyctl status` and the watchdog's anomalies (PIPELINE-HANDLE-2).
+            rid = state.get("id")
+            out.append(state if isinstance(rid, str) and rid else dict(state, id=name[:-len(".json")]))
+    return out
+
+
+def urgent_messages(root, cfg, role="implementer"):
+    """Unacknowledged messages the implementer must see before it does anything big.
+
+    MCP cannot interrupt. Its tools fire only when the agent chooses to call them,
+    so an urgent message sits unread until the agent's next `polyctl_inbox` — which may
+    be a turn away, or never if it is stuck. A2A agents get an inbound push; an
+    MCP-only agent does not, and no amount of protocol design changes that.
+
+    What we do control is the boundary the agent crosses on its own: it runs `polyctl`
+    to take the machine lock, to verify, and to ask whether it may commit. Those
+    are precisely the moments before something expensive or irreversible, which is
+    exactly when an urgent message needs to land. So the CLI carries it.
+
+    Marked messages only. Everything routine waits for `polyctl_inbox`, or the channel
+    becomes noise and gets skimmed — which is how it fails.
+
+    Urgency follows inbox addressing, including the reviewer, and role None takes
+    all recipients. Reviewer mail otherwise blocked commits while the implementer
+    could neither see nor acknowledge it (TRIAGE-3-LOW).
+    """
+    box = cfg.get("mailbox", "agent-mail")
+    out = []
+    for m in mailbox(root, box):
+        addressed = "architect" if to_architect(m, cfg) else "reviewer" if to_reviewer(m, cfg) else "implementer"
+        if role and (addressed != role or not addressed_to(m, cfg, role)):
+            continue
+        try:
+            body = open(os.path.join(root, box, m), errors="replace", encoding=UTF8).read(8000)
+        except OSError:
+            continue
+        upper = body.upper()
+        if any(k.upper() in upper for k in URGENT_MARKERS):
+            title = next((l for l in body.split("\n") if l.strip().startswith("# ")), m)
+            out.append({"id": m, "title": title.lstrip("# ").strip()[:120], "body": body,
+                        "to": addressed})
+    return out
+
+
+def escaped_cwd_dir(store, cwd):
+    """The directory an escaped-cwd store keeps a working directory's sessions in (#71, #76).
+
+    On macOS and Linux the name is the absolute path with "/" and "." made
+    dashes. polyctl built it that way everywhere, and on Windows `C:\\repo` kept its
+    drive: os.path.join took it as an absolute path, dropped the store's directory,
+    and the watchdog found no transcript and ended every cycle there. On Windows
+    every character outside letters, digits and dashes is made a dash. A
+    directory that already exists under either name is used as found.
+    """
+    base = _home_path((store or {}).get("dir"))
+    posix, portable = escaped_cwd_names(cwd)
+    for name in (posix, portable):
+        if name and "/" not in name and "\\" not in name and ":" not in name \
+                and os.path.isdir(os.path.join(base, name)):
+            return os.path.join(base, name)
+    return os.path.join(base, portable if os.name == "nt" else posix)
+
+
+def escaped_cwd_names(cwd):
+    """(posix, portable): the names an escaped-cwd store may give a working directory's directory.
+
+    "/" and "." made dashes, as polyctl named it on macOS and Linux; and every character that is
+    not a letter, a digit or a dash made one, as Windows needs and as the store's own
+    documentation describes it.
+    """
+    cwd = str(cwd or "")
+    return cwd.replace("/", "-").replace(".", "-"), re.sub(r"[^A-Za-z0-9-]", "-", cwd)
+
+
+def session_in_use(session, architect=None):
+    """Pids whose command line resumes `session`: as an argument of its own, or after `=` (JOURNAL-2).
+
+    Only the architect's own harness resumes its session: a `grep`, a `jq --arg` or a tmux named for the id
+    carries it too, and held every wake while it ran. procs.TableUnreadable where the process table cannot
+    be read: a session nobody could be seen holding read as free, and a wake could resume it beside its
+    holder (WINDOWS-TABLE-CLOSED).
+    """
+    from . import procs
+    if not session:
+        return []
+    names = _architect_names(architect)
+    found = []
+    for pid in procs.all_pids():
+        if pid == os.getpid():
+            continue
+        av = procs.argv(pid) or []
+        if names and not _is_configured_agent_process(names, av):
+            continue
+        if any(str(arg) == session or str(arg).endswith("=" + session) for arg in av[1:]):
+            found.append(pid)
+    return found
+
+
+def unplaced_agent_pids(root, adapter):
+    """Agent processes that may be working in this tree but cannot be placed (#71).
+
+    On Windows a process's working directory is read from its own memory, which
+    another user's or an elevated process does not open to polyctl, and no shipped
+    adapter's command line names the repository: such a turn in this tree was no
+    writer at all, `polyctl hold` stopped nothing and the watchdog started a second
+    turn. The guards that must not miss a writer count these and say why. Where
+    every process's directory can be read this is empty (WINDOWS-CWD-2); where the
+    table itself cannot be read it raises procs.TableUnreadable, as agent_pids does
+    (WINDOWS-TABLE-CLOSED).
+    """
+    if os.name != "nt":
+        return []
+    from . import procs
+    names = set()
+    for key in ("send", "resume"):
+        argv = (adapter.get(key) or {}).get("argv") or []
+        if argv:
+            names.add(os.path.basename(argv[0]))
+    names.update(agent_process_names())
+    want = os.path.realpath(root)
+    me = os.getpid()
+    helpers = helper_pids(root)
+    table = _proc_table() if helpers else {}
+
+    def under_helper(pid):
+        seen, current = set(), pid
+        while current > 1 and current not in seen:
+            if current in helpers:
+                return True
+            seen.add(current)
+            current = table.get(current, (0, 0, ""))[0]
+        return False
+
+    out = []
+    for pid in procs.all_pids():
+        if pid == me:
+            continue
+        av = procs.argv(pid)
+        if not av or not _is_agent_process(pid, names, av) or procs.cwd(pid) is not None:
+            continue
+        if any(os.path.isabs(a) and os.path.realpath(a.rstrip("/\\")) == want for a in av):
+            continue                      # it names this tree: agent_pids placed it
+        if helpers and under_helper(pid):
+            continue
+        out.append(pid)
+    return sorted(out)
+
+
+def git_text(root, *args, timeout=60):
+    """git's output as text without a shell, or "" when git fails (#71).
+
+    cmd.exe treats neither single quotes nor `2>/dev/null` as a POSIX shell does:
+    the quoted `--pretty` format was split at its "|" and the log came back empty.
+    """
+    try:
+        return _git_output(root, *args, timeout=timeout).decode(UTF8, "replace").strip()
+    except RuntimeError:
+        return ""
+
+
+def discover_architect(cwd):
+    """The newest session an escaped-cwd store keeps for a directory, by transcript mtime.
+
+    Pinning a session id in config goes stale the moment the human opens a new
+    conversation, and a watchdog that wakes a dead session fails silently — the
+    worst shape of failure, because everything still looks configured. Resolve it
+    from disk instead, the same way the implementer's session is resolved.
+
+    The newest is the architect's only where no other role's sessions are kept there:
+    where the implementer runs the same harness in the same directory, the newest was
+    the implementer's own session, and a wake resumed it as the architect. `sessions`
+    names every session found, newest first, for resolve_session to choose among
+    (SESSION-IDENTITY).
+    """
+    # The store flattens the path into a directory name - a worktree under a
+    # dot-directory gets a doubled dash where "/." was - and on Windows the drive
+    # and backslashes go the same way (#71).
+    found = sorted((row for ident, _ in session_stores("escaped-cwd") for row in store_sessions(ident, cwd)),
+                   key=lambda row: row["mtime"], reverse=True)
+    if not found:
+        return None
+    best = found[0]
+    return {"session": best["session"], "transcript": best["transcript"], "age": int(time.time() - best["mtime"]),
+            "adapter": best["adapter"], "sessions": [row["session"] for row in found]}
+
+
+# The name of a program no process has: an architect whose program cannot be named is proven by none (JOURNAL-2-5).
+_NO_PROGRAM = "<no program>"
+
+
+def _architect_names(architect):
+    """The program names the configured architect runs as: its command and that adapter's other names (#76)."""
+    configured = (architect or {}).get("argv") or []
+    command = _program_name(configured[0]) if configured else ""
+    if runtime_family(command):
+        # A runtime runs many programs: an architect run as `node /opt/claude-code/cli.js` is that program, where
+        # `node` alone let any node process naming the session hold every wake (JOURNAL-2-3), and `python -m claude`
+        # is claude, where its second word, `-m`, was taken for the program (JOURNAL-2-4). One whose program has no
+        # name - code given inline - is proven by no process, where the runtime alone matched every one of it
+        # (JOURNAL-2-5).
+        program = runtime_program_word(configured)
+        command = _program_name(program) if program and "{" not in program else _NO_PROGRAM
+    names = {command} if command else set()
+    for ident, adapter in package_adapters().items():
+        known = {_program_name(name) for name in [ident, *adapter_binaries(adapter),
+                                                  *((adapter.get("detect") or {}).get("processes") or [])] if name}
+        if command in known:
+            names.update(known)
+    return names
+
+
+def _architect_process_roots(root, architect=None, helper_only=False):
+    """Configured architect roots, optionally restricted to proven polyctl helpers."""
+    from . import procs
+
+    if architect is None:
+        try:
+            architect = (load_config(root).get("architect") or {})
+        except (OSError, TypeError, ValueError):
+            architect = {}
+    architect = architect or {}
+    configured = architect.get("argv") or []
+    if not configured:
+        return []
+
+    # The architect's names are its command's and that adapter's other names - an implementer on one harness
+    # must not become an architect on another merely because both are interactive in the same tree (#76) - and
+    # a runtime's architect is the program it runs. They were worked out here a second time, without the
+    # runtime, so any `python` process in the tree was the architect of one run as `python -m claude`
+    # (JOURNAL-2-5).
+    names = _architect_names(architect)
+    if not names:
+        return []
+
+    def normal_path(path):
+        raw = str(path).replace("\\", "/")
+        if re.match(r"^[A-Za-z]:/", raw):
+            return raw.rstrip("/").lower()
+        return os.path.normcase(os.path.realpath(raw))
+
+    def absolute_path(path):
+        raw = str(path).replace("\\", "/")
+        return os.path.isabs(raw) or bool(re.match(r"^[A-Za-z]:/", raw))
+
+    targets = {normal_path(architect.get("cwd") or root)}
+    if helper_only:
+        # Watchdog helpers are spawned in the project root even when the human
+        # architect works in a configured worktree.
+        targets.add(normal_path(root))
+    table = _proc_table()
+    parents = {pid: row[0] for pid, row in table.items()}
+    helpers = helper_pids(root, "architect" if helper_only else None)
+
+    def under_helper(pid):
+        current = pid
+        seen = set()
+        while current > 1 and current not in seen:
+            if current in helpers:
+                return True
+            seen.add(current)
+            current = parents.get(current, 0)
+        return False
+
+    candidates = set()
+    vectors = {}
+    for pid in procs.all_pids():
+        helper = under_helper(pid)
+        if pid == os.getpid() or (helper_only and not helper) \
+                or (not helper_only and helper):
+            continue
+        argv = procs.argv(pid)
+        if not argv or not _is_configured_agent_process(names, argv):
+            continue
+        cwd = procs.cwd(pid)
+        if cwd is None:
+            # A cwd the platform cannot read (a 32-bit or protected process on
+            # Windows, #9). Keep the same fail-closed fallback as agent_pids():
+            # an exact absolute repository argument is required.
+            in_project = any(
+                normal_path(arg.rstrip("/\\")) in targets
+                for arg in argv if absolute_path(arg)
+            )
+        else:
+            in_project = normal_path(cwd) in targets
+        if not in_project:
+            continue
+        candidates.add(pid)
+        vectors[pid] = argv
+
+    # Preserve ancestry through nonmatching intermediaries. Filtering first and
+    # looking only at an immediate parent turns `claude -p -> shell -> runtime`
+    # into two roots; the flagless runtime then looks interactive. Walk the full
+    # parent graph and assign every matching process to its highest matching
+    # ancestor, with cycle detection for a corrupt or racing process snapshot.
+    roots = set()
+    for pid in candidates:
+        root_pid = pid
+        current = pid
+        seen = set()
+        while current not in seen:
+            seen.add(current)
+            parent = parents.get(current, 0)
+            if parent in candidates:
+                root_pid = parent
+            if parent <= 1 or parent not in parents:
+                break
+            current = parent
+        roots.add(root_pid)
+    return [(pid, vectors[pid]) for pid in sorted(roots)]
+
+
+def architect_present(root, architect=None):
+    """Is a human-driven architect process alive for this project?
+
+    Presence is a process fact, not transcript recency. Match only the configured
+    architect command in its configured cwd, exclude polyctl helpers and descendants,
+    and classify headlessness at the full process-tree root, by the arguments the
+    harness it runs as declares (`_headless_argv`). No positive result is cached,
+    so process exit releases presence on the next scan. procs.TableUnreadable where
+    the process table cannot be read: absence that was not measured is not absence
+    (WINDOWS-TABLE-CLOSED).
+    """
+    return any(
+        not _headless_argv(argv)
+        for _, argv in _architect_process_roots(root, architect)
+    )
+
+
+def architect_turn_present(root, architect=None):
+    """Is a configured architect process alive in a proven polyctl helper tree?
+
+    This is the duplicate-wake guard. It revalidates the registered helper's
+    process-start identity and current process tree; an unrelated same-binary
+    implementer, remembered pid, or lock file cannot postpone a wake. Where the
+    process table cannot be read it raises procs.TableUnreadable, and no wake
+    starts beside one it could not see (WINDOWS-TABLE-CLOSED).
+    """
+    return bool(_architect_process_roots(root, architect, helper_only=True))
+
+
+DECISION_DIR = ".polyctl/decisions"
+# The state of a rule proposal's question until a person answers it (RULE-PROPOSALS). Not "open": every
+# reader of an open question reads one that parks a slice, and a proposal parks none.
+PROPOSED = "proposed"
+
+
+def decisions(root, state=None):
+    """Open questions the implementer cannot answer for itself.
+
+    A blocker written as prose costs minutes to answer from a phone: read it,
+    work out what is being asked, type a paragraph. The same blocker written as
+    a question with options costs one tap. That difference decides whether a run
+    survives the hours when nobody is at a desk.
+    """
+    d = os.path.join(root, DECISION_DIR)
+    out = []
+    if not os.path.isdir(d):
+        return out
+    for f in sorted(os.listdir(d)):
+        if not f.endswith(".json"):
+            continue
+        try:
+            rec = json.load(open(os.path.join(d, f), encoding=UTF8))
+        except Exception:
+            continue
+        rec["id"] = f[:-5]
+        if state and rec.get("state") != state:
+            continue
+        out.append(rec)
+    return out
+
+
+def ask(root, question, options, context=None, slice_id=None, cfg=None, proposal=False, after=0):
+    """Record a question. Free text is always the last option.
+
+    Options are a convenience, never a cage: the answer that matters is often the
+    one nobody listed, and a form that cannot express it produces a wrong answer
+    chosen because it was available.
+
+    The free-text option is labeled in the project's language, read from `cfg` or, without one,
+    from the project's config on disk (LANGUAGE-OUTPUT).
+
+    A rule proposal's question (`proposal`) waits in the state `proposed` and names its
+    proposal, `P-` with the question's number (RULE-PROPOSALS). It parks no slice, so nothing
+    that waits on an open question waits on it: a nudge standing down, the alarm ladder, a
+    wake of the architect, a handoff's list of what unblocks the work.
+
+    Each question is a file of its own, created and never replaced. Two asked in one second
+    shared an id and the second overwrote the first; the later now takes the next free number.
+    The number also exceeds `after`: a number stays taken where a ledger names it after its
+    question's file is gone, as a rule proposal's does.
+    """
+    d = os.path.join(root, DECISION_DIR)
+    os.makedirs(d, exist_ok=True)
+    opts = [{"key": chr(ord('a') + i), "label": o} for i, o in enumerate(options[:8])]
+    written = cfg if cfg is not None else project_config_document(root)["config"]
+    opts.append({"key": "x", "label": language.marker(written, "free-text"), "free_text": True})
+    # The same question answered before, here or in another project, travels with it (#43).
+    try:
+        precedents = [{key: found.get(key) for key in ("project", "kind", "id", "at", "outcome", "source")}
+                      for found in recall(f"{question} {context or ''}", root, limit=3, share=0.4)]
+    except Exception:
+        precedents = []
+    rec = scan_record({"asked_at": int(time.time()), "question": question, "context": context,
+                       "slice": slice_id, "options": opts, "state": PROPOSED if proposal else "open",
+                       "answer": None, "answered_at": None, "answered_by": None,
+                       "precedents": precedents})
+    number = max(rec["asked_at"], int(after) + 1)
+    while True:
+        did = f"D-{number}"
+        if proposal:
+            rec["proposal"] = f"P-{number}"
+        try:
+            with open(os.path.join(d, did + ".json"), "x", encoding=UTF8) as fh:
+                json.dump(rec, fh, ensure_ascii=False, indent=2)
+            break
+        except FileExistsError:
+            number += 1
+    rec["id"] = did
+    return rec
+
+
+class AnswerRefused(ValueError):
+    """An answer a question does not take: a key it does not offer, or a second answer given as a first."""
+
+
+def free_text_option(option):
+    """Whether a decision's option takes the answer in one's own words: flagged so, or ask's `x` labeled so.
+
+    ask flags the option it appends as `x`. Its label is read as well, as a marker is (LANGUAGE-OUTPUT):
+    an `x` that carries the label and no flag is answered in words, whichever language labeled it. An
+    option a person named so under another key stays one to choose.
+    """
+    return isinstance(option, dict) and (bool(option.get("free_text")) or (
+        option.get("key") == "x" and option.get("label") in language.forms("free-text")))
+
+
+def answer(root, did, key_or_text, by="human", change=False, user=None, interactive=None):
+    """Answer one question. Returns the updated record, or None if unknown.
+
+    The first word is the key of an option the question offers; a free-text option takes the
+    words after it as the answer. Anything else raises AnswerRefused naming the options, where
+    `z` to a question offering a, b and x was recorded as the answer (CLI-ROBUST), and so does a
+    second answer, which silently replaced the first, unless `change` says it replaces it. Each
+    answer is a row of its own under `answers` and the record's answer is the newest, so a change
+    leaves what was answered before on the record.
+
+    A rule proposal's question is a person's to answer (RULE-PROPOSALS): an architect's decision
+    (`by` architect, what `polyctl decide --answers` passes) and a turn polyctl started for either role are
+    refused, since both are agents working under the rules the proposal would change.
+    """
+    p = os.path.join(root, DECISION_DIR, did + ".json")
+    if not os.path.exists(p):
+        return None
+    from .storage import _exclusive_lock, replace_file_durably
+    # One answer at a time: the terminal and the phone answering at once each read the record unanswered,
+    # and the later write dropped the earlier answer. The record is read inside the lock, which lives
+    # beside the decisions, not among them, whose listing is how a change is noticed (CLI-ROBUST-2).
+    with _exclusive_lock(os.path.join(root, ".polyctl", "decisions.lock")):
+        rec = json.load(open(p, encoding=UTF8))
+        if rec.get("proposal"):
+            agent = invoking_role() or ("architect" if by == "architect" else None)
+            if agent:
+                raise AnswerRefused(f"{did} asks about rule proposal {rec['proposal']}, which a person decides, not the "
+                                    f"{agent}: polyctl answer {did} <key> in a person's terminal, or a tap on the phone")
+        given = str(key_or_text).split(None, 1)
+        key, words = (given[0].lower() if given else ""), (given[1].strip() if len(given) > 1 else "")
+        options = [o for o in rec.get("options") or [] if isinstance(o, dict)]
+        chosen = next((o for o in options if o.get("key") == key), None)
+        free = next((o for o in options if free_text_option(o)), None)
+        if chosen is None:
+            offered = ", ".join(f"{o.get('key')}) {o.get('label')}" for o in options)
+            raise AnswerRefused(f"{did} offers {offered or 'no options'}; {key!r} is not one of them")
+        if free_text_option(chosen) and not words:
+            raise AnswerRefused(f"{key} is answered in your own words: polyctl answer {did} {key} <text>")
+        if words and not free_text_option(chosen):
+            raise AnswerRefused(f"{key}) {chosen.get('label')} takes no words after it"
+                                + (f"; answer in your own words with {free.get('key')} <text>" if free else ""))
+        if rec.get("state") == "answered" and not change:
+            raise AnswerRefused(f"{did} is already answered: {rec.get('answer')}; "
+                                f"polyctl answer {did} <key> --change replaces it, and both stay on the record")
+        row = {"answer": words if free_text_option(chosen) else chosen.get("label"), "answer_key": chosen.get("key"),
+               "answered_at": int(time.time()), "answered_by": by}
+        if user is not None or interactive is not None:
+            # The login and the terminal, as every other act polyctl attributes to a person keeps them (RULE-PROPOSALS-2).
+            row.update(answered_user=user, answered_interactive=bool(interactive))
+        rows = rec.get("answers")
+        if not isinstance(rows, list):
+            # Answered before each answer was a row: that answer becomes the first, so a change keeps it.
+            rows = [{name: rec.get(name) for name in row}] if rec.get("state") == "answered" else []
+        rec.update(row, state="answered", answers=rows + [row])
+        rec = scan_record(rec)
+        replace_file_durably(p, json.dumps(rec, ensure_ascii=False, indent=2).encode(UTF8))
+    rec["id"] = did
+    return rec
+
+
+# ── rule proposals: an agent proposes, a person decides (RULE-PROPOSALS) ──────
+
+PROPOSAL_EVIDENCE_SLICES = 10           # the project's last landed slices a proposal is measured beside
+# What a person decided, by the key of the option they chose: `ask` keys options a, b, … in the order
+# given, and `propose` offers accept, then reject. The free-text key is an answer in their own words.
+PROPOSAL_OUTCOMES = {"a": "accepted", "b": "rejected"}
+
+
+class ProposalRefused(ValueError):
+    """A proposal polyctl does not record: it names no change, gives no reason, or names a file outside the project."""
+
+
+def proposal_rule_file(root, path):
+    """(the rule file as a path in the project, the digest of its bytes now), or ProposalRefused.
+
+    A relative path is read from the project's root, as a path polyctl records is. The file must be
+    the project's own: a link out of it is followed and refused, so nothing outside the project
+    is read, and nothing outside it is named in a ledger the project keeps.
+    """
+    full = path if os.path.isabs(path) else os.path.join(root, path)
+    if not _within(full, root):
+        raise ProposalRefused(f"{path} is outside the project; name the rule file as a path in it")
+    if not os.path.isfile(full):
+        raise ProposalRefused(f"{path} is no file in the project; name the file that holds the rule")
+    digest = hashlib.sha256()
+    with open(full, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 16), b""):
+            digest.update(chunk)
+    relative = os.path.relpath(os.path.realpath(full), os.path.realpath(root))
+    return relative.replace(os.sep, "/"), "sha256:" + digest.hexdigest()
+
+
+def proposal_evidence(root):
+    """What a proposal is judged beside: the outcomes of the project's last landed slices, as `polyctl stats` reads them.
+
+    Measured from the ledgers, never typed by the proposer (#49): which slices, and their rounds,
+    first-pass rate, time, size and the defects found in them later. A review ledger that cannot be read
+    is said so under "unread", where it was read as no slice having landed (RULE-PROPOSALS-2).
+    """
+    from .storage import read_chained_jsonl
+    try:
+        read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+        landed = sorted((o for o in slice_outcomes(root) if o.get("landed_at")), key=lambda o: o["landed_at"])
+    except Exception as exc:
+        return {"slices": [], "stats": outcome_stats([]), "unread": f"{type(exc).__name__}: {exc}"[:200]}
+    recent = landed[-PROPOSAL_EVIDENCE_SLICES:]
+    return {"slices": [o["slice"] for o in recent], "stats": outcome_stats(recent)}
+
+
+def _proposal_context(cfg, author, via, why, path, evidence):
+    """What a person reads beside a proposal's question, in the project's language: who, why, the file, the evidence."""
+    if author.get("role"):
+        who = f"{author['actor']} ({author['role']})"
+    else:
+        who = language.text(cfg, "proposal.unknown", via=via)
+    lines = [language.text(cfg, "proposal.by", who=who, why=why)]
+    if path:
+        lines.append(language.text(cfg, "proposal.rule-file", path=path))
+    stats = evidence["stats"]
+    if evidence.get("unread"):
+        lines.append(language.text(cfg, "proposal.unread", why=evidence["unread"]))
+    elif stats["slices"]:
+        def shown(value):
+            return "—" if value is None else value
+        lines.append(language.text(cfg, "proposal.evidence", n=stats["slices"],
+                                   reviewed=stats["slices"] - stats["waived"],
+                                   first_pass=shown(stats["first_pass_pct"]),
+                                   rounds=shown((stats["rounds"] or {}).get("median")),
+                                   defects=shown(stats["defects_pct"])))
+    else:
+        lines.append(language.text(cfg, "proposal.no-evidence"))
+    return "\n".join(lines)
+
+
+def _proposed_change(text, path):
+    """What makes two proposals one: the change in any spacing and case, and the file it names."""
+    return " ".join(str(text or "").split()).lower(), path
+
+
+def proposals(root):
+    """Every rule proposal, oldest first, with what its question says now (RULE-PROPOSALS).
+
+    The proposal is its row in the decision ledger. What a person decided is its question's
+    answer, recorded by the decision flow as every answer is and read from there, so the ledger
+    holds no second copy of it to disagree with. `state` is open, accepted, rejected, answered
+    (in the person's own words), or missing when its question's file is gone. A ledger that
+    cannot be read raises, as it does for every reader: it is never read as no proposals.
+    """
+    asked = {rec["id"]: rec for rec in decisions(root)}
+    out = []
+    for row in decision_rows(root):
+        if row.get("kind") != "proposal":
+            continue
+        question = asked.get(row.get("question"))
+        if question is None:
+            state = "missing"
+        elif question.get("state") != "answered":
+            state = "open"
+        else:
+            state = PROPOSAL_OUTCOMES.get(question.get("answer_key"), "answered")
+        out.append(dict(row, state=state, answer=(question or {}).get("answer"),
+                        answered_by=(question or {}).get("answered_by"),
+                        answered_user=(question or {}).get("answered_user"),
+                        answered_interactive=(question or {}).get("answered_interactive"),
+                        answered_at=(question or {}).get("answered_at")))
+    return out
+
+
+def propose(root, cfg, text, why, rule_file=None, via="cli"):
+    """Record a change an agent proposes to a rule it works under, and ask a person to decide it (RULE-PROPOSALS).
+
+    An agent that edits its own playbook, steering or authority has rewritten the rules it is
+    held to, and nobody decided it. Proposed instead, the change is a row of the decision
+    ledger, chained as `polyctl decide` chains its rows: who proposed it (the role of a turn polyctl
+    started, as a waived grant records its author, and `via` the CLI or MCP), the change, why,
+    the file that holds the rule with the digest of its bytes then, and the outcomes of the
+    project's last landed slices. Beside it goes a question a person answers through the
+    decision flow, `polyctl answer` or a tap on the phone: accept, reject or their own words.
+    Nothing here, and nothing an answer does, writes a rule file.
+
+    Returns (the proposal, its question, True), or (the open proposal of the same change, None,
+    False) when that one stands: the same change proposed twice is one proposal. Raises
+    ProposalRefused for a proposal with no change, no reason or a rule file outside the project.
+    """
+    text, why = str(text or "").strip(), str(why or "").strip()
+    if not text:
+        raise ProposalRefused("a proposal names the change: what the rule would say, or what would change")
+    if not why:
+        raise ProposalRefused("a proposal gives its reason: what went wrong under the rule as it stands")
+    path, digest = proposal_rule_file(root, str(rule_file)) if rule_file else (None, None)
+    made = proposals(root)
+    for standing in made:
+        if standing["state"] == "open" and _proposed_change(standing.get("text"), standing.get("rule_file")) \
+                == _proposed_change(text, path):
+            return standing, None, False
+    author = grant_author(cfg)
+    evidence = proposal_evidence(root)
+    # Numbered past every proposal the ledger holds, so none takes the id of one whose question file is gone.
+    taken = [int(p["id"][2:]) for p in made if str(p.get("id") or "")[:2] == "P-" and p["id"][2:].isdigit()]
+    question = ask(root, language.text(cfg, "proposal.question", text=text),
+                   [language.text(cfg, "proposal.accept"), language.text(cfg, "proposal.reject")],
+                   context=_proposal_context(cfg, author, via, why, path, evidence), cfg=cfg, proposal=True,
+                   after=max(taken, default=0))
+    row = scan_record({"id": question["proposal"], "at": question["asked_at"], "kind": "proposal", "text": text,
+                       "why": why, "rule_file": path, "rule_digest": digest, "question": question["id"],
+                       "by": author, "via": via, "evidence": evidence})
+    from .storage import append_chained_jsonl
+    try:
+        append_chained_jsonl(decisions_path(root), row, DECISION_CHAIN, legacy_prefix=True)
+    except BaseException:
+        # A question the ledger holds no proposal for would be answered for nothing: it is taken back.
+        try:
+            os.remove(os.path.join(root, DECISION_DIR, question["id"] + ".json"))
+        except OSError:
+            pass
+        raise
+    return dict(row, state="open", answer=None, answered_by=None, answered_at=None), question, True
+
+
+def last_nudge_error(root, parked=True):
+    """The most recent failed nudge, if the watchdog recorded one.
+
+    `parked=False` leaves out a failure while the implementer's slice is parked on its usage limit,
+    and one no newer than the stop a park has ended for: the park's own alarm tells a person, and an
+    architect woken to judge it spends a window on a condition that waits on a clock (QUOTA-PARK).
+    """
+    try:
+        st = json.load(open(project_file(root, "watchdog-state", key=next_project_key(root)), encoding=UTF8))
+    except Exception:
+        return None
+    err = st.get("last_error")
+    if not parked and isinstance(err, dict) and (isinstance(st.get("quota_park"), dict)
+                                                 or float(st.get("quota_resumed") or 0) >= (err.get("at") or 0)):
+        return None
+    return err
+
+
+def recent_errors(recs, limit=3, adapter=None):
+    """Tool calls the agent itself marked as failed.
+
+    Use the structural verdict the store already carries — Kiro records
+    `success: true|false` on every tool_result — never a text search. Matching on
+    words like "failed" surfaces the agent's own search patterns and passing test
+    names, which is worse than showing nothing: a panel that cries wolf gets
+    ignored exactly when it is right.
+
+    The record, the verdict field, the value that means failed and where the output
+    is are the adapter's `telemetry.failure`; asked without an adapter, the
+    implementer's adapter declares them.
+
+    A subagent's failed calls are not read (`transcript.subagents`). They are steps the
+    subagent recovers from inside - nearly every subagent that failed a call still returned
+    a result - and what the implementer is told is how the subagent ended, in its own
+    transcript: the result of the call that waited for it, read here when it failed, or the
+    notification of its end. Read beside the implementer's own failures, the subagents'
+    would crowd them out of the panel's two lines.
+
+    A task the implementer ran in the background - a subagent, a command - ends after the call
+    that started it returned, and the session is told in a record of its own: an end whose
+    status the adapter declares a failure (`telemetry.failure.ends`) is read here as its failed
+    result would be, once however many times the session was told of it.
+    """
+    shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
+    failure = shape["failure"]
+    if not failure and not shape["ends"]:
+        return []
+    out, told = [], set()
+    for r in reversed(recs):
+        raws = []
+        for task, text in failed_ends(r, shape):
+            if task not in told:
+                told.add(task)
+                raws.append(text)
+        pl = record_body(r, shape)
+        if failure and pl is not None and record_kind(r, shape) == failure["type"]:
+            failed = [item for item in declared_items(pl, failure)
+                      if _declared_value(_path_value(item, failure["field"]), failure["failed_when"])]
+            # Results nested in a message are each a call that failed, its verdict and output the block's;
+            # read newest first, as the records are.
+            raws.extend(str(_path_value(item, failure["text"]) or "") if failure["text"] else ""
+                        for item in reversed(failed))
+        for raw in raws:
+            # Failed tool output is usually a wall of passing lines with the real
+            # cause buried in it. Lead with the line that actually failed.
+            lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
+            def is_signal(ln):
+                low = ln.lower()
+                if ln.startswith("✔") or low.startswith("output:"):
+                    return False
+                return (ln.startswith("✖") or "error ts" in low or "error:" in low
+                        or low.startswith("fail") or " failing tests" in low
+                        or "exit code: 1" in low or low.startswith("✗"))
+            signal = next((ln for ln in lines if is_signal(ln)), None)
+            if not signal:
+                signal = next((ln for ln in lines if not ln.lower().startswith("output:")
+                               and not ln.startswith("✔")), lines[0] if lines else raw)
+            text = " ".join(str(signal)[:260].split())
+            out.append((local_hhmm(record_time(r, shape)) or "--:--", text))
+            if len(out) >= limit:
+                break
+        if raws and len(out) >= limit:
+            break
+    return list(reversed(out))
+
+
+# ── repository signals ────────────────────────────────────────────────────────
+
+def _review_verdict(body):
+    """Return one explicit top-level verdict value, otherwise INVALID."""
+    from .verdicts import VERDICTS
+    allowed = set(VERDICTS)
+    values = []
+    malformed = False
+    for line in str(body or "").splitlines():
+        if line.startswith((" ", "\t")):
+            continue
+        if not re.match(r"^(?:\*\*)?verdict\b", line, re.I):
+            continue
+        prefix = re.match(
+            r"^(?:\*\*verdict[ \t]*:\*\*|verdict[ \t]*:)", line, re.I
+        )
+        if not prefix:
+            malformed = True
+            continue
+        value = line[prefix.end():].strip(" \t")
+        if value.startswith("**") and value.endswith("**") and len(value) >= 4:
+            value = value[2:-2].strip(" \t")
+        if not re.fullmatch(r"[A-Za-z_]+", value or ""):
+            malformed = True
+            continue
+        value = value.upper()
+        if value not in allowed:
+            malformed = True
+            continue
+        if value not in values:
+            values.append(value)
+    return values[0] if not malformed and len(values) == 1 else "INVALID"
+
+
+def _has_verdict_marker(body):
+    """Whether output contains any verdict-like marker; authority stays stricter."""
+    return bool(re.search(r"\bverdict\b", str(body or ""), re.I))
+
+
+def reviews(root, reviews_dir, limit=4):
+    d = os.path.join(root, reviews_dir)
+    if not os.path.isdir(d):
+        return []
+    # Review artefacts only. `polyctl init` leaves semantic-review/.gitkeep, and as the
+    # newest file it was reported as an INVALID review and written into every
+    # verification record as the review the tree had been measured against.
+    # One removed after it was listed - a prune running beside the reader - is not
+    # one: its time was read for the order, and `polyctl cost` ended on it (LEADS-OPS).
+    dated = []
+    for f in os.listdir(d):
+        if f.startswith(".") or not os.path.isfile(os.path.join(d, f)):
+            continue
+        try:
+            dated.append((os.path.getmtime(os.path.join(d, f)), f))
+        except OSError:
+            continue
+    files = [f for _, f in sorted(dated, key=lambda pair: pair[0], reverse=True)[:limit]]
+    out = []
+    for f in files:
+        verdict = "INVALID"
+        try:
+            body = open(os.path.join(d, f), errors="ignore", encoding=UTF8).read()
+            verdict = _review_verdict(body)
+            evidence = review_evidence(body)
+            # polyctl records the verdict it adjudicated in the evidence line too; a
+            # margin verdict that disagrees was changed after polyctl wrote it (#60).
+            if isinstance(evidence, dict) and "verdict" in evidence \
+                    and evidence["verdict"] != verdict:
+                verdict = "INVALID"
+            # Preserve legacy one-line quota/auth artifacts written before reviews
+            # carried evidence. An artefact with an evidence line records how the
+            # reviewer's process ended as its verdict line, so words in it — a
+            # finding about authentication or a rate limit — never decide it (#57).
+            has_verdict_line = _has_verdict_marker(body)
+            if verdict == "INVALID" and not has_verdict_line \
+                    and evidence is None \
+                    and REVIEW_UNAVAILABLE_RE.search(body):
+                verdict = "UNAVAILABLE"
+        except Exception:
+            pass
+        out.append((f, verdict))
+    return out
+
+
+REVIEW_UNAVAILABLE_RE = re.compile(
+    r"hit your (?:session|usage|weekly|monthly) limit|usage limit|rate limit|"
+    r"out of (?:credits|quota)|API Error: (?:401|403|429|5\d\d)|"
+    r"Not logged in|login required|authentication", re.I)
+
+
+def reviewer_state_path(root):
+    return project_file(root, "reviewer")
+
+
+def reviewer_state(root):
+    try:
+        return json.load(open(reviewer_state_path(root), encoding=UTF8))
+    except (OSError, ValueError):
+        return {}
+
+
+def set_reviewer_state(root, **fields):
+    st = reviewer_state(root)
+    st.update(fields)
+    try:
+        os.makedirs(os.path.dirname(reviewer_state_path(root)), exist_ok=True)
+        json.dump(st, open(reviewer_state_path(root), "w", encoding=UTF8))
+    except OSError:
+        pass
+    return st
+
+
+def _edge_ids(item, field):
+    """Board ids a note names; a parenthesised remark is not one, however many words it has.
+
+    Only a word that began with `(` was dropped, so `needs: A (see ticket 12)` needed `ticket` and `12)`
+    and was never READY (READY-GRAPH-2). An unclosed remark runs to the end of the note.
+    """
+    text = re.sub(r"\([^)]*(?:\)|$)", " ", item["notes"].get(field, ""))
+    return [token for token in re.split(r"[,\s]+", text) if token]
+
+
+def board_graph(root, data=None):
+    """READY, derived from the board's dependency edges, and what is wrong with them (#33).
+
+    A dependency graph, not a handoff mechanism. The valuable part of "backend
+    done, now the frontend" is that the second item becomes eligible the moment
+    the first lands, and putting the edge on the board keeps the implementer from
+    choosing its own scope, the one authority it must not hold.
+
+    `needs: B3, B4` on a queued item names the board items it waits for;
+    `unlocks:` on any item is the same edge written from the other end. `needs:`
+    on a blocked item stays its reason in words. On 2026-09-07 the architect
+    decided what was actionable by reading the board as prose, and a dependency
+    named there was never checked against anything. So an id that is not on the
+    board, an id listed twice and a cycle are problems naming both ends, never a
+    silent skip, and no item they touch is READY; neither is one `waiting:` on
+    someone. READY is derived here and nowhere else: a hand-written `## ready`
+    section is a problem too.
+
+    `data` is the board's bytes as one reading took them (BoardEdit), so a move is decided on the board it is
+    made on (SLICE-LIFECYCLE-2).
+
+    Returns {"ready": [item with its role], "problems": [text]}.
+    """
+    b = board(root, data)
+    # What a problem touches is not READY: an id listed twice and an item that unlocks what is not on the
+    # board were named and still returned READY (READY-GRAPH-2).
+    problems, where, broken = [], {}, set()
+    for state in BOARD_STATES:
+        for item in b[state]:
+            if item["id"] in where:
+                problems.append(f"{item['id']} is on the board twice, under {where[item['id']]} and {state}")
+                broken.add(item["id"])
+            where.setdefault(item["id"], state)
+    try:
+        if data is None:
+            with open(os.path.join(root, ".polyctl", "board.md"), encoding=UTF8, errors="replace") as fh:
+                lines = fh.readlines()
+        else:
+            import io
+            lines = io.TextIOWrapper(io.BytesIO(data), encoding=UTF8, errors="replace").readlines()
+        if any(re.match(r"^\s*##\s+ready\s*$", line, re.I) for line in lines):
+            problems.append("the board has a hand-written READY section; READY is derived from `needs:`, "
+                            "so its items belong under `## queued`")
+    except OSError:
+        pass
+    edges = {item["id"]: set(_edge_ids(item, "needs")) for item in b["queued"]}
+    for state in BOARD_STATES:
+        for item in b[state]:
+            for target in _edge_ids(item, "unlocks"):
+                if target not in where:
+                    problems.append(f"{item['id']} unlocks {target}, which is not on the board")
+                    broken.add(item["id"])
+                else:
+                    edges.setdefault(target, set()).add(item["id"])
+    for item_id in sorted(edges):
+        for dep in sorted(edges[item_id]):
+            if dep not in where:
+                problems.append(f"{item_id} needs {dep}, which is not on the board")
+                broken.add(item_id)
+    colour, trail, cycles = {}, [], set()
+
+    def visit(node):
+        colour[node] = "open"
+        trail.append(node)
+        for dep in sorted(edges.get(node, ())):
+            if colour.get(dep) == "open":
+                cycle = trail[trail.index(dep):]
+                if frozenset(cycle) not in cycles:
+                    cycles.add(frozenset(cycle))
+                    problems.append("a cycle: " + ", ".join(
+                        f"{first} needs {then}" for first, then in zip(cycle, cycle[1:] + [dep])))
+                broken.update(cycle)
+            elif dep not in colour and dep in edges:
+                visit(dep)
+        trail.pop()
+        colour[node] = "closed"
+
+    for node in sorted(edges):
+        if node not in colour:
+            visit(node)
+    # A duplicate's done copy cannot satisfy another item's dependency (TRIAGE-3-LOW).
+    done = {item["id"] for state in ("done", "verified") for item in b[state]} - broken
+    ready_items = [{**item, "role": item["notes"].get("role", "")} for item in b["queued"]
+                   if item["id"] not in broken and "waiting" not in item["notes"]
+                   and all(dep in done for dep in edges.get(item["id"], ()))]
+    return {"ready": ready_items, "problems": problems}
+
+
+def ready(root):
+    """Queued items whose dependencies are all done and which wait on no one (#33)."""
+    return board_graph(root)["ready"]
+
+
+def review_loop(root, reviews_dir, min_repeats=3):
+    """The same finding coming back review after review.
+
+    A round budget counts rounds. It cannot see that round four's blocker is
+    round two's blocker with the line numbers moved — which is the actual
+    failure: the implementer is not converging, and more rounds will not help.
+    Fingerprint each finding on its file and its first clause, and report any
+    that recurs across consecutive NEEDS_CHANGES reviews.
+    """
+    seen = {}
+    d = os.path.join(root, reviews_dir)
+    for f, v in reviews(root, reviews_dir, limit=12):
+        if "APPROVED" in (v or "").upper():
+            break
+        try:
+            body = open(os.path.join(d, f), errors="replace", encoding=UTF8).read()
+        except OSError:
+            continue
+        # Findings sit in the reviewer's verbatim block, indented (#54).
+        for m in re.finditer(r"^(?:    )?- \[(BLOCKER|HIGH|MEDIUM|LOW)\]\s*([^\s:]+)[:\d]*\s*[—-]\s*(.{0,60})",
+                             body, re.M):
+            key = (m.group(2), re.sub(r"\W+", " ", m.group(3).lower()).strip()[:40])
+            seen.setdefault(key, {"sev": m.group(1), "count": 0, "reviews": []})
+            seen[key]["count"] += 1
+            seen[key]["reviews"].append(f)
+    return [{"file": k[0], "clause": k[1], **v}
+            for k, v in seen.items() if v["count"] >= min_repeats]

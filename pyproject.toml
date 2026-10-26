@@ -3,10 +3,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ao-orchestrator"
-# The version is written once, in src/ao/__init__.py: [tool.hatch.version] below reads it.
+name = "polyctl"
+# The version is written once, in src/polyctl/__init__.py: [tool.hatch.version] below reads it.
 dynamic = ["version"]
-description = "Your agents commit, every change is granted first or flagged: ao gates the change an agent staged, has a model of another family review it, refuses any other git commit in its hook, and flags a commit made around it."
+description = "Your agents commit, every change is granted first or flagged: polyctl gates the change an agent staged, has a model of another family review it, refuses any other git commit in its hook, and flags a commit made around it."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
@@ -24,7 +24,7 @@ classifiers = [
 # No runtime dependencies for the core, on purpose. This watches agents on machines it
 # does not control — often someone else's laptop, a CI box, a container — and every
 # dependency is a thing that can be missing exactly there. 3.9 is the floor because
-# that is what macOS ships, and `ao status` should work before anyone has installed
+# that is what macOS ships, and `polyctl status` should work before anyone has installed
 # anything at all. The rule is about the core (#82): docs/upstream.md sets out three
 # tiers - the core on the standard library only, optional extras declared under
 # [project.optional-dependencies] that report themselves unavailable when absent, and
@@ -32,34 +32,34 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://hakkisagdic.github.io/agent-orchestrator/"
-Source = "https://github.com/hakkisagdic/agent-orchestrator"
-Documentation = "https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/protocol.md"
+Homepage = "https://hakkisagdic.github.io/polyctl/"
+Source = "https://github.com/hakkisagdic/polyctl"
+Documentation = "https://github.com/hakkisagdic/polyctl/blob/main/docs/protocol.md"
 
 [project.scripts]
-ao = "ao.cli:main"
-ao-watchdog = "ao.watchdog:main"
-ao-api-review = "ao.api_review:main"
+polyctl = "polyctl.cli:main"
+polyctl-watchdog = "polyctl.watchdog:main"
+polyctl-api-review = "polyctl.api_review:main"
 
 [tool.hatch.version]
-# The wheel, the package and `ao --version` read this one line. Written twice, it drifted: the
+# The wheel, the package and `polyctl --version` read this one line. Written twice, it drifted: the
 # 0.3.0 and 0.4.0 tags shipped a __version__ of 0.2.0. tests/test_cli_robust.py holds them together.
-path = "src/ao/__init__.py"
+path = "src/polyctl/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 # The adapters directory lives inside the package, so it ships with it — no
 # force-include, which only produced duplicate entries in the archive.
-packages = ["src/ao"]
+packages = ["src/polyctl"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/ao", "docs", "README.md", "README.tr.md", "LICENSE", "pyproject.toml"]
+include = ["src/polyctl", "docs", "README.md", "README.tr.md", "LICENSE", "pyproject.toml"]
 
 [project.optional-dependencies]
 # pytest-xdist runs the suite in parallel in the pre-push hook (PREPUSH-PARALLEL); without it the hook runs one.
 dev = ["pytest>=8", "pytest-xdist>=3.5"]
-# A reviewer ao runs as a tool over the staged candidate, on its own provider (#86). Tier two:
+# A reviewer polyctl runs as a tool over the staged candidate, on its own provider (#86). Tier two:
 # absent, the reviewer reports itself unavailable and names this extra. pr-agent needs Python
-# 3.12, above ao's floor, so on an older interpreter the extra installs nothing rather than fail.
+# 3.12, above polyctl's floor, so on an older interpreter the extra installs nothing rather than fail.
 # Bounded to the release its adapter was measured against: a later one could move the answer
-# marker or rename a model setting, and ao would record the model it pinned (REVIEWER-TOOL-2).
+# marker or rename a model setting, and polyctl would record the model it pinned (REVIEWER-TOOL-2).
 pr-agent = ["pr-agent>=0.45.0,<0.46; python_version >= '3.12'"]

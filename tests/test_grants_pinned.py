@@ -1,8 +1,8 @@
-"""Every turn ao starts holds the grant ao composes, and nothing a person's settings add to it (GRANTS-PINNED).
+"""Every turn polyctl starts holds the grant polyctl composes, and nothing a person's settings add to it (GRANTS-PINNED).
 
 A Claude Code run given no --permission-mode starts in the mode the person's settings name, and a
 `claude -p --resume` in the mode a new run would, so an acceptEdits, auto or bypassPermissions
-default widened every nudge, every architect wake and the reviewer ao treats as read-only. The
+default widened every nudge, every architect wake and the reviewer polyctl treats as read-only. The
 implementer's and the architect's grants lacked commands their own playbook told them to run, so
 an unattended turn was silently denied those steps. A codex nudge turned its sandbox off, and flags
 that turn approvals off sat in adapters with no reason written down.
@@ -15,42 +15,42 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import allowlist as AL, cli, language, lib as A, storage, watchdog as W
+from polyctl import allowlist as AL, cli, language, lib as A, storage, watchdog as W
 from tests.scenarios import World
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PLAYBOOK = os.path.join(ROOT, "src", "ao", "skill", "SKILL.md")
+PLAYBOOK = os.path.join(ROOT, "src", "polyctl", "skill", "SKILL.md")
 BLOCKED = "# queue empty\n\n## KARAR GEREKLİ\n"
-TOOL = re.compile(r"(?<![\w.])ao_[a-z][a-z_]*[a-z]")
+TOOL = re.compile(r"(?<![\w.])polyctl_[a-z][a-z_]*[a-z]")
 
 # The playbook sections each role works from, by number; section 5 is every role's.
 SECTIONS = {"implementer": ("3.", "4.", "5.", "8."), "architect": ("5.", "7.")}
 
-# An `ao` command a role's text names that is not that role's to run, and why. Each must still be
+# A `polyctl` command a role's text names that is not that role's to run, and why. Each must still be
 # named there and still be outside the grant, or the excuse has outlived what it excused.
 NAMED_NOT_RUN = {
     "implementer": {
-        "ao lock -- <command>": "runs any command (allowlist.FORBIDDEN); the declared gates take the same lock "
-                                "through ao verify",
-        "ao lock": "named where an urgent note reaches the implementer; the same command",
-        "ao commit-check": "what the commit hook runs against Git's index; ao commit runs it itself",
-        "ao hooks status": "how doctor and init prove the hook, not a step of the loop",
-        "ao hooks": "installing and removing hooks is a person's (allowlist.FORBIDDEN)",
-        "ao surfaces install|uninstall swiftbar --dir <dir>": (
+        "polyctl lock -- <command>": "runs any command (allowlist.FORBIDDEN); the declared gates take the same lock "
+                                "through polyctl verify",
+        "polyctl lock": "named where an urgent note reaches the implementer; the same command",
+        "polyctl commit-check": "what the commit hook runs against Git's index; polyctl commit runs it itself",
+        "polyctl hooks status": "how doctor and init prove the hook, not a step of the loop",
+        "polyctl hooks": "installing and removing hooks is a person's (allowlist.FORBIDDEN)",
+        "polyctl surfaces install|uninstall swiftbar --dir <dir>": (
             "installing and removing the menu bar plugin is a person's (allowlist.FORBIDDEN)"
         ),
     },
     "architect": {
-        "ao lock": "named where an urgent note reaches the implementer; the architect runs none of the three",
-        "ao verify": "as ao lock",
-        "ao commit-ok": "as ao lock",
-        "ao surfaces install|uninstall swiftbar --dir <dir>": (
+        "polyctl lock": "named where an urgent note reaches the implementer; the architect runs none of the three",
+        "polyctl verify": "as polyctl lock",
+        "polyctl commit-ok": "as polyctl lock",
+        "polyctl surfaces install|uninstall swiftbar --dir <dir>": (
             "installing and removing the menu bar plugin is a person's (allowlist.FORBIDDEN)"
         ),
     },
 }
 
-# The flags that approve everything, sandbox nothing or check no permission in a command ao starts,
+# The flags that approve everything, sandbox nothing or check no permission in a command polyctl starts,
 # each declared with its reason; the replaced ones are gone from this list.
 KEPT = {
     "aider": {"implementer": ["--yes-always"], "architect": ["--yes-always"]},
@@ -80,7 +80,7 @@ def _swapped(argv, flag, value):
 
 
 def _store(root, cfg):
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in cfg.items() if key != "root"}, fh)
 
 
@@ -123,9 +123,9 @@ def _texts(role):
 
 
 def _commands(text):
-    """{span: [command]} for each `ao …` span a text names: `"…"`, `<…>` and `…` filled, `a|b` expanded."""
+    """{span: [command]} for each `polyctl …` span a text names: `"…"`, `<…>` and `…` filled, `a|b` expanded."""
     found = {}
-    for span in re.findall(r"`(ao\s[^`]*)`", text):
+    for span in re.findall(r"`(polyctl\s[^`]*)`", text):
         span = " ".join(span.split())
         filled = span.replace("…", "x")
         filled = re.sub(r'"[^"]*"', "x", re.sub(r"<[^<>]*>", "x", filled))
@@ -136,7 +136,7 @@ def _commands(text):
     return found
 
 
-def test_every_command_ao_composes_for_a_claude_turn_names_the_mode_and_tools_its_adapter_pins():
+def test_every_command_polyctl_composes_for_a_claude_turn_names_the_mode_and_tools_its_adapter_pins():
     adapter = A.load_adapter("claude-code")
     resume = adapter["resume"]["argv"]
     composed = {"implementer": resume + A.unattended_flags(adapter, resume)[0],
@@ -156,9 +156,9 @@ def test_a_reviewer_in_another_mode_or_with_a_tool_beyond_reading_is_named():
     reviewer = A.compose_reviewer("claude-code", model="m")["argv"]
 
     for mode in ("default", "plan", "acceptEdits", "auto", "bypassPermissions"):
-        assert f"it runs with --permission-mode {mode}, where ao pins dontAsk" in AL.reviewer_problems(
+        assert f"it runs with --permission-mode {mode}, where polyctl pins dontAsk" in AL.reviewer_problems(
             _swapped(reviewer, "--permission-mode", mode))
-    assert "it runs with --tools Read,Grep,Glob,Edit, where ao pins Read,Grep,Glob" in AL.reviewer_problems(
+    assert "it runs with --tools Read,Grep,Glob,Edit, where polyctl pins Read,Grep,Glob" in AL.reviewer_problems(
         _swapped(reviewer, "--tools", "Read,Grep,Glob,Edit"))
     assert AL.reviewer_problems(_swapped(reviewer, "--tools", "Read")) == []
 
@@ -176,7 +176,7 @@ def test_a_reviewer_route_composed_before_the_pin_runs_with_it(project, monkeypa
     assert attempt["ok"] and label == "claude-reviewer"
     (argv,) = seen
     assert argv[-4:] == ["--permission-mode", "dontAsk", "--tools", "Read,Grep,Glob"]
-    assert "ao appends --permission-mode dontAsk --tools Read,Grep,Glob" in capsys.readouterr().out
+    assert "polyctl appends --permission-mode dontAsk --tools Read,Grep,Glob" in capsys.readouterr().out
 
 
 def test_the_hunter_is_held_to_the_reviewers_pin(project, monkeypatch, capsys):
@@ -200,7 +200,7 @@ def test_the_hunter_is_held_to_the_reviewers_pin(project, monkeypatch, capsys):
 
     widened = dict(project, hunter={"id": "h1", "argv": hunter + ["--permission-mode", "acceptEdits"]})
     assert cli.cmd_hunt(widened, run) == 2
-    assert "it runs with --permission-mode acceptEdits, where ao pins dontAsk" in capsys.readouterr().out
+    assert "it runs with --permission-mode acceptEdits, where polyctl pins dontAsk" in capsys.readouterr().out
     assert len(seen) == 1
 
 
@@ -214,7 +214,7 @@ def test_an_architect_block_composed_before_the_pin_is_woken_with_it_and_the_fla
 
     (argv,) = _spawned(world, "claude")
     assert argv[-2:] == ["--permission-mode", "dontAsk"]
-    (row,) = storage.read_jsonl(os.path.join(world.root, ".ao", "ledger", "actor-flags.jsonl"))
+    (row,) = storage.read_jsonl(os.path.join(world.root, ".polyctl", "ledger", "actor-flags.jsonl"))
     assert row["actor"] == "architect" and row["flags"] == ["--permission-mode", "dontAsk"]
 
 
@@ -239,7 +239,7 @@ def test_a_claude_implementer_is_nudged_in_the_pinned_mode_with_no_grant_appende
 
 @pytest.mark.parametrize("ident,role", [("claude-code", "implementer"), ("claude-code", "architect"),
                                         ("qwen", "implementer"), ("qoder", "implementer")])
-def test_each_role_is_granted_every_ao_command_and_tool_its_playbook_and_prompts_name(ident, role):
+def test_each_role_is_granted_every_polyctl_command_and_tool_its_playbook_and_prompts_name(ident, role):
     text = _texts(role)
     rules = _grant(ident, role)
     named = _commands(text)
@@ -247,10 +247,10 @@ def test_each_role_is_granted_every_ao_command_and_tool_its_playbook_and_prompts
 
     missing = [f"`{span}`: {command}" for span, commands in sorted(named.items()) if span not in excused
                for command in commands if not any(AL.admits(rule, command) for rule in rules)]
-    # A harness whose grant names ao's MCP tools must name each one its text does; one that names
+    # A harness whose grant names polyctl's MCP tools must name each one its text does; one that names
     # none reaches the mailbox and the board through the CLI commands checked above.
     if any(rule.startswith("mcp__") for rule in rules):
-        missing += [tool for tool in sorted(set(TOOL.findall(text))) if f"mcp__ao__{tool}" not in rules]
+        missing += [tool for tool in sorted(set(TOOL.findall(text))) if f"mcp__polyctl__{tool}" not in rules]
 
     assert missing == []
     for span, why in excused.items():
@@ -265,7 +265,7 @@ def test_the_architect_edits_the_coordination_files_its_routine_names_and_no_oth
 
     assert not {"Bash", "Bash(*)", "Edit", "Write", "NotebookEdit"} & set(rules)
     edited = sorted(rule[len("Edit(/"):-1] for rule in rules if rule.startswith("Edit("))
-    assert edited == [".ao/backlog.md", ".ao/board.md", ".ao/inbox/**"]
+    assert edited == [".polyctl/backlog.md", ".polyctl/board.md", ".polyctl/inbox/**"]
     assert all(path.rstrip("*") in text for path in edited)
     assert not [rule for rule in rules if rule.startswith(("Write(", "NotebookEdit("))]
     assert AL.problems(argv, role="architect") == []
@@ -282,17 +282,17 @@ def test_the_doctor_names_a_mode_other_than_the_pin_a_product_write_and_an_archi
 
     problems = dict(cli._actor_grant_problems(cfg))
 
-    assert "it runs with --permission-mode acceptEdits, where ao pins dontAsk" in problems["actor-mode:architect"]
+    assert "it runs with --permission-mode acceptEdits, where polyctl pins dontAsk" in problems["actor-mode:architect"]
     assert "Bash(rm agent-mail/*) admits `rm agent-mail/x src/app.py` (removes a product file)" \
         in problems["actor-grant:architect"]
-    assert "Edit(/.ao/board.md)" in problems["architect-grant"] and "options.architect_tools" in problems["architect-grant"]
+    assert "Edit(/.polyctl/board.md)" in problems["architect-grant"] and "options.architect_tools" in problems["architect-grant"]
     assert "architect-grant" not in dict(cli._actor_grant_problems(
         dict(project, architect={"adapter": "claude-code", "name": "fable", "argv": cli._architect_argv("claude-code")})))
 
 
 def test_a_codex_nudge_waits_for_a_person_and_starts_with_its_bypass_only_once_allowed(project, monkeypatch, tmp_path):
     machine = tmp_path / "machine-settings.json"
-    monkeypatch.setenv("AO_SETTINGS", str(machine))
+    monkeypatch.setenv("POLYCTL_SETTINGS", str(machine))
     cfg = dict(project, implementer={"adapter": "codex", "session": "s1", "name": "dev"})
     _store(project["root"], cfg)
     world = World(cfg, monkeypatch, tmp_path)
@@ -337,7 +337,7 @@ def test_a_harness_with_no_approval_flag_is_nudged_with_nothing_appended_and_sti
         assert AL.grants_everything(adapter["resume"]["argv"], adapter["options"])
 
 
-def test_every_flag_that_turns_approvals_off_in_a_command_ao_starts_is_declared_with_its_reason():
+def test_every_flag_that_turns_approvals_off_in_a_command_polyctl_starts_is_declared_with_its_reason():
     shipped = {ident: A.load_adapter(ident) for ident in A.shipped_adapter_ids()}
     carried = {ident: {role: A.bypass_arguments(argv) for role, argv in A.role_commands(adapter).items()
                        if A.bypass_arguments(argv)} for ident, adapter in shipped.items()}
@@ -372,4 +372,4 @@ def test_a_rule_is_read_the_way_the_harness_reads_a_wildcard():
     assert AL.admits("Bash(ls:*)", "ls -la") and AL.admits("Bash(git * main)", "git push origin main")
     assert not AL.admits("Bash(* --help *)", "npm --help") and AL.admits("Bash(* --help *)", "npm --help x")
     assert AL.admits("Bash(git diff:*)", "git diff --output=src/app.py")
-    assert not AL.admits("Bash(ao writers)", "ao writers --clean")
+    assert not AL.admits("Bash(polyctl writers)", "polyctl writers --clean")

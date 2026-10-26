@@ -1,6 +1,6 @@
 import json
 
-from ao import email
+from polyctl import email
 
 
 class _Resp:
@@ -23,7 +23,7 @@ def test_send_posts_json_to_formsubmit(tmp_path, monkeypatch):
         return _Resp('{"success": "true", "message": "ok"}')
     assert email.send("test", "hello", root="/tmp/proj", opener=opener) is True
     assert seen["url"] == "https://formsubmit.co/ajax/tok123"
-    assert seen["body"]["_subject"] == "[ao/proj] test" and seen["body"]["message"] == "hello"
+    assert seen["body"]["_subject"] == "[polyctl/proj] test" and seen["body"]["message"] == "hello"
     assert seen["headers"]["Content-type"] == "application/json"
 
 

@@ -1,0 +1,27 @@
+{
+  "project_config": [".qwen", "QWEN.md", "AGENTS.md"],
+  "id": "qwen", "name": "Qwen Code", "contract": 1, "verified": "untested",
+  "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "sources": ["https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/",
+              "https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/",
+              "https://qwenlm.github.io/qwen-code-docs/en/users/features/memory/"],
+  "detect": { "headless": ["-p", "--prompt"] },
+  "send":   { "argv": ["qwen", "-p", "{prompt}"], "cwd_matters": true,
+              "stdin": { "replaces": ["-p", "{prompt}"], "with": [],
+                         "note": "Verified from the headless documentation (qwenlm.github.io/qwen-code-docs/en/users/features/headless/), read 2026-09-17: its example pipes the prompt to `qwen` with no -p. Its --resume and --continue examples all pass -p, so resume declares none." } },
+  "resume": { "argv": ["qwen", "--resume", "{session}", "-p", "{prompt}"], "continue_last": ["qwen", "--continue", "-p", "{prompt}"],
+              "note": "--resume without an id opens an interactive picker; always pass one." },
+  "options": {
+    "trust_none": ["--approval-mode", "plan"],
+    "trust_none_note": "plan mode analyses only: it neither edits files nor runs commands",
+    "model": ["--model", "{model}"],
+    "effort": null, "effort_why": "no documented flag; reasoning effort is the model.reasoningEffort setting",
+    "output_json": ["--output-format", "stream-json"],
+    "trust_all": ["--yolo"],
+    "unattended": ["--approval-mode", "auto-edit", "--allowed-tools", "Edit,Bash(polyctl status *),Bash(polyctl board *),Bash(polyctl next *),Bash(polyctl slice start *),Bash(polyctl slice block *),Bash(polyctl slice status *),Bash(polyctl slices *),Bash(polyctl writers),Bash(polyctl verify *),Bash(polyctl review *),Bash(polyctl commit-ok *),Bash(polyctl commit -m *),Bash(polyctl commit -F *),Bash(polyctl mail *),Bash(polyctl ask *),Bash(polyctl decisions *),Bash(polyctl propose *),Bash(polyctl doctor),Bash(polyctl watchdog explain *),Bash(polyctl since *),Bash(polyctl digest *),Bash(polyctl fanout ok *),Bash(polyctl fanout record *),Bash(polyctl tail *),Bash(git status *),Bash(git log *),Bash(git diff *),Bash(git add *),Bash(ls *),Bash(cat *),Bash(grep *)"],
+    "unattended_note": "In place of --yolo: auto-edit approves edits, a shell command runs only where --allowed-tools names it, and a -p run turns what would ask into an error the model reads; Edit is named for a folder Qwen Code does not trust, where the mode falls back to default; polyctl's MCP tools are not named, and the loop reaches the mailbox through the CLI. A person's tools.approvalMode yolo is overridden by the flag, and allow rules in settings still apply. Read on 2026-09-17 from qwenlm.github.io/qwen-code-docs/en/users/features/approval-mode/ and /features/headless/, and github.com/QwenLM/qwen-code (packages/cli/src/config/config.ts)."
+  },
+  "transcript": { "kind": "jsonl", "path": "~/.qwen/projects/{sanitized_cwd}/chats", "todo": "confirm how the cwd is sanitised and the record shape against an install" },
+  "busy": { "mtime_glob": "~/.qwen/projects/*/chats/*", "idle_seconds": 240 },
+  "directives": { "steering_files": ["QWEN.md", "AGENTS.md", ".qwen/QWEN.local.md", "~/.qwen/QWEN.md"], "note": "the file name follows context.fileName" }
+}

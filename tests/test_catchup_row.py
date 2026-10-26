@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from ao import cli, lib as A, storage, watchdog as W
+from polyctl import cli, lib as A, storage, watchdog as W
 from tests.standin import program
 from tests.test_catchup_ready import APPROVED, NEEDS_CHANGES, PERSON, _catchup, _land, _legacy_waiver
 
@@ -122,7 +122,7 @@ def test_catchup_reads_the_ledger_before_starting_a_review_or_closing_an_unchang
     out = capsys.readouterr().out
     assert "review ledger cannot be read" in out
     if failure == "corrupt":
-        assert "does not record ao appending" in out
+        assert "does not record polyctl appending" in out
     assert all(f"{row['id']} stays open" in out for row in waivers)
 
 

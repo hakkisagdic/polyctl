@@ -3,7 +3,7 @@
 A review prompt carries a diff of up to 400 KB and its context, and it travelled as one argument.
 Linux refuses one argument over 131,072 bytes, and landed ranges already reached 175 KB: the reviewer
 could not start, and the spawn error read as a reviewer that was unavailable. An adapter declares how
-else its CLI takes a prompt. Past the bound ao hands the prompt over that way, byte for byte, from a
+else its CLI takes a prompt. Past the bound polyctl hands the prompt over that way, byte for byte, from a
 private file it removes when the process ends; with nothing declared it starts nothing and says why,
 as a configuration error that catch-up leaves open, never as an unavailable reviewer or a verdict.
 """
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, language, lib as A, procs, storage, watchdog as W
+from polyctl import cli, language, lib as A, procs, storage, watchdog as W
 from tests import standin
 from tests.scenarios import World
 
@@ -61,7 +61,7 @@ def _declare(monkeypatch, ident, **blocks):
 
 
 def _route(tmp_path, ident, adapter, *extra, program=None):
-    """A route naming `adapter` that runs the fake CLI as that adapter's program: a route that names an adapter ao
+    """A route naming `adapter` that runs the fake CLI as that adapter's program: a route that names an adapter polyctl
     ships runs that adapter's program (ROUTE-ARGV)."""
     fake = standin.program(tmp_path / "bin", program or adapter or "reviewer", FAKE_CLI)
     record = tmp_path / f"{ident}.received"
@@ -74,7 +74,7 @@ def _seen(record):
 
 
 def _private_temp(monkeypatch, tmp_path):
-    """Every temporary directory ao makes in this test lands here, outside the project."""
+    """Every temporary directory polyctl makes in this test lands here, outside the project."""
     private = tmp_path / "temporary"
     private.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(private))
@@ -279,7 +279,7 @@ def test_a_hunt_whose_prompt_no_channel_carries_is_refused_and_recorded(project,
     monkeypatch.setattr(cli, "_run_reviewer", _no_process)
     root = project["root"]
     _large_range(root)
-    # A harness ao ships, as a hunter must run (BUG-HUNTER-2), with no channel past one argument.
+    # A harness polyctl ships, as a hunter must run (BUG-HUNTER-2), with no channel past one argument.
     _declare(monkeypatch, "stand-in", detect={"binaries": [os.path.basename(sys.executable)]},
              options={"trust_none": ["-B"]})
     cfg = dict(project, hunter={"id": "h1", "argv": [sys.executable, "-B", "-c", "print()", "{prompt}"],
@@ -314,7 +314,7 @@ def test_a_detached_turn_takes_its_prompt_on_standard_input_and_never_a_file(pro
     assert A.prompt_plan(template, LARGE, "filed")[0]["channel"] == "file"
     _, why = A.prompt_plan(template, LARGE, "filed", detached=True)
     assert why.endswith("adapter filed declares only a prompt file for `resume`, which is removed when its "
-                        "process ends, and ao does not wait on a detached turn")
+                        "process ends, and polyctl does not wait on a detached turn")
 
 
 def test_a_nudge_whose_prompt_no_channel_carries_starts_nothing(project, monkeypatch, tmp_path):

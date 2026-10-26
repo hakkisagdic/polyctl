@@ -1,9 +1,9 @@
-"""What the Windows lane's first full run found in ao, done here the way Windows does it (#71).
+"""What the Windows lane's first full run found in polyctl, done here the way Windows does it (#71).
 
-A harness on Windows names the files it writes with backslashes, and `ao cost` counted a turn
+A harness on Windows names the files it writes with backslashes, and `polyctl cost` counted a turn
 that wrote product or coordination files as analysis. CPython 3.12 and later on Windows read two
 clocks into `st_ctime`: a path's stat reports when a file was created, a handle's when its
-metadata last changed, so `ao init` took the marker it had just written for one that changed
+metadata last changed, so `polyctl init` took the marker it had just written for one that changed
 before it could be read. Each test holds on every platform.
 """
 import ntpath
@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_second_harness_cost import R1, R2, R3, R4, R5, _call, _prompt, _response, _result, _text, _world
 from tests.test_windows_followups import _Instead
 
@@ -39,7 +39,7 @@ def test_a_write_a_windows_harness_names_with_backslashes_is_product_or_coordina
         # Only a coordination file, named relative to the project.
         _prompt(now - 420, "move the parser slice on the board"),
         *_response(now - 410, "msg-4", "tool_use", R4,
-                   _call("call-4", "Edit", file_path=ntpath.join(".ao", "board.md"), old_string="a", new_string="b")),
+                   _call("call-4", "Edit", file_path=ntpath.join(".polyctl", "board.md"), old_string="a", new_string="b")),
         _result(now - 405, "call-4", "The file has been updated"),
         *_response(now - 400, "msg-5", "end_turn", R5, _text("the parser slice is verified on the board")),
     ]
@@ -107,4 +107,4 @@ def test_init_keeps_the_marker_it_writes_where_a_path_and_a_handle_read_two_cloc
     assert cli.cmd_init({"root": str(root)}, args) == 0, capsys.readouterr().out
 
     assert (root / cli.PROJECT_MARKER).read_bytes() == cli.PROJECT_MARKER_BYTES
-    assert (root / ".ao" / "config.json").exists()
+    assert (root / ".polyctl" / "config.json").exists()

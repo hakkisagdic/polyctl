@@ -4,8 +4,8 @@ import re
 
 import pytest
 
-from ao import lib as A, matrix as M
-from ao.verdicts import REVIEW_STATUSES, VERDICTS, ReviewStatus, Verdict
+from polyctl import lib as A, matrix as M
+from polyctl.verdicts import REVIEW_STATUSES, VERDICTS, ReviewStatus, Verdict
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -17,7 +17,7 @@ def _listed(path, label):
 
 
 def test_the_enum_the_playbook_and_the_protocol_list_the_same_values():
-    for doc in (ROOT / "src" / "ao" / "skill" / "SKILL.md", ROOT / "docs" / "protocol.md"):
+    for doc in (ROOT / "src" / "polyctl" / "skill" / "SKILL.md", ROOT / "docs" / "protocol.md"):
         assert _listed(doc, "Verdicts:") == set(VERDICTS), doc.name
         assert _listed(doc, "Review status:") == set(REVIEW_STATUSES), doc.name
 
@@ -42,7 +42,7 @@ def test_a_review_status_outside_the_enum_is_refused_when_written():
 def test_no_module_spells_a_verdict_or_status_the_enum_does_not_hold():
     lookalike = re.compile(r"^(APPROV|NEEDS[ _-]?CHANGE|UNAVAIL|REJECT|LGTM)", re.I)
     found = []
-    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
+    for path in sorted((ROOT / "src" / "polyctl").rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.isupper() \
                     and lookalike.match(node.value) and node.value not in VERDICTS:

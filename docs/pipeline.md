@@ -1,6 +1,6 @@
 # The review pipeline — never wait on a reviewer
 
-Today `ao review` blocks. The implementer runs it, then sits there: on 2026-09-07 one
+Today `polyctl review` blocks. The implementer runs it, then sits there: on 2026-09-07 one
 review took 11m48s and returned APPROVED, and the next was killed at the 900s ceiling
 after burning ~15 minutes of model work that was then discarded. In both cases the
 implementer did nothing while it ran, and in the second case the work was lost entirely.
@@ -32,43 +32,43 @@ git object at submit time and to keep one slice per worktree.
 
 ## 1 — Submit and collect
 
-*In ao since slice PIPELINE-SUBMIT (#27): `ao review submit`, `ao reviews`, `ao review collect`,
-`ao commit-ok --review`, and `review.max_inflight`. The pinned tree is kept as a private index
-file under `.ao/reviews/`, so the running review reads that tree whatever the live index holds.*
+*In polyctl since slice PIPELINE-SUBMIT (#27): `polyctl review submit`, `polyctl reviews`, `polyctl review collect`,
+`polyctl commit-ok --review`, and `review.max_inflight`. The pinned tree is kept as a private index
+file under `.polyctl/reviews/`, so the running review reads that tree whatever the live index holds.*
 
-*In ao since slice REVIEW-START-DELAY: `ao reviews` says what a review in flight is doing and for how
+*In polyctl since slice REVIEW-START-DELAY: `polyctl reviews` says what a review in flight is doing and for how
 long - `starting` until its runner reports, `preparing`, `waiting` and on what, or `running` with the
 section, the reviewer and its pid - and a review whose runner is gone says what it was doing when it
-went. The log, `.ao/reviews/R-<id>.log`, is written a line at a time: its first line names the runner,
+went. The log, `.polyctl/reviews/R-<id>.log`, is written a line at a time: its first line names the runner,
 how long after the submit it started and the tree it reviews, the run preparing from then as its state says,
-and each phase after preparing is a line with the time of day (REVIEW-START-DELAY-2). A review was seen to start its reviewer 69 minutes after its submit while `ao reviews` said
+and each phase after preparing is a line with the time of day (REVIEW-START-DELAY-2). A review was seen to start its reviewer 69 minutes after its submit while `polyctl reviews` said
 "running": nothing in its state could say more, and its log - the run's standard output, which Python
 wrote in blocks - could hold nothing before a reviewer's first heartbeat. A review runs no gate and
-takes no gate lock - `ao verify`, `ao merge-check` and `ao lock` take it - so a suite holding that lock
+takes no gate lock - `polyctl verify`, `polyctl merge-check` and `polyctl lock` take it - so a suite holding that lock
 does not hold a review back. The one machine-wide lock a review can wait on is the keyflip rotation
 lock, with `keyflip.rotation` on, and a review reads `waiting` on it once the provider's window is read
 spent and the lock is about to be waited on. A run that stops on an error, from its first step on, is
 recorded `failed` with the error wherever its state can still be written, and told in the machine's event
 log as every other end is (EVENTS-LOG); it stood at "running" until it read as lost.*
 
-*In ao since slice REVIEWER-ORPHAN: `ao review cancel R-<id>` stops a submitted review's run and the
+*In polyctl since slice REVIEWER-ORPHAN: `polyctl review cancel R-<id>` stops a submitted review's run and the
 reviewer it started, and records the review `failed` with how it was stopped. A run stopped by hand
 left its reviewer working for nobody: the reviewer leads a session of its own, so that a timeout can
 stop it with everything it started, and for the same reason nothing sent to the run reached it. The run
 now stops its reviewer itself on SIGTERM, SIGHUP or SIGINT, from the moment the reviewer starts, and
 records which signal stopped it. A run killed outright cannot: its state names the reviewer while it
-works, with the process's start, and `ao reviews` says of such a lost run that its reviewer runs on and
-that `ao review cancel` stops it. `ao review cancel` asks the run first, with SIGTERM; a run that is gone,
+works, with the process's start, and `polyctl reviews` says of such a lost run that its reviewer runs on and
+that `polyctl review cancel` stops it. `polyctl review cancel` asks the run first, with SIGTERM; a run that is gone,
 or has not ended ten seconds later, is stopped outright, and the reviewer after it, while that pid is
-still the process the run started. A review in the foreground - `ao review`, and each review
-`ao catchup` starts - stops its reviewer on the same signals (REVIEWER-ORPHAN-3). A signal that comes
-while the reviewer is being started waits until ao holds the reviewer, and stops it then; raised inside
+still the process the run started. A review in the foreground - `polyctl review`, and each review
+`polyctl catchup` starts - stops its reviewer on the same signals (REVIEWER-ORPHAN-3). A signal that comes
+while the reviewer is being started waits until polyctl holds the reviewer, and stops it then; raised inside
 the start, it left a reviewer that had already begun with nobody to stop it (REVIEWER-ORPHAN-4). A
 start that fails after the reviewer began - an ACP session whose reader could not start - stops it,
 and whatever ends a start puts the handlers back, where they were left holding every later stop
 (REVIEWER-ORPHAN-5).*
 
-*In ao since slice WINDOWS-STOP-PROVEN: `ao review cancel` asks, once it has stopped them, whether the
+*In polyctl since slice WINDOWS-STOP-PROVEN: `polyctl review cancel` asks, once it has stopped them, whether the
 run and its reviewer still run, giving each five seconds to be gone; on Windows taskkill can be
 refused, and the review was recorded cancelled while they worked on. A run that still runs is not
 cancelled: nothing is recorded over it, and the command names what still runs and exits 1. A reviewer
@@ -76,23 +76,23 @@ that still runs is recorded as one that could not be stopped, keeps its place am
 the command exits 1. A reviewer stopped on its timeout, and an ACP reviewer's session as it closes,
 say the same of what of them still runs ([windows.md](windows.md)).*
 
-*In ao since slice LEADS-REVIEW: a submitted review is run once, and S3 holds for submits made at once.
+*In polyctl since slice LEADS-REVIEW: a submitted review is run once, and S3 holds for submits made at once.
 The run read its review's state and wrote its own pid into it with nothing held between the two, so a
 second run of one review - its hidden `--run` started again - took it as well: both reviewed its pinned
 index, and the first to end deleted that index under the other. Two submits at once each counted the
 reviews in flight before either had written its own, and both started, past `review.max_inflight`. A
 submit now counts, claims its id, pins the tree and writes the state under one lock,
-`.ao/reviews/submitted.lock`, and a run takes its review under that lock only while the review is
+`.polyctl/reviews/submitted.lock`, and a run takes its review under that lock only while the review is
 running and names no runner: a second run is refused, records nothing and leaves the index alone. The
 run records the review it made itself, as the review hands it back; the newest review of the candidate
 after a count taken before it could be one a person ran beside it in the foreground.*
 
 ```bash
-ao review submit --boundary '…'      # returns R-1788… immediately
-ao reviews                            # what is in flight, with elapsed and progress
-ao review collect --any               # the first finished one; blocks only if you ask it to
-ao review collect R-1788…             # a specific one
-ao review cancel R-1788…              # stop it, and the reviewer it started
+polyctl review submit --boundary '…'      # returns R-1788… immediately
+polyctl reviews                            # what is in flight, with elapsed and progress
+polyctl review collect --any               # the first finished one; blocks only if you ask it to
+polyctl review collect R-1788…             # a specific one
+polyctl review cancel R-1788…              # stop it, and the reviewer it started
 ```
 
 A submitted review keeps the slice that submitted it and the boundary read then. Without
@@ -101,7 +101,7 @@ name. Moving the board to another running slice does not change the review's att
 question. If the original slice is no longer on the board, the runner refuses the stale
 review; submit a new review under the intended slice (TRIAGE-3-MEDIUM).
 
-At submit time ao records, in `.ao/reviews/R-<id>.json`:
+At submit time polyctl records, in `.polyctl/reviews/R-<id>.json`:
 
 | field | why |
 |---|---|
@@ -110,10 +110,10 @@ At submit time ao records, in `.ao/reviews/R-<id>.json`:
 | `worktree` | which working copy this candidate belongs to |
 | `boundary`, `sections` | what the reviewer was asked, split as in §2 |
 | `state` | `running` / `finished` / `timeout` / `failed`, with `pid` and `started_at` |
-| `phase` | while it runs: what it is doing, what on, and since when - what `ao reviews` shows |
-| `reviewer` | while a reviewer works: its pid and the process's start - what `ao review cancel` stops |
+| `phase` | while it runs: what it is doing, what on, and since when - what `polyctl reviews` shows |
+| `reviewer` | while a reviewer works: its pid and the process's start - what `polyctl review cancel` stops |
 
-**Invariant S1.** `ao commit-ok --review R-<id>` grants only if `git write-tree` in the
+**Invariant S1.** `polyctl commit-ok --review R-<id>` grants only if `git write-tree` in the
 current worktree equals the recorded `tree`. A candidate that drifted is refused with the
 two digests printed; the implementer either restores it or re-reviews. Nothing about
 "the same slice" or "the same branch" is accepted as a substitute.
@@ -128,12 +128,12 @@ model quota with the architect; unbounded fan-out spends someone else's window.
 
 ## 2 — Sectioned reviews, so a cut-off costs one section
 
-*In ao since slice REVIEW-SECTIONS (#26, #78): sections come from the slice's lenses or the
-boundary's numbered scenarios; each answer is appended to `.ao/reviews/sections/<key>.jsonl`
-before the next is asked, a re-run of `ao review` on the same candidate asks only what is
+*In polyctl since slice REVIEW-SECTIONS (#26, #78): sections come from the slice's lenses or the
+boundary's numbered scenarios; each answer is appended to `.polyctl/reviews/sections/<key>.jsonl`
+before the next is asked, a re-run of `polyctl review` on the same candidate asks only what is
 unanswered, and the verdict is computed from the sections' counts.*
 
-*In ao since slice LANGUAGE-PROMPTS: the prompt, the headings it asks for and the markers ao writes
+*In polyctl since slice LANGUAGE-PROMPTS: the prompt, the headings it asks for and the markers polyctl writes
 into it are in the project's `language` ([configuration.md](configuration.md)) - `--- CANDIDATE DIFF ---`,
 `--- CONTEXT (read-only; not under review) ---` and `--- THIS SECTION'S QUESTION ---` in English,
 `--- ADAY DIFF ---`, `--- BAĞLAM (salt okunur; incelemenin konusu değil) ---` and
@@ -143,17 +143,17 @@ project is handed the prompt it always was, byte for byte, so a review cut off t
 written in English resumes as well, unless its prompt leaves room beside the diff for a different set
 of a waived range's commit messages, and then its sections are asked again.*
 
-*In ao since slice REVIEW-TREE: the reviewer's working directory is not empty any more. The tree the
+*In polyctl since slice REVIEW-TREE: the reviewer's working directory is not empty any more. The tree the
 review pinned is unpacked into it with `git archive`, so a reviewer's `Read`, `Grep` and `Glob` have
 the code under review to read while the isolation stays what it was - a copy of the candidate, outside
-the repository, with no history and no index. ao says so in a note of its own after the context,
+the repository, with no history and no index. polyctl says so in a note of its own after the context,
 `--- TREE: … ---` in English and `--- AĞAÇ: … ---` in Turkish, rather than in a line of the prompt
 above it, so a Turkish project's prompt is still the bytes a sectioned review resumes on. Reviews said what the empty directory cost them
 ("the repository could not be searched, so any other site of the same fault is unchecked"), and a
 reviewer holding file tools could spend a whole run hunting for a repository that was not there.*
 
-*In ao since slice REVIEW-TREE-2: a [tool reviewer](adapters.md#a-reviewer-can-be-a-tool-ao-runs)
-is given neither the tree nor the note. It reads the diff ao writes into a file of its own in that
+*In polyctl since slice REVIEW-TREE-2: a [tool reviewer](adapters.md#a-reviewer-can-be-a-tool-polyctl-runs)
+is given neither the tree nor the note. It reads the diff polyctl writes into a file of its own in that
 directory and answers into another there; a tree holding a file of the first name at its root stopped
 the handoff, and one holding the second's could be read as an answer the tool never wrote. A stand-in
 request is written without the note too. Both are handed the prompt as it stood before the note was
@@ -161,7 +161,7 @@ added, never one with the note taken back out. An unpacking that fails partway, 
 the file system takes or one Windows reserves, leaves the directory empty again, which is what the note
 tells the reviewer an empty one means, and the terminal says the tree could not be unpacked.*
 
-*In ao since slice REVIEW-TREE-3: the tree goes into `candidate/` in the reviewer's working directory,
+*In polyctl since slice REVIEW-TREE-3: the tree goes into `candidate/` in the reviewer's working directory,
 not the directory itself, and what any coding agent reads from a project as its configuration or
 instructions is not unpacked at all, wherever it is. A harness started in a folder reads its hooks,
 plugins, MCP servers and instructions from there. Measured on 2026-10-07 with the tree in the
@@ -170,7 +170,7 @@ before it had even signed in, agy 1.3.0 ran the hooks of its `.agents/hooks.json
 and OpenCode 1.18.27 loaded a plugin from `.opencode/plugin` and started an MCP server from
 `opencode.json` - each though the reviewer's own tools only read. An implementer could so run
 commands of its choice as the person, outside its own sandbox, by staging them. With the tree in its
-own folder the root a harness reads its project from holds only what ao writes, whatever a harness
+own folder the root a harness reads its project from holds only what polyctl writes, whatever a harness
 reads and however it spells it; the names every adapter declares, `project_config` and its project
 steering files, are withheld besides, matched as a file system that ignores case, a trailing dot or
 space, or an NTFS stream would open them, for a harness that reads deeper. Run again over a tree
@@ -178,26 +178,26 @@ holding all four at its root and in a subfolder, agy reviewed and none ran, nor 
 before its sign-in failed. The note tells the reviewer where the tree is and what is withheld, and
 the diff shows any change to those files.*
 
-*In ao since slice CODEBASE-COPY: `ao ask --codebase` runs its provider in a copy made the same way,
+*In polyctl since slice CODEBASE-COPY: `polyctl ask --codebase` runs its provider in a copy made the same way,
 of the working tree as it stands, since a provider that is a harness ran the tree's own hooks and MCP
 servers when it ran in the repository ([upstream](upstream.md#asking-the-codebase-as-built)).*
 
-*In ao since slice HARNESS-CONFIG: the same files act wherever else a harness starts in a tree an agent
+*In polyctl since slice HARNESS-CONFIG: the same files act wherever else a harness starts in a tree an agent
 writes - the implementer's own next nudge, the architect's wake in the same checkout - and a harness's
-own folder is coordination state no candidate carries, so no review sees a change to it. `ao verify`,
-`ao doctor` and the watchdog name each change to those names that no person has seen, and no wake,
-refill, nudge, hunt or lane starts in the tree until a person has read it with `ao harness seen`
+own folder is coordination state no candidate carries, so no review sees a change to it. `polyctl verify`,
+`polyctl doctor` and the watchdog name each change to those names that no person has seen, and no wake,
+refill, nudge, hunt or lane starts in the tree until a person has read it with `polyctl harness seen`
 ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).*
 
-A review of eight scenarios is eight questions, not one. ao splits the prompt into
+A review of eight scenarios is eight questions, not one. polyctl splits the prompt into
 **sections** — from the numbered scenarios in the boundary, or failing that from the
 candidate's file groups — and runs them as separate bounded calls, appending each result
-to `.ao/reviews/sections/<key>.jsonl` as it lands.
+to `.polyctl/reviews/sections/<key>.jsonl` as it lands.
 
 **Invariant P1.** Every finished section is durable before the next one starts. Kill the
 process, reboot the machine, hit the ceiling: what was answered stays answered.
 
-**Invariant P2.** Running `ao review` again on the same candidate, boundary and reviewers asks
+**Invariant P2.** Running `polyctl review` again on the same candidate, boundary and reviewers asks
 only the sections with no recorded result. A resumed review is the same review — same
 candidate, same sections, one round.
 
@@ -206,7 +206,7 @@ or HIGH makes the review `NEEDS_CHANGES`; all sections clean makes it `APPROVED`
 review with unanswered sections has no verdict at all and is not a round.
 
 **Invariant P4.** Each section completion writes a heartbeat line: elapsed, sections done
-of total, reviewer id, child pid. `ao reviews` shows it. Silence is a symptom, and today
+of total, reviewer id, child pid. `polyctl reviews` shows it. Silence is a symptom, and today
 there is no way to tell a working reviewer from a dead one.
 
 ## 2b — Lenses: a review is a set of declared questions
@@ -239,28 +239,28 @@ A boundary often names several conditions, and one verdict for the whole of it c
 of them the reviewer examined: a candidate could land with one never looked at, and nothing on
 the record would show it.
 
-*In ao since slice CRITERIA-VERDICTS: a boundary that lists criteria is judged criterion by
+*In polyctl since slice CRITERIA-VERDICTS: a boundary that lists criteria is judged criterion by
 criterion. Its criteria are its numbered lines; a one-line boundary, which a board row's
 `acceptance:` is, lists them with inline numbers counting from 1, `1) … 2) …`, or separated by
-semicolons; a boundary file lists them in its Invariant and Scenarios sections. ao numbers them
+semicolons; a boundary file lists them in its Invariant and Scenarios sections. polyctl numbers them
 from 1 and asks for them in a note of its own after the context and the tree's note,
 `--- CRITERIA: … ---` in English and `--- KRİTERLER: … ---` in Turkish, rather than in a line of
 the prompt above, whose Turkish bytes are pinned. The reviewer writes one line for each criterion
 it judged, spelled the same in both languages: `CRITERION <n>: MET` followed by the evidence, or
-`CRITERION <n>: NOT MET` followed by what is missing. ao reads those lines at the margin of the
+`CRITERION <n>: NOT MET` followed by what is missing. polyctl reads those lines at the margin of the
 answer, as it reads the verdict and the counts, and records every criterion in the review's
 evidence as `met`, `not met` or no verdict; a MET line that gives no evidence is no verdict. In a
 sectioned review each section is asked too, and a criterion is met when a section judged it and
 none found it not met. The review's verdict is still computed from the counts; the criteria are
-listed in the artefact's header and printed beside the verdict, and `ao commit-ok` is where a
+listed in the artefact's header and printed beside the verdict, and `polyctl commit-ok` is where a
 criterion that is not met, or was never judged, refuses ([gates.md](gates.md)). A person's review answers them in its findings file, and a
 stand-in's answer is read against the criteria its request asked about. A landed range under
 retrospective review grants nothing and is asked none. A single sentence lists none: its prompt,
 its evidence and its grant are what they were.*
 
-*In ao since slice REVIEW-PATH-HIGHS: the criteria a stand-in's answer is read against, with its
-candidate, scope, diff, boundary and slice, come from the request ao keeps outside the tree
-([standin.md](standin.md)): in `.ao/review-requests/` the implementer could empty them, and the answer
+*In polyctl since slice REVIEW-PATH-HIGHS: the criteria a stand-in's answer is read against, with its
+candidate, scope, diff, boundary and slice, come from the request polyctl keeps outside the tree
+([standin.md](standin.md)): in `.polyctl/review-requests/` the implementer could empty them, and the answer
 was recorded as whatever slice ran when a person collected it, where it is the request's now. A person's
 verdict is refused when the slice, boundary or criteria shown with the diff are not the ones its digest
 was given for, so a board moved while they wrote their findings cannot record their approval against
@@ -268,7 +268,7 @@ other criteria, or none.*
 
 ## 3 — No deadline on thinking; a deadline on silence
 
-*In ao since slice SILENCE-DEADLINE (#25): a reviewer whose process group spends no CPU for
+*In polyctl since slice SILENCE-DEADLINE (#25): a reviewer whose process group spends no CPU for
 `review.stall_minutes` (10) is killed as stalled - a streaming answer spends CPU, a hung call
 spends none - and a stalled section is journaled unanswered with its partial output, so a
 re-run asks it again. One ruling against the text below: `review_timeout` stays each call's
@@ -292,14 +292,14 @@ is the only way to find out.
 heartbeat for a stall window (ten minutes proposed; not a setting until this lands) — never for
 having taken a long time.
 A stalled section is recorded as unanswered with its partial output kept as evidence; the
-rest of the review is untouched and running `ao review` again retries just that one.
+rest of the review is untouched and running `polyctl review` again retries just that one.
 
 **Invariant Z2.** Total work is bounded by structure, not by a clock: a review has a
-finite number of sections, each bounded by the stall detector. `ao reviews` shows
+finite number of sections, each bounded by the stall detector. `polyctl reviews` shows
 cumulative elapsed and, where the adapter reports it, spend — so an expensive review is
 visible while it runs rather than after the bill.
 
-**Invariant Z3.** Before spawning anything, ao measures the candidate. Over the slice
+**Invariant Z3.** Before spawning anything, polyctl measures the candidate. Over the slice
 budget (≤5 paths, ≤400 changed lines) it is refused with the measurement and the budget
 side by side. This is now a *quality* rule, not a scheduling one: a 5,592-line candidate
 under one boundary gets a shallow review no matter how long it is given. The answer to a
@@ -325,7 +325,7 @@ B; and so on. At most two reviewer calls are ever in flight, at most three slice
 open, and the implementer is never idle waiting for a verdict.
 
 **Invariant W1.** An open slice whose review has returned is never left unattended while
-new work starts. `ao status` names every slice with a returned-but-unhandled review, and
+new work starts. `polyctl status` names every slice with a returned-but-unhandled review, and
 the watchdog treats "finished review, nobody handling it" as an anomaly.
 
 **Invariant W2.** Parking is still free. A slice whose review budget is exhausted parks

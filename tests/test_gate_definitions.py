@@ -7,13 +7,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, features as F, lib as A, storage
+from polyctl import cli, features as F, lib as A, storage
 
 
 def _gates(root, command):
     spec = {"gates": {"smoke": {"run": command, "expect": "exit_zero", "timeout": 30}},
             "profiles": {"quick": ["smoke"]}, "default_profile": "quick"}
-    open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8").write(json.dumps(spec))
+    open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8").write(json.dumps(spec))
 
 
 def _command(*code):
@@ -80,7 +80,7 @@ def test_a_forged_verification_row_makes_the_ledger_unreadable(project, tmp_path
     forged.pop("ordinal")
     if link:
         forged["previous"] = link
-    path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "verifications.jsonl")
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(forged) + "\n")
     storage._record_committed_length(path, 2, None)
@@ -94,7 +94,7 @@ def test_a_forged_verification_row_makes_the_ledger_unreadable(project, tmp_path
 
 def test_rows_from_before_the_chain_stay_history_and_never_count(project):
     root = project["root"]
-    path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "verifications.jsonl")
     legacy = [{"id": "V-1", "passed": True}, {"id": "V-2", "passed": True}]
     open(path, "w", encoding="utf-8").write("".join(json.dumps(row) + "\n" for row in legacy))
     storage._record_committed_length(path, 2, storage.chained_row_digest(legacy[-1], A.VERIFICATION_CHAIN))

@@ -2,8 +2,8 @@
 
 Architecture decision records (ADRs) preserve repository-level choices and their
 trade-offs beside the implementation. They describe architecture that applies to
-agent-orchestrator across runs and projects. Runtime and project-specific decisions
-remain append-only evidence in [`.ao/ledger/decisions.jsonl`](../ledger.md); that
+polyctl across runs and projects. Runtime and project-specific decisions
+remain append-only evidence in [`.polyctl/ledger/decisions.jsonl`](../ledger.md); that
 ledger does not replace ADRs, and ADRs do not replace the ledger.
 
 ## Index

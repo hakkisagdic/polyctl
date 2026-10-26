@@ -1,6 +1,6 @@
-"""`ao credits --all` reads every shipped adapter's account and local estimate (CREDITS-ALL).
+"""`polyctl credits --all` reads every shipped adapter's account and local estimate (CREDITS-ALL).
 
-Only an adapter that declares a lookup ao ships a driver for is asked; one that declares none
+Only an adapter that declares a lookup polyctl ships a driver for is asked; one that declares none
 is named beside the others rather than shown another harness's figure, or a zero. The local
 estimate is read only where the adapter declares its transcripts, and `--offline` asks nothing.
 """
@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 KIRO = {"billing": {"api": {"driver": "usage-limits"},
                     "fallback": {"transcripts": "~/.kiro/sessions/*/*/messages.jsonl"}}}
@@ -46,7 +46,7 @@ def test_every_readable_account_is_asked_and_the_rest_are_named(project, monkeyp
     assert asked == [(20, "kiro")]
     assert "this machine" in out and "2.00 on 1 day(s)" in out
     assert "5.00" not in out and "99.00" not in out and "left out" in out and "2099-01-01" in out
-    assert "no account ao can read, and no local estimate declared: qoder" in out
+    assert "no account polyctl can read, and no local estimate declared: qoder" in out
 
 
 def test_offline_asks_no_account_and_says_so(project, monkeypatch, capsys):

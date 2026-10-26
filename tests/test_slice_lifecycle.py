@@ -1,24 +1,24 @@
-"""A slice is started, blocked and abandoned by command, and each move ao makes is a ledger line (SLICE-LIFECYCLE).
+"""A slice is started, blocked and abandoned by command, and each move polyctl makes is a ledger line (SLICE-LIFECYCLE).
 
-A slice's state was the section of `.ao/board.md` its row sat in and nothing more. The playbook had the
+A slice's state was the section of `.polyctl/board.md` its row sat in and nothing more. The playbook had the
 implementer move rows by editing the file, so nothing said when a slice started, who parked it or why,
 and a slice deleted from the board left no trace at all - docs/slices.md called abandoning one an
-outcome to record and ao recorded nothing. `ao slice start|block|abandon` move a row as the board has
-always been moved, and each move ao makes - those commands, `ao board add`, `ao source import` and the
-watchdog's quota park - is first a line in the chained `.ao/ledger/slices.jsonl`: which slice, from
+outcome to record and polyctl recorded nothing. `polyctl slice start|block|abandon` move a row as the board has
+always been moved, and each move polyctl makes - those commands, `polyctl board add`, `polyctl source import` and the
+watchdog's quota park - is first a line in the chained `.polyctl/ledger/slices.jsonl`: which slice, from
 which section to which, by whom, when and why. Who may make which move follows docs/roles.md: the
 implementer starts a READY item and resumes a block it made, anyone blocks, and dropping a slice or
-pointing it at a boundary file is the architect's or a person's. `ao slice status` and `ao slices`
+pointing it at a boundary file is the architect's or a person's. `polyctl slice status` and `polyctl slices`
 read the board and the ledger together and name a row moved or removed by hand.
 
-The review of that round found three holes (SLICE-LIFECYCLE-2). `ao slice start` judged an item READY
+The review of that round found three holes (SLICE-LIFECYCLE-2). `polyctl slice start` judged an item READY
 on one reading of the board and moved it on a later one, so an implementer that wrote `waiting:
-architect` in between had ao record an authorized-looking start of a slice that was not READY; the
+architect` in between had polyctl record an authorized-looking start of a slice that was not READY; the
 watchdog's park moved a row from wherever a hand had put it while it decided. A move is now decided
-and made on one reading, which ao's other writers wait for and which is compared with the board as it
+and made on one reading, which polyctl's other writers wait for and which is compared with the board as it
 stands before it is replaced: a board that changed meanwhile moves nothing, and says to run it again.
 A board write that failed after its line left the ledger holding a move that never happened, and a
-retry recorded a second one: a line now voids it, and readers leave both out. And `ao slice status`
+retry recorded a second one: a line now voids it, and readers leave both out. And `polyctl slice status`
 said a slice reviewed before the review ledger had no review at all, though its rounds counted them.
 """
 import errno
@@ -29,8 +29,8 @@ import time
 
 import pytest
 
-from ao import allowlist as AL, cli, lib as A, storage
-from ao import watchdog as W
+from polyctl import allowlist as AL, cli, lib as A, storage
+from polyctl import watchdog as W
 from tests.test_quota_park import LIMIT, PROMPT, SLICE, _harness, _nudges_run, _say
 
 REVIEWS = "semantic-review"
@@ -41,16 +41,16 @@ BOARD = ("# Board\n\n## running\n\n## blocked\n\n## queued\n"
 
 
 def _board(root, text=BOARD):
-    with open(os.path.join(root, ".ao", "board.md"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "board.md"), "w", encoding="utf-8") as fh:
         fh.write(text)
 
 
 def _slice(cfg, monkeypatch, role, *argv):
-    """`ao slice …` as a turn ao started for `role` runs it, or as a person when `role` is None."""
+    """`polyctl slice …` as a turn polyctl started for `role` runs it, or as a person when `role` is None."""
     if role:
-        monkeypatch.setenv("AO_ROLE", role)
+        monkeypatch.setenv("POLYCTL_ROLE", role)
     else:
-        monkeypatch.delenv("AO_ROLE", raising=False)
+        monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     words = list(argv) if argv[0] == "slices" else ["slice", *argv]
     args = cli.build_parser().parse_args(words)
     return args.fn(cfg, args)
@@ -113,11 +113,11 @@ def test_an_implementer_is_refused_an_item_that_is_not_ready_and_the_architect_s
         project, monkeypatch, capsys):
     root = project["root"]
     _board(root)
-    before = open(os.path.join(root, ".ao", "board.md"), encoding="utf-8").read()
+    before = open(os.path.join(root, ".polyctl", "board.md"), encoding="utf-8").read()
 
     assert _slice(project, monkeypatch, "implementer", "start", "S2") == 2
     assert "S2 needs S1, which has not landed" in capsys.readouterr().out
-    assert open(os.path.join(root, ".ao", "board.md"), encoding="utf-8").read() == before
+    assert open(os.path.join(root, ".polyctl", "board.md"), encoding="utf-8").read() == before
     assert not os.path.exists(A.slice_ledger_path(root))
 
     assert _slice(project, monkeypatch, "architect", "start", "S2") == 0
@@ -249,12 +249,12 @@ def test_a_boundary_file_must_be_committed_and_takes_the_sentences_place_which_t
     assert row["notes"]["acceptance"] is None and row["notes"]["boundary"] == item["notes"]["boundary"]
 
 
-# ---- what ao already did to the board is recorded too ------------------------------------------------------
+# ---- what polyctl already did to the board is recorded too ------------------------------------------------------
 
 def test_an_item_admitted_with_board_add_enters_the_ledger_with_its_boundary(project, monkeypatch):
     root = project["root"]
     _board(root)
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     args = cli.build_parser().parse_args(["board", "add", "S7", "the report", "--acceptance", "a report per day"])
 
     assert cli.cmd_board(project, args) == 0
@@ -266,13 +266,13 @@ def test_an_item_admitted_with_board_add_enters_the_ledger_with_its_boundary(pro
 def test_items_a_source_import_admits_or_holds_enter_the_ledger(project, monkeypatch):
     root = project["root"]
     _board(root)
-    with open(os.path.join(root, ".ao", "sources.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "sources.json"), "w", encoding="utf-8") as fh:
         json.dump({"bound_root": root, "sources": [{"id": "tracker", "kind": "mcp", "server": "linear"}]}, fh)
-    os.makedirs(os.path.join(root, ".ao", "inbox"))
-    with open(os.path.join(root, ".ao", "inbox", "tracker.json"), "w", encoding="utf-8") as fh:
+    os.makedirs(os.path.join(root, ".polyctl", "inbox"))
+    with open(os.path.join(root, ".polyctl", "inbox", "tracker.json"), "w", encoding="utf-8") as fh:
         json.dump({"bound_root": root, "source": "tracker", "items": [
             {"id": "T1", "title": "a ticket", "acceptance": "it is fixed"}, {"id": "T2", "title": "another"}]}, fh)
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
 
     assert cli.cmd_source(project, cli.build_parser().parse_args(["source", "import"])) == 0
     admitted, held = _moves(root)
@@ -305,13 +305,13 @@ def test_a_ledger_that_cannot_take_the_line_leaves_the_board_as_it_was(project, 
     with open(A.slice_ledger_path(root), "w", encoding="utf-8") as fh:
         fh.write(json.dumps({"slice": "S1", "from": "queued", "to": "running", "previous": "sha256:forged",
                              "ordinal": 1}) + "\n")
-    before = open(os.path.join(root, ".ao", "board.md"), encoding="utf-8").read()
+    before = open(os.path.join(root, ".polyctl", "board.md"), encoding="utf-8").read()
 
     with pytest.raises(storage.LedgerCorruption):
         _slice(project, monkeypatch, "implementer", "start", "S1")
     with pytest.raises(storage.LedgerCorruption):
         A.board_move(root, "S1", "blocked", {"needs": "x"}, by="watchdog")
-    assert open(os.path.join(root, ".ao", "board.md"), encoding="utf-8").read() == before
+    assert open(os.path.join(root, ".polyctl", "board.md"), encoding="utf-8").read() == before
     # A move within a section is no transition, and writes no line.
     assert A.board_move(root, "S1", "queued", {"role": "implementer"}) is True
 
@@ -319,7 +319,7 @@ def test_a_ledger_that_cannot_take_the_line_leaves_the_board_as_it_was(project, 
 # ---- a move is decided and made on one reading of the board (SLICE-LIFECYCLE-2) ----------------------------
 
 def _edited_by_hand(root, old, new):
-    path = os.path.join(root, ".ao", "board.md")
+    path = os.path.join(root, ".polyctl", "board.md")
     text = open(path, encoding="utf-8").read()
     assert old in text
     _board(root, text.replace(old, new))
@@ -333,16 +333,16 @@ def test_a_hand_edit_between_aos_reading_and_its_write_moves_nothing_and_says_to
     row = "- [S1] the store · acceptance: the store keeps every row it is given\n"
 
     def judged_then_parked_by_hand(*args):
-        ready = judged(*args)                       # READY on what ao read, and then the implementer parks it
+        ready = judged(*args)                       # READY on what polyctl read, and then the implementer parks it
         _edited_by_hand(root, row, row.replace("\n", " · waiting: architect\n"))
         return ready
 
     monkeypatch.setattr(A, "lane_not_ready", judged_then_parked_by_hand)
-    monkeypatch.setenv("AO_ROLE", "implementer")
+    monkeypatch.setenv("POLYCTL_ROLE", "implementer")
 
     assert cli.main(["-C", root, "slice", "start", "S1"]) == 1
     said = capsys.readouterr().err
-    assert "the board changed while ao read it" in said and "run it again" in said
+    assert "the board changed while polyctl read it" in said and "run it again" in said
     state, item = _where(root, "S1")
     assert state == "queued" and item["notes"]["waiting"] == "architect"         # the hand edit stands
     assert not os.path.exists(A.slice_ledger_path(root))                          # and nothing was recorded
@@ -353,7 +353,7 @@ def test_a_hand_edit_between_aos_reading_and_its_write_moves_nothing_and_says_to
     assert "S1 is waiting on architect" in capsys.readouterr().out
 
 
-def test_a_hand_edit_landing_while_ao_writes_the_board_voids_the_move_it_recorded(project, monkeypatch, capsys):
+def test_a_hand_edit_landing_while_polyctl_writes_the_board_voids_the_move_it_recorded(project, monkeypatch, capsys):
     root = project["root"]
     _board(root)
     recorded = A.record_slice_move
@@ -364,7 +364,7 @@ def test_a_hand_edit_landing_while_ao_writes_the_board_voids_the_move_it_recorde
         return line
 
     monkeypatch.setattr(A, "record_slice_move", recorded_then_landed_by_hand)
-    monkeypatch.setenv("AO_ROLE", "implementer")
+    monkeypatch.setenv("POLYCTL_ROLE", "implementer")
 
     assert cli.main(["-C", root, "slice", "start", "S1"]) == 1
     assert "the slice ledger voids the move it had recorded; run it again" in capsys.readouterr().err
@@ -372,7 +372,7 @@ def test_a_hand_edit_landing_while_ao_writes_the_board_voids_the_move_it_recorde
     move, void = storage.read_chained_jsonl(A.slice_ledger_path(root), A.SLICE_CHAIN)
     assert (move["slice"], move["from"], move["to"]) == ("S1", "queued", "running")
     assert (void["slice"], void["voids"], void["by"]) == ("S1", move["ordinal"], "implementer")
-    assert void["why"] == "the board was edited after ao read it and before ao wrote it; the edit stands"
+    assert void["why"] == "the board was edited after polyctl read it and before polyctl wrote it; the edit stands"
     assert A.slice_moves(root) == []
 
 
@@ -406,7 +406,7 @@ def test_a_board_that_cannot_be_written_leaves_a_line_voiding_the_move_and_a_ret
         project, monkeypatch, capsys):
     root = project["root"]
     _board(root)
-    path = os.path.join(root, ".ao", "board.md")
+    path = os.path.join(root, ".polyctl", "board.md")
     before = open(path, encoding="utf-8").read()
     rename = storage._replace
 
@@ -428,10 +428,10 @@ def test_a_board_that_cannot_be_written_leaves_a_line_voiding_the_move_and_a_ret
     capsys.readouterr()
     assert _slice(project, monkeypatch, None, "status", "S1") == 0
     out = capsys.readouterr().out
-    assert "state     queued" in out and "ao last recorded it" not in out and "never took" not in out
+    assert "state     queued" in out and "polyctl last recorded it" not in out and "never took" not in out
     assert "queued → running" in out and "did not happen: the board could not be written: PermissionError" in out
     assert _slice(project, monkeypatch, None, "slices") == 0
-    assert "ao last recorded it" not in capsys.readouterr().out
+    assert "polyctl last recorded it" not in capsys.readouterr().out
 
     monkeypatch.setattr(storage, "_replace", rename)
     assert _slice(project, monkeypatch, "implementer", "start", "S1") == 0
@@ -440,7 +440,7 @@ def test_a_board_that_cannot_be_written_leaves_a_line_voiding_the_move_and_a_ret
     assert _where(root, "S1")[0] == "running"
 
 
-def test_a_move_ao_recorded_that_the_board_never_took_is_named_as_such(project, monkeypatch, capsys):
+def test_a_move_polyctl_recorded_that_the_board_never_took_is_named_as_such(project, monkeypatch, capsys):
     """A process stopped between the line and the board leaves no line voiding the move; status says what it may be."""
     root = project["root"]
     _board(root)
@@ -448,8 +448,8 @@ def test_a_move_ao_recorded_that_the_board_never_took_is_named_as_such(project, 
 
     assert _slice(project, monkeypatch, None, "status", "S1") == 0
     out = capsys.readouterr().out
-    assert "the board never took ao's last recorded move of it, queued → running" in out
-    assert "ao stopped between recording it and writing the board, or a hand moved it back" in out
+    assert "the board never took polyctl's last recorded move of it, queued → running" in out
+    assert "polyctl stopped between recording it and writing the board, or a hand moved it back" in out
 
 
 # ---- reading where slices stand ----------------------------------------------------------------------------
@@ -511,22 +511,22 @@ def test_a_row_moved_or_removed_by_hand_is_named_by_status_and_slices(project, m
     root = project["root"]
     _board(root)
     _slice(project, monkeypatch, "implementer", "start", "S1")
-    path = os.path.join(root, ".ao", "board.md")
+    path = os.path.join(root, ".polyctl", "board.md")
     text = open(path, encoding="utf-8").read()
     line = next(row for row in text.splitlines() if row.startswith("- [S1]"))
     _board(root, text.replace(line + "\n", "").replace("## done\n", f"## done\n{line}\n"))
     capsys.readouterr()
 
     assert _slice(project, monkeypatch, None, "status", "S1") == 0
-    assert "moved by hand: ao last recorded it under running" in capsys.readouterr().out
+    assert "moved by hand: polyctl last recorded it under running" in capsys.readouterr().out
     assert _slice(project, monkeypatch, None, "slices") == 0
     out = capsys.readouterr().out
-    assert "S1" in out and "moved by hand: ao last recorded it under running" in out
+    assert "S1" in out and "moved by hand: polyctl last recorded it under running" in out
 
     _board(root, open(path, encoding="utf-8").read().replace(line + "\n", ""))
     assert _slice(project, monkeypatch, None, "slices", "--open") == 0
     gone = next(row for row in capsys.readouterr().out.splitlines() if "S1" in row)
-    assert "the store" in gone and "not on the board: ao last recorded it under running" in gone
+    assert "the store" in gone and "not on the board: polyctl last recorded it under running" in gone
     assert _slice(project, monkeypatch, None, "status", "S1") == 0
     assert "not on the board" in capsys.readouterr().out
     assert _slice(project, monkeypatch, None, "status", "S9") == 1
@@ -549,15 +549,15 @@ def test_slices_lists_every_slice_by_state_and_open_leaves_out_the_ended(project
 # ---- grants ----------------------------------------------------------------------------------------------------
 
 def test_no_implementer_grant_admits_abandoning_and_the_shipped_grants_admit_what_each_role_runs():
-    named = [reason for reason, _, _ in AL.problems(["claude", "--allowedTools", "Bash(ao slice:*)"],
+    named = [reason for reason, _, _ in AL.problems(["claude", "--allowedTools", "Bash(polyctl slice:*)"],
                                                     role="implementer")]
     assert "abandons a slice, which the architect decides" in named
-    assert AL.problems(["claude", "--allowedTools", "Bash(ao slice:*)"], role="architect") == []
+    assert AL.problems(["claude", "--allowedTools", "Bash(polyctl slice:*)"], role="architect") == []
 
     implementer = AL.rules(A.role_commands(A.load_adapter("claude-code"))["implementer"])
     architect = AL.rules(cli._architect_argv("claude-code"))
-    for command in ("ao slice start S1", 'ao slice block "x" --waiting human', "ao slice status", "ao slices --open"):
+    for command in ("polyctl slice start S1", 'polyctl slice block "x" --waiting human', "polyctl slice status", "polyctl slices --open"):
         assert any(AL.admits(rule, command) for rule in implementer), command
-    assert not any(AL.admits(rule, "ao slice abandon --why w") for rule in implementer)
-    for command in ("ao slice abandon --slice S1 --why w", "ao slice start S1 --boundary-file f", "ao slices"):
+    assert not any(AL.admits(rule, "polyctl slice abandon --why w") for rule in implementer)
+    for command in ("polyctl slice abandon --slice S1 --why w", "polyctl slice start S1 --boundary-file f", "polyctl slices"):
         assert any(AL.admits(rule, command) for rule in architect), command

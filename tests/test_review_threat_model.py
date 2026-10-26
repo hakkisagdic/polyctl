@@ -2,7 +2,7 @@
 
 Catchup reviews kept finding new edge cases: each needed an attacker to have landed malicious code through an
 earlier review, or the interpreter to fail at one chosen line. Without a model of who the attacker is, a reviewer
-had no line between a blocker and a hardening note. ao puts the project's model - THREAT_MODEL.md or
+had no line between a blocker and a hardening note. polyctl puts the project's model - THREAT_MODEL.md or
 docs/threat-model.md, read from HEAD - in every review prompt, so a candidate cannot loosen the model it is judged
 under, and no setting the implementer can write points it elsewhere (REVIEW-THREAT-MODEL-2). A landed range is
 judged under the model from before it, and a change to the model that landed under a waiver still open judges no
@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from ao import cli, language, lib as A, storage
+from polyctl import cli, language, lib as A, storage
 from tests.test_review_context import _args, _git, _package, _review_file, _reviewer, _stage_test, _write
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -54,7 +54,7 @@ def test_a_review_is_judged_against_the_threat_model_the_last_commit_holds(proje
 
 
 def test_the_model_at_the_root_is_read_first_and_no_setting_points_elsewhere(project, tmp_path):
-    """REVIEW-THREAT-MODEL-2: `review.threat_model` was a setting in `.ao/config.json`, a file the implementer can
+    """REVIEW-THREAT-MODEL-2: `review.threat_model` was a setting in `.polyctl/config.json`, a file the implementer can
     write, and could point a review at any committed text that put everything out of scope."""
     root = _package(project)
     _commit(root, "THREAT_MODEL.md", MODEL.replace("MODEL-AS-COMMITTED", "AT-THE-ROOT"))
@@ -145,7 +145,7 @@ def test_a_section_answered_under_another_threat_model_is_no_answer_under_this_o
 
 
 def test_no_setting_names_the_threat_model():
-    from ao import settings as S
+    from polyctl import settings as S
     assert "review.threat_model" not in S.SETTINGS
     assert json.dumps(cli.THREAT_MODEL_PATHS) == '["THREAT_MODEL.md", "docs/threat-model.md"]'
 
@@ -194,8 +194,8 @@ def test_a_model_changed_under_a_waiver_still_open_judges_no_later_review(projec
     assert "MODEL-AS-COMMITTED" in model and "LOOSENED" not in model
 
 
-def test_a_review_runs_without_a_model_when_ao_cannot_tell_which_applies(project, monkeypatch, capsys, tmp_path):
-    """REVIEW-THREAT-MODEL-3: an open waiver whose range ao cannot place could have changed the model, and a review
+def test_a_review_runs_without_a_model_when_polyctl_cannot_tell_which_applies(project, monkeypatch, capsys, tmp_path):
+    """REVIEW-THREAT-MODEL-3: an open waiver whose range polyctl cannot place could have changed the model, and a review
     without a model judges every finding by its severity."""
     root = _package(project)
     _commit(root, "docs/threat-model.md", MODEL)
@@ -262,7 +262,7 @@ def test_the_severity_rule_and_both_languages_review_prompts_bound_blocker_and_h
         "(REVIEW-SCOPE)",
         "names an actor in scope, the capability they use and the outcome",
         "an unreviewed or unverified commit lands; a guarantee a person records (review on, a person's opt-in, a waiver)",
-        "turns off with no person; a reviewer or hunter writes; a secret leaks; ao runs code an attacker chose.",
+        "turns off with no person; a reviewer or hunter writes; a secret leaks; polyctl runs code an attacker chose.",
         "A finding in a feature outside that core - reporting, exports, notifications, onboarding and setup,",
         "documentation pages, dashboards - that needs the implementer to forge a record or plant a file, and",
         "reaches none of those outcomes, is MEDIUM at most, and says so in its text.",
@@ -284,7 +284,7 @@ def test_the_severity_rule_and_both_languages_review_prompts_bound_blocker_and_h
         "If the BLOCKER or HIGH count is above zero the verdict is NEEDS_CHANGES, otherwise APPROVED.",
         "names an actor in scope, the capability they use and the outcome: an unreviewed or unverified commit lands; "
         "a guarantee a person records (review on, a person's opt-in, a waiver) turns off with no person; a reviewer "
-        "or hunter writes; a secret leaks; ao runs code an attacker chose.",
+        "or hunter writes; a secret leaks; polyctl runs code an attacker chose.",
         "A finding in a feature outside that core - reporting, exports, notifications, onboarding and setup, "
         "documentation pages, dashboards - that needs the implementer to forge a record or plant a file, and reaches "
         "none of those outcomes, is MEDIUM at most, and says so in its text.",
@@ -294,7 +294,7 @@ def test_the_severity_rule_and_both_languages_review_prompts_bound_blocker_and_h
         assert expected in en_prompt
 
     tr_cfg = dict(cfg, language="tr")
-    with open(Path(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(Path(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in tr_cfg.items() if key != "root"}, fh)
     assert cli.cmd_review(tr_cfg, _args()) == 0
     tr_prompt = capture.read_text(encoding="utf-8")
@@ -303,7 +303,7 @@ def test_the_severity_rule_and_both_languages_review_prompts_bound_blocker_and_h
         "kapsamdaki bir aktörü, kullandığı yeteneği ve sonucu adlandırdığında: gözden geçirilmemiş ya da "
         "doğrulanmamış bir commit iner; bir insanın kayda geçirdiği bir güvence (gözden geçirmenin açık olması, bir "
         "insanın açık tercihi, bir feragat) insan olmadan kapanır; bir gözden geçiren ya da avcı yazar; bir sır "
-        "sızar; ao saldırganın seçtiği kodu çalıştırır.",
+        "sızar; polyctl saldırganın seçtiği kodu çalıştırır.",
         "Bu çekirdeğin dışındaki bir özellikte - raporlama, dışa aktarma, bildirimler, ilk kurulum ve ayar, "
         "dokümantasyon sayfaları, paneller - uygulayıcının sahte bir kayıt üretmesini ya da bir dosya yerleştirmesini "
         "gerektiren ve bu sonuçların hiçbirine varmayan bir bulgu en çok MEDIUM olur ve metninde bunu söyler.",

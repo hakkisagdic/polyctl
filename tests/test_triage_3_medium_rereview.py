@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ao import allowlist as AL, cli, lib as A, storage
+from polyctl import allowlist as AL, cli, lib as A, storage
 from tests.scenarios import World
 from tests.test_lanes import _board, _git
 from tests.test_review_retention import _artefact
@@ -88,7 +88,7 @@ def test_reference_chains_keep_their_legacy_prefix(project, kind):
     root = project["root"]
     artefact = Path(_artefact(root, "kept.md"))
     path, chain = {
-        "verification": (str(Path(root, ".ao", "ledger", "verifications.jsonl")), A.VERIFICATION_CHAIN),
+        "verification": (str(Path(root, ".polyctl", "ledger", "verifications.jsonl")), A.VERIFICATION_CHAIN),
         "waiver": (A.waivers_path(root), A.WAIVER_CHAIN),
         "decision": (A.decisions_path(root), A.DECISION_CHAIN),
     }[kind]
@@ -107,7 +107,7 @@ def test_lane_removal_reuses_its_prepared_file_rules(project):
     lane = Path(record["path"])
     _git(lane, "commit", "-q", "--allow-empty", "-m", "unmerged lane work")
     tip = _git(lane, "rev-parse", "HEAD")
-    # Losing Git's exclude lines must not turn ao's own env file into user work (TRIAGE-3-MEDIUM).
+    # Losing Git's exclude lines must not turn polyctl's own env file into user work (TRIAGE-3-MEDIUM).
     exclude = Path(A._git_output(lane, "rev-parse", "--git-path", "info/exclude").decode().strip())
     if not exclude.is_absolute():
         exclude = lane / exclude
@@ -115,4 +115,4 @@ def test_lane_removal_reuses_its_prepared_file_rules(project):
     assert A.lane_changes(str(lane), record) == []
     A.remove_lane(root, "B")
     assert not lane.exists() and A.lane_record(root, "B") is None
-    assert tip in _git(root, "for-each-ref", "--format=%(objectname)", "refs/ao/archive/").split()
+    assert tip in _git(root, "for-each-ref", "--format=%(objectname)", "refs/polyctl/archive/").split()

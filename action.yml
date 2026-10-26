@@ -1,19 +1,19 @@
 # Cross-family review in CI (GITHUB-ACTION): a pull request's change reviewed by a model of another family than the
-# one that wrote it, in ao's verdict format, before it is merged. It reviews and grants nothing. docs/github-action.md
+# one that wrote it, in polyctl's verdict format, before it is merged. It reviews and grants nothing. docs/github-action.md
 # says what it does and does not guarantee. Every input reaches a script through the environment, never written into
 # it, so a pull request's title cannot become a command.
-name: ao cross-family review
+name: polyctl cross-family review
 description: >-
   Have a pull request's change reviewed by a model of another family than the one that wrote it, through an
-  OpenAI-compatible API, with ao's verdict, findings and evidence in the job summary. Advisory: it grants nothing.
-author: agent-orchestrator
+  OpenAI-compatible API, with polyctl's verdict, findings and evidence in the job summary. Advisory: it grants nothing.
+author: polyctl
 
 inputs:
   model:
     description: The reviewer model, as the API names it.
     required: true
   base-url:
-    description: The base URL of an OpenAI-compatible API, over https; ao asks its /chat/completions once.
+    description: The base URL of an OpenAI-compatible API, over https; polyctl asks its /chat/completions once.
     required: true
   api-key-env:
     description: >-
@@ -21,7 +21,7 @@ inputs:
       env. The key itself is never an input.
     required: true
   reviewer-family:
-    description: The reviewer model's family, as you know it; ao never infers one from a model name.
+    description: The reviewer model's family, as you know it; polyctl never infers one from a model name.
     required: true
   author-family:
     description: >-
@@ -46,19 +46,19 @@ inputs:
       none; never leaves the job to the outputs.
     required: false
     default: needs-changes
-  ao-version:
-    description: The ao-orchestrator release installed from PyPI.
+  polyctl-version:
+    description: The polyctl release installed from PyPI.
     required: false
     default: "0.6.0"
   python-version:
-    description: The Python that runs ao.
+    description: The Python that runs polyctl.
     required: false
     default: "3.12"
 
 outputs:
   verdict:
     description: >-
-      APPROVED, NEEDS_CHANGES, INVALID, UNAVAILABLE, or none when no review was recorded or ao cannot show the
+      APPROVED, NEEDS_CHANGES, INVALID, UNAVAILABLE, or none when no review was recorded or polyctl cannot show the
       one it recorded.
     value: ${{ steps.review.outputs.verdict }}
   artefact:
@@ -83,18 +83,18 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
-    - name: Install ao
+    - name: Install polyctl
       shell: bash
       env:
-        PINNED_AO_VERSION: ${{ inputs.ao-version }}
-      run: python -m pip install --disable-pip-version-check "ao-orchestrator==$PINNED_AO_VERSION"
+        PINNED_POLYCTL_VERSION: ${{ inputs.polyctl-version }}
+      run: python -m pip install --disable-pip-version-check "polyctl==$PINNED_POLYCTL_VERSION"
 
     - name: Name the review provider
       shell: bash
       env:
         REVIEW_BASE_URL: ${{ inputs.base-url }}
         REVIEW_KEY_ENV: ${{ inputs.api-key-env }}
-      run: ao config set review.api_providers "ci $REVIEW_BASE_URL $REVIEW_KEY_ENV" --machine
+      run: polyctl config set review.api_providers "ci $REVIEW_BASE_URL $REVIEW_KEY_ENV" --machine
 
     - name: Review the change
       id: review
@@ -110,7 +110,7 @@ runs:
       run: |
         set +e
         # Each value is written --option=value, so a title that starts with a dash is still the option's value.
-        ao ci review --base="$REVIEW_BASE" --head="$REVIEW_HEAD" --reviewer=openai-api --model="ci/$REVIEW_MODEL" \
+        polyctl ci review --base="$REVIEW_BASE" --head="$REVIEW_HEAD" --reviewer=openai-api --model="ci/$REVIEW_MODEL" \
           --family="$REVIEWER_FAMILY" --author-family="$AUTHOR_FAMILY" --boundary="$REVIEW_BOUNDARY" \
           --summary="$GITHUB_STEP_SUMMARY" --outputs="$GITHUB_OUTPUT"
         code=$?

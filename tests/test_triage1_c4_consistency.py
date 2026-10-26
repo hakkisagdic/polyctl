@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 import pytest
-from ao import lib as A, storage
+from polyctl import lib as A, storage
 from tests import test_consistency as consistency
 
 
@@ -42,7 +42,7 @@ def test_c4_corrupt_repair_history_prevents_every_action(project, tmp_path):
     findings = A.consistency_findings(root, project)
     paths = [Path(A.architect_lock_path(root)), Path(storage.checkpoint_path())]
     before = [path.read_bytes() for path in paths]
-    Path(root, ".ao", "ledger", "repairs.jsonl").write_text("broken\n", encoding="utf-8")
+    Path(root, ".polyctl", "ledger", "repairs.jsonl").write_text("broken\n", encoding="utf-8")
     with pytest.raises((ValueError, RuntimeError)):
         A.repair_consistency(root, findings)
     assert [path.read_bytes() for path in paths] == before
@@ -53,7 +53,7 @@ def test_c4_repair_records_intent_before_action(project, monkeypatch):
     root = project["root"]
 
     def action(*args):
-        rows = storage.read_chained_jsonl(str(Path(root, ".ao", "ledger", "repairs.jsonl")), A.REPAIR_CHAIN)
+        rows = storage.read_chained_jsonl(str(Path(root, ".polyctl", "ledger", "repairs.jsonl")), A.REPAIR_CHAIN)
         assert rows and rows[-1]["event"] == "intent"
         raise OSError("interrupted repair")
 
@@ -65,7 +65,7 @@ def test_c4_repair_records_intent_before_action(project, monkeypatch):
 @pytest.mark.parametrize("operation", ["acquire", "release", "repair"])
 def test_c4_remove_takes_the_architect_guard(tmp_path, monkeypatch, operation):
     import json
-    from ao import cli
+    from polyctl import cli
     from tests import test_safe_remove as remove
 
     home = remove._home(tmp_path, monkeypatch)
@@ -73,7 +73,7 @@ def test_c4_remove_takes_the_architect_guard(tmp_path, monkeypatch, operation):
     remove._launchd(monkeypatch)
     lock = Path(A.architect_lock_path(root))
     guard = Path(str(lock) + ".guard")
-    neighbour = home / ".ao" / "architect-other.lock.guard"
+    neighbour = home / ".polyctl" / "architect-other.lock.guard"
     neighbour.write_text("another project's guard", encoding="utf-8")
     if operation == "acquire":
         assert A.acquire_architect(root, os.getpid(), "test")

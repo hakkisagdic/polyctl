@@ -1,4 +1,4 @@
-"""Tests for `ao start`: first-run onboarding wizard (ONBOARD, ONBOARD-2).
+"""Tests for `polyctl start`: first-run onboarding wizard (ONBOARD, ONBOARD-2).
 
 All tests use stand-in adapters and binaries (`tests/standin.py`), never real agent runs.
 """
@@ -10,7 +10,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests import standin
 
 
@@ -66,7 +66,7 @@ def _adapter(adapter_id, binary, family, verified="full", trust_flag="--no-tools
             "model": ["--model", "{model}"],
             "trust_none": [trust_flag],
             "allowed_tools": ["--allowed-tools", "{tools}"],
-            "architect_tools": "read,shell(ao *)",
+            "architect_tools": "read,shell(polyctl *)",
         },
         "directives": {
             "rule_files": ["AGENTS.md"],
@@ -91,11 +91,11 @@ def _repo(tmp_path):
         "if __name__ == '__main__':\n    unittest.main()\n",
         encoding="utf-8",
     )
-    (root / ".ao").mkdir()
+    (root / ".polyctl").mkdir()
     cmd = (subprocess.list2cmdline if os.name == "nt" else shlex.join)(
         [sys.executable, "-m", "unittest", "-q"]
     )
-    (root / ".ao" / "gates.json").write_text(
+    (root / ".polyctl" / "gates.json").write_text(
         json.dumps(
             {
                 "gates": {"unit": {"run": cmd, "expect": "exit_zero", "timeout": 60}},
@@ -107,7 +107,7 @@ def _repo(tmp_path):
         + "\n",
         encoding="utf-8",
     )
-    subprocess.run(["git", "add", ".gitignore", "app.py", "test_app.py", ".ao/gates.json"], cwd=str(root), check=True)
+    subprocess.run(["git", "add", ".gitignore", "app.py", "test_app.py", ".polyctl/gates.json"], cwd=str(root), check=True)
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=str(root), check=True)
     return str(root)
 
@@ -117,7 +117,7 @@ def test_start_detects_installed_clis_prefers_measured_verified_and_explains_why
     for name in ("alpha-cli", "beta-cli", "gamma-cli"):
         standin.program(bin_dir, name, REVIEW_STANDIN)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
-    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", str(tmp_path / "user-adapters"))
 
     adapters = {
         "alpha": _adapter("alpha", "alpha-cli", "fam-alpha", verified="full", trust_flag="--read-only"),
@@ -142,7 +142,7 @@ def test_start_detects_installed_clis_prefers_measured_verified_and_explains_why
 
     pairs = cli._start_pairs(str(tmp_path), installed)
     pair_names = [(p["implementer"]["id"], p["reviewer"]["id"]) for p in pairs]
-    # Same-family pairs are never offered by ao's independence rule.
+    # Same-family pairs are never offered by polyctl's independence rule.
     assert all(i != r for i, r in pair_names)
     # Measured verified pairs (full + partial: alpha/beta and beta/alpha) rank ahead of documented (gamma).
     assert set(pair_names[:2]) == {("alpha", "beta"), ("beta", "alpha")}
@@ -157,7 +157,7 @@ def test_start_refuses_when_no_cross_family_pair_exists_and_installs_nothing(tmp
     bin_dir = tmp_path / "bin"
     standin.program(bin_dir, "solo-cli", REVIEW_STANDIN)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
-    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", str(tmp_path / "user-adapters"))
 
     adapters = {
         "solo-a": _adapter("solo-a", "solo-cli", "fam-solo", verified="full"),
@@ -174,7 +174,7 @@ def test_start_refuses_when_no_cross_family_pair_exists_and_installs_nothing(tmp
     assert code == 1
     out = _plain(capsys)
     assert "no cross-family implementer/reviewer pair is available" in out
-    assert "ao never installs software" in out
+    assert "polyctl never installs software" in out
     assert not os.path.exists(A.user_profiles_path())
 
 
@@ -184,7 +184,7 @@ def test_start_asks_before_each_step_and_writes_chosen_profile(tmp_path, monkeyp
     standin.program(bin_dir, "alpha-cli", REVIEW_STANDIN)
     standin.program(bin_dir, "beta-cli", REVIEW_STANDIN)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
-    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", str(tmp_path / "user-adapters"))
 
     adapters = {
         "alpha": _adapter("alpha", "alpha-cli", "fam-alpha", verified="full", trust_flag="--read-only"),
@@ -212,12 +212,12 @@ def test_start_asks_before_each_step_and_writes_chosen_profile(tmp_path, monkeyp
     out = _plain(capsys)
 
     assert ran == ["demo", ("init", "beta-alpha")]
-    assert "skipped `ao hooks install`" in out
-    assert "skipped `ao prove`" in out
+    assert "skipped `polyctl hooks install`" in out
+    assert "skipped `polyctl prove`" in out
     assert "Steps only a person can take:" in out
-    assert "ao harness seen --ask" in out
+    assert "polyctl harness seen --ask" in out
 
-    # Profile is written to profiles.json and known to A.profiles() and `ao init --profile`.
+    # Profile is written to profiles.json and known to A.profiles() and `polyctl init --profile`.
     assert os.path.isfile(A.user_profiles_path())
     profiles = A.profiles(root)
     assert profiles["beta-alpha"] == {"implementer": "beta", "reviewer": "alpha", "architect": "beta"}
@@ -234,11 +234,11 @@ def test_start_yes_runs_demo_init_hooks_and_prove_without_recording_person_appro
     standin.program(bin_dir, "beta-cli", REVIEW_STANDIN)
     standin.program(
         bin_dir,
-        "ao",
-        "import sys\nfrom ao.cli import main\nsys.exit(main())\n",
+        "polyctl",
+        "import sys\nfrom polyctl.cli import main\nsys.exit(main())\n",
     )
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
-    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", str(tmp_path / "user-adapters"))
     monkeypatch.setattr(A, "GATE_LOCK", str(tmp_path / "gate.lock"))
 
     adapters = {
@@ -269,8 +269,8 @@ def test_start_yes_runs_demo_init_hooks_and_prove_without_recording_person_appro
 
     assert demo_calls == [False]
     assert seen_calls == []
-    assert os.path.isfile(os.path.join(root, ".ao", "config.json"))
-    assert os.path.isfile(os.path.join(root, ".ao-project"))
+    assert os.path.isfile(os.path.join(root, ".polyctl", "config.json"))
+    assert os.path.isfile(os.path.join(root, ".polyctl-project"))
     for claim in (
         "hook refuses an unauthorised commit",
         "reviewer answers and is another actor",
@@ -278,11 +278,11 @@ def test_start_yes_runs_demo_init_hooks_and_prove_without_recording_person_appro
     ):
         assert f"proven  {claim}" in out
     assert "Steps only a person can take:" in out
-    assert "ao harness seen --ask" in out
+    assert "polyctl harness seen --ask" in out
 
 
 def test_start_assigns_only_restricted_architect_command(tmp_path, monkeypatch, capsys):
-    from ao import allowlist as AL
+    from polyctl import allowlist as AL
 
     root = _repo(tmp_path)
     no_arch = tmp_path / "no_arch"
@@ -292,7 +292,7 @@ def test_start_assigns_only_restricted_architect_command(tmp_path, monkeypatch, 
     standin.program(bin_dir, "amp", REVIEW_STANDIN)
     standin.program(bin_dir, "claude", REVIEW_STANDIN)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
-    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", str(tmp_path / "user-adapters"))
 
     real_pkg = A.package_adapters()
     shipped_subset = {k: real_pkg[k] for k in ("amp", "claude-code")}
@@ -319,7 +319,7 @@ def test_start_assigns_only_restricted_architect_command(tmp_path, monkeypatch, 
     assert AL.problems(arch_argv, claude_opts, role="architect") == []
     assert A.turn_refusal("architect", "claude-code", arch_argv) is None
 
-    # When no installed adapter has a restricted architect command, ao start omits architect
+    # When no installed adapter has a restricted architect command, polyctl start omits architect
     # rather than writing an unrestricted wake command.
     unrestricted_impl = _adapter("unrestricted", "amp", "fam-impl", verified="partial", trust_flag=None)
     unrestricted_impl["options"] = {"trust_none": None, "trust_all": ["--dangerously-allow-all"]}
@@ -375,11 +375,11 @@ def test_start_refuses_profiles_json_symlink_without_truncating_target(tmp_path,
     key_material = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyMaterial person@example\n"
     authorized_keys.write_text(key_material, encoding="utf-8")
 
-    in_tree_adapters = os.path.join(root, ".ao", "adapters")
+    in_tree_adapters = os.path.join(root, ".polyctl", "adapters")
     os.makedirs(in_tree_adapters, exist_ok=True)
     link_path = os.path.join(in_tree_adapters, "profiles.json")
     os.symlink(str(authorized_keys), link_path)
-    monkeypatch.setenv("AO_USER_ADAPTERS", in_tree_adapters)
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", in_tree_adapters)
 
     cfg = A.load_config(root)
     assert cli.cmd_start(cfg, SimpleNamespace(yes=True)) == 1
@@ -418,7 +418,7 @@ def test_start_ignores_project_local_profiles_json_and_uses_selected_pair(tmp_pa
     for name in ("alpha-cli", "beta-cli", "gamma-cli"):
         standin.program(bin_dir, name, REVIEW_STANDIN)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
-    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", str(tmp_path / "user-adapters"))
 
     adapters = {
         "alpha": _adapter("alpha", "alpha-cli", "fam-alpha", verified="full", trust_flag="--read-only"),
@@ -435,8 +435,8 @@ def test_start_ignores_project_local_profiles_json_and_uses_selected_pair(tmp_pa
     monkeypatch.setattr(cli, "cmd_hooks", lambda cfg, a: 0)
     monkeypatch.setattr(cli, "cmd_prove", lambda cfg, a: 0)
 
-    # A project-local .ao/adapters/profiles.json maps alpha-beta to gamma/beta instead of alpha/beta.
-    project_adapters = os.path.join(root, ".ao", "adapters")
+    # A project-local .polyctl/adapters/profiles.json maps alpha-beta to gamma/beta instead of alpha/beta.
+    project_adapters = os.path.join(root, ".polyctl", "adapters")
     os.makedirs(project_adapters, exist_ok=True)
     with open(os.path.join(project_adapters, "profiles.json"), "w", encoding="utf-8") as fh:
         json.dump(
@@ -469,7 +469,7 @@ def test_project_local_profiles_json_drives_init_and_review_fallback(tmp_path, m
     for name in ("alpha-cli", "beta-cli", "gamma-cli"):
         standin.program(bin_dir, name, REVIEW_STANDIN)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
-    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", str(tmp_path / "user-adapters"))
 
     adapters = {
         "alpha": _adapter("alpha", "alpha-cli", "fam-alpha", verified="full", trust_flag="--read-only"),
@@ -483,7 +483,7 @@ def test_project_local_profiles_json_drives_init_and_review_fallback(tmp_path, m
         for k, v in adapters.items()
     })
 
-    project_adapters = os.path.join(root, ".ao", "adapters")
+    project_adapters = os.path.join(root, ".polyctl", "adapters")
     os.makedirs(project_adapters, exist_ok=True)
     with open(os.path.join(project_adapters, "profiles.json"), "w", encoding="utf-8") as fh:
         json.dump(
@@ -537,7 +537,7 @@ def test_start_does_not_write_user_profile_when_cmd_init_refuses(tmp_path, monke
         "raise SystemExit(17)\n",
     )
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
-    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", str(tmp_path / "user-adapters"))
 
     adapters = {
         "alpha": _adapter("alpha", "alpha-cli", "fam-alpha", verified="full", trust_flag="--read-only"),
@@ -582,7 +582,7 @@ def test_start_writes_nothing_before_init_step_is_confirmed(tmp_path, monkeypatc
     standin.program(bin_dir, "alpha-cli", REVIEW_STANDIN)
     standin.program(bin_dir, "beta-cli", REVIEW_STANDIN)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
-    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", str(tmp_path / "user-adapters"))
 
     adapters = {
         "alpha": _adapter("alpha", "alpha-cli", "fam-alpha", verified="full", trust_flag="--read-only"),
@@ -611,11 +611,11 @@ def test_start_writes_nothing_before_init_step_is_confirmed(tmp_path, monkeypatc
     cfg = A.load_config(root)
     assert cli.cmd_start(cfg, SimpleNamespace(yes=False)) == 0
     out = _plain(capsys)
-    assert "skipped `ao demo`" in out
-    assert "skipped `ao init --profile alpha-beta`" in out
+    assert "skipped `polyctl demo`" in out
+    assert "skipped `polyctl init --profile alpha-beta`" in out
     assert ran == []
     assert not os.path.exists(A.user_profiles_path())
-    assert not os.path.exists(os.path.join(root, ".ao", "config.json"))
+    assert not os.path.exists(os.path.join(root, ".polyctl", "config.json"))
 
     # At a terminal, saying yes to demo and no to init still writes no profile.
     answers = iter(["1", "y", "n", "n", "n"])
@@ -624,4 +624,4 @@ def test_start_writes_nothing_before_init_step_is_confirmed(tmp_path, monkeypatc
     assert cli.cmd_start(cfg, SimpleNamespace(yes=False)) == 0
     assert ran == ["demo"]
     assert not os.path.exists(A.user_profiles_path())
-    assert not os.path.exists(os.path.join(root, ".ao", "config.json"))
+    assert not os.path.exists(os.path.join(root, ".polyctl", "config.json"))

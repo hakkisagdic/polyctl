@@ -5,7 +5,7 @@ import subprocess
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 
 def _git(cwd, *args):
@@ -29,13 +29,13 @@ def test_merged_and_rejected_worktrees_go_while_dirty_and_reviewed_ones_stay(pro
     for name in ("merged", "dirty", "reviewed"):
         _git(root, "merge", "-q", "--no-ff", "--no-edit", name)
     (dirty / "dirty.txt").write_text("changed, never committed", encoding="utf-8")
-    (reviewed / ".ao" / "reviews").mkdir(parents=True)
-    with open(reviewed / ".ao" / "reviews" / "R-1.json", "w", encoding="utf-8") as fh:
+    (reviewed / ".polyctl" / "reviews").mkdir(parents=True)
+    with open(reviewed / ".polyctl" / "reviews" / "R-1.json", "w", encoding="utf-8") as fh:
         json.dump({"id": "R-1", "state": "running", "pid": os.getpid(), "submitted_at": int(time.time())}, fh)
-    (merged / ".ao").mkdir()
-    (merged / ".ao" / "notes.jsonl").write_text('{"kept": true}\n', encoding="utf-8")
+    (merged / ".polyctl").mkdir()
+    (merged / ".polyctl" / "notes.jsonl").write_text('{"kept": true}\n', encoding="utf-8")
     rejected_head = _git(rejected, "rev-parse", "HEAD")
-    with open(os.path.join(root, ".ao", "board.md"), "a", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "board.md"), "a", encoding="utf-8") as fh:
         fh.write(f"\n## rejected\n- [ABN] an abandoned slice · worktree: {rejected}\n")
 
     assert cli.cmd_worktrees(project, SimpleNamespace(action="prune", yes=False)) == 0
@@ -49,9 +49,9 @@ def test_merged_and_rejected_worktrees_go_while_dirty_and_reviewed_ones_stay(pro
     assert left == {os.path.realpath(p) for p in (root, dirty, reviewed)}
     branches = _git(root, "branch", "--format=%(refname:short)").split()
     assert "merged" not in branches and "rejected" not in branches and "dirty" in branches
-    archived = _git(root, "for-each-ref", "--format=%(objectname)", "refs/ao/archive/")
+    archived = _git(root, "for-each-ref", "--format=%(objectname)", "refs/polyctl/archive/")
     assert rejected_head in archived.split()
-    kept = glob.glob(os.path.join(A.HOME, ".ao", "archive", A.project_key(root), "worktree-merged-*", ".ao",
+    kept = glob.glob(os.path.join(A.HOME, ".polyctl", "archive", A.project_key(root), "worktree-merged-*", ".polyctl",
                                   "notes.jsonl"))
     assert len(kept) == 1
     out = capsys.readouterr().out
@@ -70,7 +70,7 @@ def test_a_worktree_whose_directory_was_deleted_by_hand_goes_with_its_branch(pro
     assert "its directory is gone" in capsys.readouterr().out
     assert "gone" not in _git(root, "branch", "--format=%(refname:short)").split()
     assert len(A.worktree_list(root)) == 1
-    assert head in _git(root, "for-each-ref", "--format=%(objectname)", "refs/ao/archive/").split()
+    assert head in _git(root, "for-each-ref", "--format=%(objectname)", "refs/polyctl/archive/").split()
 
 
 def test_the_doctor_names_worktrees_that_may_go_with_their_size(project, tmp_path):

@@ -1,4 +1,4 @@
-"""Tests for slice MODES: ao mode lite|full|show."""
+"""Tests for slice MODES: polyctl mode lite|full|show."""
 import json
 import os
 import re
@@ -7,7 +7,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from ao import allowlist as AL, cli, lib as A, mcp as M, tiers as T
+from polyctl import allowlist as AL, cli, lib as A, mcp as M, tiers as T
 from tests.test_profiles import _init_args
 from tests.test_prove import PROBE_OR_APPROVE
 
@@ -19,15 +19,15 @@ def _plain(capsys):
 
 def _git_repo(root, with_marker=True):
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    subprocess.run(["git", "config", "user.email", "test@ao.local"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "test@polyctl.local"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
     with open(os.path.join(root, "app.py"), "w", encoding="utf-8") as fh:
         fh.write("x = 1\n")
     paths = ["app.py"]
     if with_marker:
-        with open(os.path.join(root, ".ao-project"), "wb") as fh:
+        with open(os.path.join(root, ".polyctl-project"), "wb") as fh:
             fh.write(cli.PROJECT_MARKER_BYTES)
-        paths.append(".ao-project")
+        paths.append(".polyctl-project")
     subprocess.run(["git", "add", *paths], cwd=root, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=root, check=True)
 
@@ -68,7 +68,7 @@ def test_mode_show_prints_mode_and_what_each_mode_does_and_does_not_protect(proj
     assert "lite mode (enforcement: off - lite):" in out
     assert "no reviewer probe" in out
     assert "no commit hooks" in out
-    assert "ao commit refuses because there is no gate to commit through" in out
+    assert "polyctl commit refuses because there is no gate to commit through" in out
 
     assert cli.cmd_mode(cfg, _mode_args("lite", by="Ada Lovelace")) == 0
     _plain(capsys)
@@ -96,25 +96,25 @@ def test_switching_to_lite_is_a_persons_act_recorded_and_refused_to_agents(proje
         assert cli.cmd_mode(cfg, _mode_args("lite", by=agent_name)) == 2
         assert "--by names an agent or a role" in _plain(capsys)
 
-    # AO_ROLE is a caller-controlled environment variable, not proof of who invoked ao:
+    # POLYCTL_ROLE is a caller-controlled environment variable, not proof of who invoked polyctl:
     # switching to lite relies on harness grants (allowlist.FORBIDDEN), --by validation, and record_opt_in.
     safety_doc = open(os.path.join(A.REPO, "docs", "safety.md"), encoding="utf-8").read()
     assert "relies on the harness grants" in safety_doc
-    assert "refuses when `AO_ROLE` names an agent role" not in safety_doc
-    monkeypatch.setenv("AO_ROLE", "implementer")
+    assert "refuses when `POLYCTL_ROLE` names an agent role" not in safety_doc
+    monkeypatch.setenv("POLYCTL_ROLE", "implementer")
     assert cli.cmd_mode(cfg, _mode_args("lite", by="Ada Lovelace")) == 0
     _plain(capsys)
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     assert cli.cmd_mode(dict(A.load_config(root), root=root), _mode_args("full")) == 0
     _plain(capsys)
     cfg = dict(A.load_config(root), root=root)
 
-    # Allowlist forbids ao mode lite and ao config set mode lite for agent grants.
-    assert any("ao mode lite" in sample for _, sample in AL.FORBIDDEN)
-    assert any("ao config set mode lite" in sample for _, sample in AL.FORBIDDEN)
-    assert AL.problems(["claude", "--allowedTools", "Bash(ao mode lite --by Ada)"])
-    assert AL.problems(["claude", "--allowedTools", "Bash(ao mode:*)"])
-    assert AL.problems(["claude", "--allowedTools", "Bash(ao config set mode lite:*)"])
+    # Allowlist forbids polyctl mode lite and polyctl config set mode lite for agent grants.
+    assert any("polyctl mode lite" in sample for _, sample in AL.FORBIDDEN)
+    assert any("polyctl config set mode lite" in sample for _, sample in AL.FORBIDDEN)
+    assert AL.problems(["claude", "--allowedTools", "Bash(polyctl mode lite --by Ada)"])
+    assert AL.problems(["claude", "--allowedTools", "Bash(polyctl mode:*)"])
+    assert AL.problems(["claude", "--allowedTools", "Bash(polyctl config set mode lite:*)"])
 
     # A person switches the project to lite; hooks are removed and opt-in is recorded.
     assert cli.cmd_mode(cfg, _mode_args("lite", by="Ada Lovelace")) == 0
@@ -126,10 +126,10 @@ def test_switching_to_lite_is_a_persons_act_recorded_and_refused_to_agents(proje
     rec = A.recorded_opt_in(root, "mode")
     assert rec and rec["setting"] == "mode" and rec["value"] == "lite" and rec["by"] == "Ada Lovelace"
 
-    # Hand-editing .ao/config.json to "lite" without an opt-in record does not activate lite mode.
+    # Hand-editing .polyctl/config.json to "lite" without an opt-in record does not activate lite mode.
     fresh = os.path.join(root, "hand-edited")
-    os.makedirs(os.path.join(fresh, ".ao"), exist_ok=True)
-    with open(os.path.join(fresh, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    os.makedirs(os.path.join(fresh, ".polyctl"), exist_ok=True)
+    with open(os.path.join(fresh, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(dict(A.load_config(root), mode="lite"), fh)
     hand_cfg = dict(A.load_config(fresh), root=fresh)
     assert cli.project_mode(hand_cfg) == "full"
@@ -145,7 +145,7 @@ def test_every_surface_says_enforcement_off_lite_and_commit_refuses(project, mon
     _plain(capsys)
     cfg = dict(A.load_config(root), root=root)
 
-    # 1. ao status (text and --json)
+    # 1. polyctl status (text and --json)
     assert cli.cmd_status(cfg, SimpleNamespace(json=False, messages=6, window=24.0)) in (0, None)
     status_out = _plain(capsys)
     assert "enforcement: off - lite" in status_out and "nothing is enforced" in status_out
@@ -162,7 +162,7 @@ def test_every_surface_says_enforcement_off_lite_and_commit_refuses(project, mon
     assert "enforcement: off - lite" in mcp_status["enforcement"]
     assert "nothing is enforced" in mcp_status["enforcement"]
 
-    # 3. ao doctor and ao doctor --check (runs no reviewer probe, requires no commit hooks)
+    # 3. polyctl doctor and polyctl doctor --check (runs no reviewer probe, requires no commit hooks)
     probed = []
     monkeypatch.setattr(cli, "_reviewer_probe", lambda *a, **kw: probed.append(1) or {"ok": False})
     assert cli.cmd_doctor(cfg, SimpleNamespace(check=False, notify=False)) == 0
@@ -175,7 +175,7 @@ def test_every_surface_says_enforcement_off_lite_and_commit_refuses(project, mon
     assert "enforcement: off - lite" in check_out and "nothing is enforced" in check_out
     assert "commit-hook" not in check_out and "reviewer" not in check_out
 
-    # 4. ao commit refuses in lite mode: there is no gate to commit through.
+    # 4. polyctl commit refuses in lite mode: there is no gate to commit through.
     assert cli.cmd_commit(cfg, SimpleNamespace(message=["try commit"])) == 1
     commit_out = _plain(capsys)
     assert "there is no gate to commit through in lite mode" in commit_out
@@ -183,16 +183,16 @@ def test_every_surface_says_enforcement_off_lite_and_commit_refuses(project, mon
 
 
 def test_init_never_puts_project_into_lite_by_itself(tmp_path, monkeypatch, capsys):
-    # Case 1: No reviewer binary available -> init refuses with nothing written and names `ao mode lite --by <name>`.
+    # Case 1: No reviewer binary available -> init refuses with nothing written and names `polyctl mode lite --by <name>`.
     repo1 = tmp_path / "no-reviewer-bin"
     repo1.mkdir()
     _git_repo(str(repo1), with_marker=False)
     assert cli.cmd_init({"root": str(repo1)}, _init_args(profile="agy-codex")) == 1
     out1 = _plain(capsys)
     assert "init refused: reviewer probe" in out1
-    assert "ao mode lite --by <name>" in out1
-    assert not (repo1 / ".ao").exists()
-    assert not (repo1 / ".ao-project").exists()
+    assert "polyctl mode lite --by <name>" in out1
+    assert not (repo1 / ".polyctl").exists()
+    assert not (repo1 / ".polyctl-project").exists()
 
     # Case 2: Reviewer is available, but foreign pre-commit hook present -> init refuses with nothing written.
     bin_dir = tmp_path / "bin"
@@ -210,11 +210,11 @@ def test_init_never_puts_project_into_lite_by_itself(tmp_path, monkeypatch, caps
     assert cli.cmd_init({"root": str(repo2)}, _init_args(profile="agy-codex")) == 1
     out2 = _plain(capsys)
     assert "init refused: commit hooks cannot be installed" in out2 and "foreign" in out2
-    assert "ao mode lite --by <name>" in out2
-    assert not (repo2 / ".ao").exists()
-    assert not (repo2 / ".ao-project").exists()
+    assert "polyctl mode lite --by <name>" in out2
+    assert not (repo2 / ".polyctl").exists()
+    assert not (repo2 / ".polyctl-project").exists()
 
-    # Case 3: A person opts into lite first with `ao mode lite --by Ada`, then runs `ao init`.
+    # Case 3: A person opts into lite first with `polyctl mode lite --by Ada`, then runs `polyctl init`.
     assert cli.cmd_mode({"root": str(repo1)}, _mode_args("lite", by="Ada")) == 0
     _plain(capsys)
     assert cli.cmd_init({"root": str(repo1)}, _init_args(profile="agy-codex")) == 0
@@ -222,8 +222,8 @@ def test_init_never_puts_project_into_lite_by_itself(tmp_path, monkeypatch, caps
     assert "enforcement: off - lite" in out3
     assert cli.project_mode(dict(A.load_config(str(repo1)), root=str(repo1))) == "lite"
 
-    # Case 4: A ledger entry with `by: "ao init"` is never accepted as a valid lite opt-in.
-    A.record_opt_in(str(repo1), "mode", "lite", "ao init")
+    # Case 4: A ledger entry with `by: "polyctl init"` is never accepted as a valid lite opt-in.
+    A.record_opt_in(str(repo1), "mode", "lite", "polyctl init")
     assert cli.project_mode(dict(A.load_config(str(repo1)), root=str(repo1))) == "full"
 
 
@@ -242,18 +242,18 @@ def test_mode_full_checks_requirements_refuses_without_half_switching_and_switch
     _plain(capsys)
     assert cli.cmd_init({"root": str(repo)}, _init_args(profile="agy-codex")) == 0
     _plain(capsys)
-    subprocess.run(["git", "add", ".ao-project"], cwd=repo, check=True)
+    subprocess.run(["git", "add", ".polyctl-project"], cwd=repo, check=True)
     cfg = dict(A.load_config(str(repo)), root=str(repo))
     assert cli.project_mode(cfg) == "lite"
 
-    # ao mode full refuses naming BOTH the missing reviewer and the foreign hook, and stays in lite.
+    # polyctl mode full refuses naming BOTH the missing reviewer and the foreign hook, and stays in lite.
     assert cli.cmd_mode(cfg, _mode_args("full")) == 1
     refusal = _plain(capsys)
     assert "mode full refused" in refusal
     assert "independent reviewer:" in refusal and "commit hooks:" in refusal
     assert cli.project_mode(dict(A.load_config(str(repo)), root=str(repo))) == "lite"
 
-    # Provide the independent reviewer binary and remove the foreign hook; now ao mode full succeeds.
+    # Provide the independent reviewer binary and remove the foreign hook; now polyctl mode full succeeds.
     bin_dir = tmp_path / "bin"
     _make_fake_claude_reviewer(str(bin_dir))
     monkeypatch.setenv("PATH", str(bin_dir), prepend=os.pathsep)
@@ -284,12 +284,12 @@ def test_switching_to_lite_with_tracked_githooks_pre_commit_does_not_enforce_com
         fh.write("x = 2\n")
     subprocess.run(["git", "add", "app.py"], cwd=root, check=True)
 
-    # In full mode, the tracked .githooks/pre-commit runs `ao commit-check` and refuses without a grant.
+    # In full mode, the tracked .githooks/pre-commit runs `polyctl commit-check` and refuses without a grant.
     blocked = subprocess.run(["git", "commit", "-q", "-m", "blocked in full"], cwd=root, capture_output=True, text=True)
     assert blocked.returncode != 0
 
     # Switch to lite mode with a person opt-in; tracked .githooks/pre-commit remains on disk,
-    # yet direct `git commit` and `ao push check` succeed without requiring a grant.
+    # yet direct `git commit` and `polyctl push check` succeed without requiring a grant.
     cfg = dict(A.load_config(root), root=root)
     assert cli.cmd_mode(cfg, _mode_args("lite", by="Ada", allow_shared_hooks=True)) == 0
     _plain(capsys)
@@ -317,8 +317,8 @@ def test_mode_full_accepts_person_review_tier_without_model_reviewer(tmp_path, c
     assert "reviewer" not in cfg
     assert cli.project_mode(cfg) == "lite"
 
-    # Once `.ao-project` is staged, `ao mode full` accepts person review without a model reviewer.
-    subprocess.run(["git", "add", ".ao-project"], cwd=repo, check=True)
+    # Once `.polyctl-project` is staged, `polyctl mode full` accepts person review without a model reviewer.
+    subprocess.run(["git", "add", ".polyctl-project"], cwd=repo, check=True)
     assert cli.cmd_mode(cfg, _mode_args("full")) == 0
     out = _plain(capsys)
     assert "mode = 'full' — enforcement: on" in out
@@ -344,15 +344,15 @@ def test_mode_full_refuses_when_hook_static_install_succeeds_but_execution_probe
         _init_args(profile="agy-codex"),
     ) == 0
     _plain(capsys)
-    subprocess.run(["git", "add", ".ao-project"], cwd=repo, check=True)
+    subprocess.run(["git", "add", ".polyctl-project"], cwd=repo, check=True)
 
-    # Make the installed hook carry no machine fallback and remove `ao` from PATH so static install
-    # succeeds (`current-local`), while Git's `/bin/sh` fails at execution time with `ao not found`.
+    # Make the installed hook carry no machine fallback and remove `polyctl` from PATH so static install
+    # succeeds (`current-local`), while Git's `/bin/sh` fails at execution time with `polyctl not found`.
     hook_file = repo / ".git" / "hooks" / "pre-commit"
     monkeypatch.setattr(cli, "_hook_fallback", lambda: None)
     clean_dirs = [str(bin_dir)] + [
         d for d in os.environ.get("PATH", "").split(os.pathsep)
-        if d and not os.path.exists(os.path.join(d, "ao"))
+        if d and not os.path.exists(os.path.join(d, "polyctl"))
     ]
     monkeypatch.setenv("PATH", os.pathsep.join(clean_dirs))
 
@@ -360,13 +360,13 @@ def test_mode_full_refuses_when_hook_static_install_succeeds_but_execution_probe
     assert cli.cmd_mode(cfg, _mode_args("full")) == 1
     out = _plain(capsys)
     assert "mode full refused" in out
-    assert "not installed" in out and "no ao on PATH" in out
+    assert "not installed" in out and "no polyctl on PATH" in out
     assert cli.project_mode(dict(A.load_config(str(repo)), root=str(repo))) == "lite"
     assert not hook_file.exists()
 
 
 def test_forged_or_appended_opt_in_row_does_not_activate_lite_and_doctor_names_it(project, capsys):
-    from ao import storage
+    from polyctl import storage
     root = project["root"]
     assert cli.cmd_hooks(project, SimpleNamespace(action="install", allow_shared_hooks=False)) == 0
     _plain(capsys)
@@ -375,15 +375,15 @@ def test_forged_or_appended_opt_in_row_does_not_activate_lite_and_doctor_names_i
         fh.write("x = 2\n")
     subprocess.run(["git", "add", "app.py"], cwd=root, check=True)
 
-    config_file = os.path.join(root, ".ao", "config.json")
-    ledger_file = os.path.join(root, ".ao", "ledger", "opt-ins.jsonl")
+    config_file = os.path.join(root, ".polyctl", "config.json")
+    ledger_file = os.path.join(root, ".polyctl", "ledger", "opt-ins.jsonl")
     os.makedirs(os.path.dirname(ledger_file), exist_ok=True)
     updated_cfg = dict(A.project_config_document(root)["config"], mode="lite")
     with open(config_file, "w", encoding="utf-8") as fh:
         json.dump(updated_cfg, fh)
 
     # (a) A forged genesis `mode` row planted with no checkpoint does not activate lite;
-    # the commit hook keeps checking and `ao doctor` names the unattested row.
+    # the commit hook keeps checking and `polyctl doctor` names the unattested row.
     forged_genesis = {
         "previous": None,
         "ordinal": 1,
@@ -405,12 +405,12 @@ def test_forged_or_appended_opt_in_row_does_not_activate_lite_and_doctor_names_i
     assert commit_a.returncode != 0
     problems_a = dict(cli.doctor_problems(cfg_a))
     assert "opt-ins-unattested" in problems_a
-    assert "no row of it is ao's own" in problems_a["opt-ins-unattested"]
+    assert "no row of it is polyctl's own" in problems_a["opt-ins-unattested"]
     assert cli.cmd_doctor(cfg_a, SimpleNamespace(check=True, notify=False)) == 1
     assert "opt-ins-unattested" in _plain(capsys)
 
     # (b) A `lite` row appended by hand after an attested `full` row does not activate lite;
-    # the commit hook keeps checking and `ao doctor` names the unattested row.
+    # the commit hook keeps checking and `polyctl doctor` names the unattested row.
     os.remove(ledger_file)
     A.record_opt_in(root, "mode", "full", "Ada")
     with open(ledger_file, encoding="utf-8") as fh:
@@ -447,7 +447,7 @@ def test_init_succeeds_with_shared_hooks_dir_and_refuses_when_hook_path_is_a_fil
     monkeypatch.setenv("PATH", str(bin_dir), prepend=os.pathsep)
 
     # 1. Repository whose `core.hooksPath` is a shared directory outside the repo:
-    # full-mode `ao init` succeeds and names `ao hooks install --allow-shared-hooks` as the next step.
+    # full-mode `polyctl init` succeeds and names `polyctl hooks install --allow-shared-hooks` as the next step.
     shared_hooks = tmp_path / "shared-hooks"
     shared_hooks.mkdir()
     shared_repo = tmp_path / "shared-repo"
@@ -457,11 +457,11 @@ def test_init_succeeds_with_shared_hooks_dir_and_refuses_when_hook_path_is_a_fil
 
     assert cli.cmd_init({"root": str(shared_repo)}, _init_args(profile="agy-codex")) == 0
     shared_out = _plain(capsys)
-    assert "ao hooks install --allow-shared-hooks" in shared_out
-    assert (shared_repo / ".ao" / "config.json").exists()
-    assert (shared_repo / ".ao-project").exists()
+    assert "polyctl hooks install --allow-shared-hooks" in shared_out
+    assert (shared_repo / ".polyctl" / "config.json").exists()
+    assert (shared_repo / ".polyctl-project").exists()
 
-    # 2. Repository whose `core.hooksPath` is a regular file: full-mode `ao init` refuses with nothing written.
+    # 2. Repository whose `core.hooksPath` is a regular file: full-mode `polyctl init` refuses with nothing written.
     hook_file = tmp_path / "hooks-file"
     hook_file.write_text("not a dir\n", encoding="utf-8")
     file_repo = tmp_path / "file-repo"
@@ -473,13 +473,13 @@ def test_init_succeeds_with_shared_hooks_dir_and_refuses_when_hook_path_is_a_fil
     file_out = _plain(capsys)
     assert "init refused: commit hooks cannot be installed" in file_out
     assert "not a directory" in file_out
-    assert not (file_repo / ".ao").exists()
-    assert not (file_repo / ".ao-project").exists()
+    assert not (file_repo / ".polyctl").exists()
+    assert not (file_repo / ".polyctl-project").exists()
 
 
 def test_lite_opt_in_cannot_be_reused_after_config_leaves_lite(project, monkeypatch, capsys):
     root = project["root"]
-    config_file = os.path.join(root, ".ao", "config.json")
+    config_file = os.path.join(root, ".polyctl", "config.json")
     assert cli.cmd_hooks(project, SimpleNamespace(action="install", allow_shared_hooks=False)) == 0
     _plain(capsys)
 
@@ -502,17 +502,17 @@ def test_lite_opt_in_cannot_be_reused_after_config_leaves_lite(project, monkeypa
     monkeypatch.setattr(A, "record_opt_in", lambda *a, **kw: (_ for _ in ()).throw(OSError("disk full")))
     assert cli.project_mode(dict(A.load_config(root), root=root)) == "full"
     monkeypatch.setattr(A, "record_opt_in", orig_record)
-    # Normal read while config is not `lite` spends the `lite` opt-in by appending `mode = full` by `ao`.
+    # Normal read while config is not `lite` spends the `lite` opt-in by appending `mode = full` by `polyctl`.
     assert cli.project_mode(dict(A.load_config(root), root=root)) == "full"
     spent = A.recorded_opt_in(root, "mode")
-    assert spent and spent["value"] == "full" and spent["by"] == "ao"
+    assert spent and spent["value"] == "full" and spent["by"] == "polyctl"
     write_mode("lite")
     assert cli.project_mode(dict(A.load_config(root), root=root)) == "full"
     assert cli.cmd_commit_check(dict(A.load_config(root), root=root), SimpleNamespace(range=None)) == 1
     _plain(capsys)
     assert subprocess.run(["git", "commit", "-q", "-m", "after hand edit"], cwd=root, capture_output=True).returncode != 0
 
-    # Path 2: `ao config set` refuses the `mode` key and names `ao mode lite --by <name>` / `ao mode full`.
+    # Path 2: `polyctl config set` refuses the `mode` key and names `polyctl mode lite --by <name>` / `polyctl mode full`.
     assert cli.cmd_mode(dict(A.load_config(root), root=root), _mode_args("lite", by="Ada")) == 0
     assert cli.cmd_hooks(dict(A.load_config(root), root=root), SimpleNamespace(action="install", allow_shared_hooks=False)) == 0
     _plain(capsys)
@@ -523,7 +523,7 @@ def test_lite_opt_in_cannot_be_reused_after_config_leaves_lite(project, monkeypa
         )
         assert rc == 2
         msg = _plain(capsys)
-        assert "ao mode lite --by <name>" in msg and "ao mode full" in msg
+        assert "polyctl mode lite --by <name>" in msg and "polyctl mode full" in msg
     assert cli.cmd_mode(dict(A.load_config(root), root=root), _mode_args("full")) == 0
     _plain(capsys)
     write_mode("lite")
@@ -531,7 +531,7 @@ def test_lite_opt_in_cannot_be_reused_after_config_leaves_lite(project, monkeypa
     _plain(capsys)
     assert subprocess.run(["git", "commit", "-q", "-m", "after config set"], cwd=root, capture_output=True).returncode != 0
 
-    # Path 3: `ao mode full` records its opt-in row first and writes the config after;
+    # Path 3: `polyctl mode full` records its opt-in row first and writes the config after;
     # if the record fails, nothing changes and the command fails; once the config leaves `lite`,
     # writing `"mode": "lite"` back still keeps the hook checking.
     assert cli.cmd_mode(dict(A.load_config(root), root=root), _mode_args("lite", by="Ada")) == 0
@@ -546,7 +546,7 @@ def test_lite_opt_in_cannot_be_reused_after_config_leaves_lite(project, monkeypa
     assert not os.path.exists(hook_path)
     assert A.recorded_opt_in(root, "mode")["value"] == "lite"
 
-    # And if the config write fails after `ao mode full` recorded `full`, or if the config was
+    # And if the config write fails after `polyctl mode full` recorded `full`, or if the config was
     # already `full` when `record_opt_in` failed and `"mode": "lite"` is written back:
     assert cli.cmd_hooks(dict(A.load_config(root), root=root), SimpleNamespace(action="install", allow_shared_hooks=False)) == 0
     _plain(capsys)

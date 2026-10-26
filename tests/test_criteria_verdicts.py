@@ -3,7 +3,7 @@
 A review returned one verdict for a whole boundary, so a boundary of several conditions could be approved with one of
 them never examined, and nothing on the record said which. The criteria a boundary lists - numbered, or separated by
 semicolons on one line - are now each asked for in a note after the prompt, each recorded in the review's evidence
-with the reviewer's evidence, and `ao commit-ok` refuses a review that did not find every one met, naming each one
+with the reviewer's evidence, and `polyctl commit-ok` refuses a review that did not find every one met, naming each one
 that is not. A single sentence lists no criteria, and is reviewed, recorded and granted exactly as it was.
 """
 import json
@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, language, lib as A, storage
+from polyctl import cli, language, lib as A, storage
 from tests import test_commit_authority as authority
 from tests.test_review_chain import _args, _fake, _repo_with_change
 
@@ -29,15 +29,15 @@ BOUNDARY_FILE = ("# S1 - the claim journal\n## Invariant\nA claim is journalled 
                  "2. a restart replays the journal in order\n"
                  "## Out of scope\n1. the public claim API stays as it is\n")
 SECTION_MARKERS = "|".join(re.escape(marker) for marker in language.TEXTS["prompt.review-section"].values())
-# A reviewer that keeps every prompt it is handed and approves, adding the criterion lines AO_TEST_ANSWERS holds for
+# A reviewer that keeps every prompt it is handed and approves, adding the criterion lines POLYCTL_TEST_ANSWERS holds for
 # the question it was asked: a scenario's section by its name, a review asked as one question by "whole".
 REVIEWER = f"MARKERS = {SECTION_MARKERS!r}\nAPPROVED = {APPROVED!r}\n" + """
 import json, os, re, sys
 prompt = sys.argv[1]
-with open(os.environ["AO_TEST_PROMPTS"], "a", encoding="utf-8") as fh:
+with open(os.environ["POLYCTL_TEST_PROMPTS"], "a", encoding="utf-8") as fh:
     fh.write(json.dumps(prompt) + "\\n")
 section = re.search(r"Scenario \\d+", re.split(MARKERS, prompt)[-1]) if re.search(MARKERS, prompt) else None
-lines = json.loads(os.environ["AO_TEST_ANSWERS"]).get(section.group(0) if section else "whole", [])
+lines = json.loads(os.environ["POLYCTL_TEST_ANSWERS"]).get(section.group(0) if section else "whole", [])
 print("\\n".join(APPROVED + lines))
 """
 
@@ -47,7 +47,7 @@ def _plain(capsys):
 
 
 def _running(root, row):
-    with open(os.path.join(root, ".ao", "board.md"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "board.md"), "w", encoding="utf-8") as fh:
         fh.write(f"# Board\n\n## running\n{row}\n\n## blocked\n\n## queued\n\n## verified\n\n## done\n")
 
 
@@ -58,8 +58,8 @@ def _reviewed(project, tmp_path, monkeypatch, row, answers):
     _repo_with_change(root)
     _running(root, row)
     prompts = tmp_path / "prompts.jsonl"
-    monkeypatch.setenv("AO_TEST_PROMPTS", str(prompts))
-    monkeypatch.setenv("AO_TEST_ANSWERS", json.dumps(answers))
+    monkeypatch.setenv("POLYCTL_TEST_PROMPTS", str(prompts))
+    monkeypatch.setenv("POLYCTL_TEST_ANSWERS", json.dumps(answers))
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": [sys.executable, "-c", REVIEWER, "{prompt}"]})
 
     def handed():
@@ -94,9 +94,9 @@ def _commit_ok(cfg, monkeypatch, capsys):
                 "a restart replays the journal"]),
     ("the journal: 1) a claim is journalled 2) a restart replays it (3) a duplicate is refused",
      ["a claim is journalled", "a restart replays it", "a duplicate is refused"]),
-    (THREE + "; `ao review --boundary 'a; b'` stays one criterion",
+    (THREE + "; `polyctl review --boundary 'a; b'` stays one criterion",
      ["the store is durable", "a restart replays it", "a duplicate is refused",
-      "`ao review --boundary 'a; b'` stays one criterion"]),
+      "`polyctl review --boundary 'a; b'` stays one criterion"]),
 ])
 def test_a_boundary_lists_its_criteria_numbered_or_separated_by_semicolons(boundary, criteria):
     listed = A.boundary_criteria(boundary)

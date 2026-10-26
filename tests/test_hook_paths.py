@@ -10,10 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 # What the Windows lane cannot check here, named where each test skips (#71).
-SHARED_HOOKS_REFUSED = "on Windows ao refuses every hook write that needs --allow-shared-hooks"
+SHARED_HOOKS_REFUSED = "on Windows polyctl refuses every hook write that needs --allow-shared-hooks"
 POSIX_MODE = "POSIX executable mode is not a Windows hook property"
 
 
@@ -77,7 +77,7 @@ def _enroll_project(root, commit=True):
             "commit",
             "-q",
             "-m",
-            "enroll ao",
+            "enroll polyctl",
         )
     return marker
 
@@ -98,7 +98,7 @@ def _commit_marker_absence(root):
         "commit",
         "-q",
         "-m",
-        "fixture without ao marker",
+        "fixture without polyctl marker",
     )
 
 
@@ -127,15 +127,15 @@ def _strip_colour(text):
     return re.sub(r"\033\[[0-9;]*m", "", text)
 
 
-def _make_current_ao_available(monkeypatch, tmp_path, body=None):
-    """Put a deterministic `ao` command on the hook's PATH.
+def _make_current_polyctl_available(monkeypatch, tmp_path, body=None):
+    """Put a deterministic `polyctl` command on the hook's PATH.
 
-    The subprocess must import this worktree's source, not whichever editable AO
+    The subprocess must import this worktree's source, not whichever editable polyctl
     happens to be installed on the machine running the tests.
     """
     bindir = tmp_path / "probe-bin"
     bindir.mkdir(exist_ok=True)
-    executable = bindir / "ao"
+    executable = bindir / "polyctl"
     if body is None:
         source = os.path.dirname(os.path.dirname(os.path.abspath(cli.__file__)))
         python = sys.executable.replace("\\", "/")
@@ -144,7 +144,7 @@ def _make_current_ao_available(monkeypatch, tmp_path, body=None):
             "#!/bin/sh\n"
             "export PYTHONDONTWRITEBYTECODE=1\n"
             f"export PYTHONPATH={shlex.quote(source)}\n"
-            f"exec {shlex.quote(python)} -m ao.cli \"$@\"\n"
+            f"exec {shlex.quote(python)} -m polyctl.cli \"$@\"\n"
         )
     executable.write_text(body, encoding="utf-8")
     executable.chmod(0o755)
@@ -170,14 +170,14 @@ def test_relative_hooks_path_uses_linked_worktree_top_not_private_git_dir(projec
     _git(root, "worktree", "add", "-q", "-b", "linked", str(linked))
     _git(root, "config", "core.hooksPath", ".githooks")
 
-    inv = cli._ao_hook_inventory(str(linked))
+    inv = cli._polyctl_hook_inventory(str(linked))
 
     assert inv["error"] is None
     assert inv["active_dir"] == os.path.realpath(linked / ".githooks")
     assert inv["git_dir"].endswith(os.path.join("worktrees", "linked"))
     assert inv["active_dir"] != os.path.join(inv["git_dir"], "hooks")
     assert inv["directory_class"] == "project-local"
-    assert cli._ao_hook_paths(str(linked))["pre-commit"] == os.path.join(
+    assert cli._polyctl_hook_paths(str(linked))["pre-commit"] == os.path.join(
         os.path.realpath(linked / ".githooks"), "pre-commit"
     )
 
@@ -187,7 +187,7 @@ def test_unconfigured_linked_worktrees_share_common_hooks(project, tmp_path):
     linked = tmp_path / "linked"
     _git(root, "worktree", "add", "-q", "-b", "linked", str(linked))
 
-    inv = cli._ao_hook_inventory(root)
+    inv = cli._polyctl_hook_inventory(root)
 
     assert inv["error"] is None
     assert inv["active_dir"] == os.path.realpath(os.path.join(root, ".git", "hooks"))
@@ -201,7 +201,7 @@ def test_absolute_external_hooks_path_needs_explicit_authorization(project, tmp_
     external = tmp_path / "external-hooks"
     _git(root, "config", "core.hooksPath", str(external))
 
-    inv = cli._ao_hook_inventory(root)
+    inv = cli._polyctl_hook_inventory(root)
     assert inv["directory_class"] == "external"
     assert cli.cmd_hooks(project, _args("install")) == 1
     assert not external.exists()
@@ -224,7 +224,7 @@ def test_global_scope_requires_authorization_even_when_path_is_project_local(
     monkeypatch.setenv("HOME", str(home))
     _git(root, "config", "--global", "core.hooksPath", ".global-hooks")
 
-    inv = cli._ao_hook_inventory(root)
+    inv = cli._polyctl_hook_inventory(root)
 
     assert inv["config"]["scope"] == "global"
     assert inv["globally_configured"] is True
@@ -244,7 +244,7 @@ def test_git_environment_poisoning_is_removed(project, tmp_path, monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(tmp_path / "poison-hooks"))
     monkeypatch.setenv("GIT_LITERAL_PATHSPECS", "0")
 
-    inv = cli._ao_hook_inventory(root)
+    inv = cli._polyctl_hook_inventory(root)
 
     assert inv["error"] is None
     assert inv["top"] == os.path.realpath(root)
@@ -256,12 +256,12 @@ def test_config_parser_is_nul_safe_and_set_empty_uses_git_path(project):
     root = project["root"]
     weird = "hooks\twith-tab"
     _git(root, "config", "core.hooksPath", weird)
-    inv = cli._ao_hook_inventory(root)
+    inv = cli._polyctl_hook_inventory(root)
     assert inv["config"]["value"] == weird
     assert inv["active_dir"] == os.path.realpath(os.path.join(root, weird))
 
     _git(root, "config", "core.hooksPath", "")
-    inv = cli._ao_hook_inventory(root)
+    inv = cli._polyctl_hook_inventory(root)
     config = inv["config"]
     assert config["set"] is True
     assert config["scope"] == "local"
@@ -287,7 +287,7 @@ def test_bare_repository_with_attached_worktree_uses_common_hooks(tmp_path):
     linked = tmp_path / "from-bare"
     _git(bare, "worktree", "add", "-q", str(linked), "main")
 
-    inv = cli._ao_hook_inventory(str(linked))
+    inv = cli._polyctl_hook_inventory(str(linked))
 
     assert inv["error"] is None
     assert inv["common_dir"] == os.path.realpath(bare)
@@ -308,7 +308,7 @@ def test_locked_missing_worktree_is_conservative_and_stale_unlocked_is_ignored(
     _git(root, "worktree", "add", "-q", "-b", "stale", str(stale))
     shutil.rmtree(stale)
 
-    inv = cli._ao_hook_inventory(root)
+    inv = cli._polyctl_hook_inventory(root)
 
     rows = {os.path.realpath(w["path"]): w for w in inv["worktrees"]}
     assert rows[os.path.realpath(locked)]["status"] == "locked"
@@ -324,7 +324,7 @@ def test_unknown_symlinked_admin_fails_closed(project):
     os.makedirs(admins, exist_ok=True)
     os.symlink(os.path.join(root, ".git"), os.path.join(admins, "unknown"))
 
-    inv = cli._ao_hook_inventory(root)
+    inv = cli._polyctl_hook_inventory(root)
 
     assert inv["error"] is not None
     assert "unknown worktree admin" in inv["error"]
@@ -342,7 +342,7 @@ def test_tracked_missing_active_hook_is_never_recreated(project):
     _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "hook")
     os.remove(path)
 
-    inv = cli._ao_hook_inventory(root)
+    inv = cli._polyctl_hook_inventory(root)
     target = _active(inv, "pre-commit")
     assert target["static_state"] == "absent"
     assert target["track_state"] == "tracked"
@@ -387,7 +387,7 @@ def test_uninstall_authorization_is_command_wide_and_prevents_partial_local_dele
     legacy = os.path.join(common, "pre-commit")
     os.makedirs(common, exist_ok=True)
     with open(legacy, "w", encoding="utf-8") as fh:
-        fh.write(cli.PRE_COMMIT_HOOK.format(ao="/x/ao", root=str(linked)))
+        fh.write(cli.PRE_COMMIT_HOOK.format(polyctl="/x/polyctl", root=str(linked)))
 
     assert cli.cmd_hooks(project, _args("uninstall")) == 1
     assert os.path.exists(local_commit)
@@ -415,7 +415,7 @@ def test_dead_protected_repository_source_warns_but_does_not_block_remove(
     # schedulers are not asked: a user systemd that does not answer counts its jobs as there (LEADS-INSTALL).
     monkeypatch.setattr(cli, "_installed_jobs", lambda key: [])
     assert cli.cmd_remove(project, SimpleNamespace(yes=True, allow_shared_hooks=False)) == 0
-    assert not os.path.exists(os.path.join(root, ".ao"))
+    assert not os.path.exists(os.path.join(root, ".polyctl"))
     assert os.path.exists(hook)
 
 
@@ -427,15 +427,15 @@ def test_protected_effective_legacy_aborts_remove_with_state_intact(project, mon
     os.makedirs(hooks)
     hook = os.path.join(hooks, "pre-commit")
     with open(hook, "w", encoding="utf-8") as fh:
-        # Quoted as ao quoted it: a Windows path's backslashes are shell escapes.
-        fh.write(cli.PRE_COMMIT_HOOK.format(ao="/old/ao", root=shlex.quote(root)))
+        # Quoted as polyctl quoted it: a Windows path's backslashes are shell escapes.
+        fh.write(cli.PRE_COMMIT_HOOK.format(polyctl="/old/polyctl", root=shlex.quote(root)))
     _git(root, "add", ".githooks/pre-commit")
-    # Git for Windows runs a hook whatever its mode, and this legacy one names an ao that is not there:
+    # Git for Windows runs a hook whatever its mode, and this legacy one names a polyctl that is not there:
     # the fixture's own commit runs no hook, as it runs none where the file is not executable (#71).
     _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--no-verify", "-qm", "legacy")
 
     assert cli.cmd_remove(project, SimpleNamespace(yes=True, allow_shared_hooks=False)) == 1
-    assert os.path.isdir(os.path.join(root, ".ao"))
+    assert os.path.isdir(os.path.join(root, ".polyctl"))
     assert os.path.exists(hook)
 
 
@@ -449,7 +449,7 @@ def test_doctor_has_commit_problems_but_never_a_push_alarm(
     assert not any("push-hook" in key for key in keys)
 
     _enroll_project(root)
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
     linked = tmp_path / "linked"
     _git(root, "worktree", "add", "-q", "-b", "linked", str(linked))
     assert cli.cmd_hooks(project, _args("install", allow=True)) == 0
@@ -466,8 +466,8 @@ def test_status_names_config_path_class_track_state_and_misplaced(
     _git(root, "config", "core.hooksPath", ".githooks")
     old = os.path.join(root, ".git", "hooks", "pre-commit")
     with open(old, "w", encoding="utf-8") as fh:
-        # Quoted as ao quoted it: a Windows path's backslashes are shell escapes.
-        fh.write(cli.PRE_COMMIT_HOOK.format(ao="/old/ao", root=shlex.quote(root)))
+        # Quoted as polyctl quoted it: a Windows path's backslashes are shell escapes.
+        fh.write(cli.PRE_COMMIT_HOOK.format(polyctl="/old/polyctl", root=shlex.quote(root)))
 
     assert cli.cmd_hooks(project, _args("status")) == 0
     output = _strip_colour(capsys.readouterr().out)
@@ -480,13 +480,13 @@ def test_status_names_config_path_class_track_state_and_misplaced(
 
 
 @pytest.mark.parametrize("body_kind", ("v1", "v2"))
-def test_user_extended_ao_hook_is_ambiguous_and_never_mutated(
+def test_user_extended_polyctl_hook_is_ambiguous_and_never_mutated(
     project, body_kind
 ):
     root = project["root"]
     path = os.path.join(root, ".git", "hooks", "pre-commit")
     if body_kind == "v1":
-        body = cli.PRE_COMMIT_HOOK.format(ao="/old/ao", root=root).encode("utf-8")
+        body = cli.PRE_COMMIT_HOOK.format(polyctl="/old/polyctl", root=root).encode("utf-8")
     else:
         body = cli._render_local_hook("pre-commit", ".")
     extended = body.replace(
@@ -495,8 +495,8 @@ def test_user_extended_ao_hook_is_ambiguous_and_never_mutated(
     with open(path, "wb") as fh:
         fh.write(extended)
 
-    target = _active(cli._ao_hook_inventory(root), "pre-commit")
-    assert target["static_state"] == "ambiguous-ao"
+    target = _active(cli._polyctl_hook_inventory(root), "pre-commit")
+    assert target["static_state"] == "ambiguous-polyctl"
     assert target["eligible"] is False
 
     assert cli.cmd_hooks(project, _args("install")) == 1
@@ -510,7 +510,7 @@ def test_lf_shebang_with_crlf_body_is_ambiguous(project, body_kind):
     root = project["root"]
     path = os.path.join(root, ".git", "hooks", "pre-commit")
     if body_kind == "v1":
-        body = cli.PRE_COMMIT_HOOK.format(ao="/old/ao", root=root).encode("utf-8")
+        body = cli.PRE_COMMIT_HOOK.format(polyctl="/old/polyctl", root=root).encode("utf-8")
     else:
         body = cli._render_local_hook("pre-commit", ".")
     shebang = b"#!/bin/sh\n"
@@ -519,8 +519,8 @@ def test_lf_shebang_with_crlf_body_is_ambiguous(project, body_kind):
     with open(path, "wb") as fh:
         fh.write(mixed)
 
-    target = _active(cli._ao_hook_inventory(root), "pre-commit")
-    assert target["static_state"] == "ambiguous-ao"
+    target = _active(cli._polyctl_hook_inventory(root), "pre-commit")
+    assert target["static_state"] == "ambiguous-polyctl"
     assert target["eligible"] is False
 
 
@@ -535,13 +535,13 @@ def test_shell_quoted_v1_generated_body_is_legacy(project, role, template):
     root = project["root"]
     path = os.path.join(root, ".git", "hooks", role)
     body = template.format(
-        ao="'/opt/AO Tool/bin/ao'",
+        polyctl="'/opt/polyctl Tool/bin/polyctl'",
         root="'/tmp/My Projects/repo'",
     ).encode("utf-8")
     with open(path, "wb") as fh:
         fh.write(body)
 
-    target = _active(cli._ao_hook_inventory(root), role)
+    target = _active(cli._polyctl_hook_inventory(root), role)
     assert target["static_state"] == "legacy (behavior unverified)"
     assert target["eligible"] is True
 
@@ -562,10 +562,10 @@ def test_nul_in_scoped_candidate_is_ambiguous_without_resolver_failure(project):
         fh.write(corrupt)
 
     assert cli._legacy_hook_role(corrupt) is None
-    inv = cli._ao_hook_inventory(root)
+    inv = cli._polyctl_hook_inventory(root)
     assert inv["error"] is None
     target = _active(inv, "pre-commit")
-    assert target["static_state"] == "ambiguous-ao"
+    assert target["static_state"] == "ambiguous-polyctl"
     assert target["eligible"] is False
     assert cli.cmd_hooks(project, _args("status")) == 0
     assert "commit-hook" in {key for key, _ in cli.doctor_problems(project)}
@@ -579,13 +579,13 @@ def test_static_classifier_handles_crlf_mixed_prior_undecodable_and_symlink(proj
 
     with open(path, "wb") as fh:
         fh.write(body.replace(b"\n", b"\r\n"))
-    assert cli._ao_hook_inventory(root)["targets"][0]["static_state"] == "legacy (behavior unverified)"
+    assert cli._polyctl_hook_inventory(root)["targets"][0]["static_state"] == "legacy (behavior unverified)"
 
     with open(path, "wb") as fh:
         fh.write(body.replace(b"\n", b"\r\n", 1))
-    assert _active(cli._ao_hook_inventory(root), "pre-commit")["static_state"] in {
+    assert _active(cli._polyctl_hook_inventory(root), "pre-commit")["static_state"] in {
         "foreign",
-        "ambiguous-ao",
+        "ambiguous-polyctl",
     }
 
     prior = body.replace(
@@ -595,17 +595,17 @@ def test_static_classifier_handles_crlf_mixed_prior_undecodable_and_symlink(proj
     )
     with open(path, "wb") as fh:
         fh.write(prior)
-    assert _active(cli._ao_hook_inventory(root), "pre-commit")["static_state"] == \
+    assert _active(cli._polyctl_hook_inventory(root), "pre-commit")["static_state"] == \
         "legacy (behavior unverified)"
 
     with open(path, "wb") as fh:
-        fh.write(b"\xff\xfe agent-orchestrator commit-check")
-    assert _active(cli._ao_hook_inventory(root), "pre-commit")["static_state"] == "foreign"
+        fh.write(b"\xff\xfe polyctl commit-check")
+    assert _active(cli._polyctl_hook_inventory(root), "pre-commit")["static_state"] == "foreign"
 
     os.remove(path)
     if hasattr(os, "symlink"):
         os.symlink(os.path.join(root, "missing"), path)
-        assert _active(cli._ao_hook_inventory(root), "pre-commit")["static_state"] == "foreign"
+        assert _active(cli._polyctl_hook_inventory(root), "pre-commit")["static_state"] == "foreign"
 
 
 @pytest.mark.parametrize("failing_command", ("rev-parse", "ls-files"))
@@ -634,7 +634,7 @@ def test_common_fallback_is_never_remove_inert_local(project):
         fh.write(cli._render_local_hook("pre-commit", "."))
     os.chmod(path, 0o755)                   # as install writes it: without the bit it is no current hook (LEADS-GATE)
 
-    inv = cli._ao_hook_inventory(root)
+    inv = cli._polyctl_hook_inventory(root)
     target = _active(inv, "pre-commit")
     assert target["static_state"] == "current-local (behavior unverified)"
     assert os.path.realpath(target["directory"]) == os.path.realpath(
@@ -720,10 +720,10 @@ def test_execution_probe_uses_git_hook_runner_without_repository_residue(
     root = project["root"]
     _enroll_project(root)
     _git(root, "config", "core.hooksPath", ".githooks")
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
     assert cli.cmd_hooks(project, _args("install")) == 0
 
-    inventory = cli._ao_hook_inventory(root)
+    inventory = cli._polyctl_hook_inventory(root)
     before = _git_snapshot(root)
     proof = cli._hook_execution_probe(inventory)
     after = _git_snapshot(root)
@@ -731,20 +731,20 @@ def test_execution_probe_uses_git_hook_runner_without_repository_residue(
     assert proof == {
         "installed": True,
         "state": "installed",
-        "detail": "Git executed pre-commit and AO refused the synthetic candidate",
+        "detail": "Git executed pre-commit and polyctl refused the synthetic candidate",
         "exit": 1,
     }
     assert after == before
-    assert not any(name.startswith(".ao-hook-probe-") for name in os.listdir(root))
+    assert not any(name.startswith(".polyctl-hook-probe-") for name in os.listdir(root))
 
 
 @pytest.mark.parametrize(
     "missing",
     (
-        "AO_HOOK_PROBE_NONCE",
-        "AO_HOOK_PROBE_PATH",
-        "AO_HOOK_PROBE_HEAD",
-        "AO_HOOK_PROBE_INDEX",
+        "POLYCTL_HOOK_PROBE_NONCE",
+        "POLYCTL_HOOK_PROBE_PATH",
+        "POLYCTL_HOOK_PROBE_HEAD",
+        "POLYCTL_HOOK_PROBE_INDEX",
     ),
 )
 def test_partial_hook_probe_environment_is_inert_for_live_commit_path(
@@ -752,10 +752,10 @@ def test_partial_hook_probe_environment_is_inert_for_live_commit_path(
 ):
     index = os.path.abspath(os.path.join(project["root"], "probe-index"))
     values = {
-        "AO_HOOK_PROBE_NONCE": "0" * 32,
-        "AO_HOOK_PROBE_PATH": ".ao-hook-probe-" + "0" * 32,
-        "AO_HOOK_PROBE_HEAD": "1" * 40,
-        "AO_HOOK_PROBE_INDEX": index,
+        "POLYCTL_HOOK_PROBE_NONCE": "0" * 32,
+        "POLYCTL_HOOK_PROBE_PATH": ".polyctl-hook-probe-" + "0" * 32,
+        "POLYCTL_HOOK_PROBE_HEAD": "1" * 40,
+        "POLYCTL_HOOK_PROBE_INDEX": index,
     }
     monkeypatch.setenv("GIT_INDEX_FILE", index)
     for name, value in values.items():
@@ -773,11 +773,11 @@ def test_complete_hook_probe_binds_namespaced_index_to_git_index(
 ):
     root = project["root"]
     nonce = "0" * 32
-    monkeypatch.setenv("AO_HOOK_PROBE_NONCE", nonce)
-    monkeypatch.setenv("AO_HOOK_PROBE_PATH", ".ao-hook-probe-" + nonce)
-    monkeypatch.setenv("AO_HOOK_PROBE_HEAD", "1" * 40)
+    monkeypatch.setenv("POLYCTL_HOOK_PROBE_NONCE", nonce)
+    monkeypatch.setenv("POLYCTL_HOOK_PROBE_PATH", ".polyctl-hook-probe-" + nonce)
+    monkeypatch.setenv("POLYCTL_HOOK_PROBE_HEAD", "1" * 40)
     monkeypatch.setenv(
-        "AO_HOOK_PROBE_INDEX", os.path.abspath(os.path.join(root, "probe-index"))
+        "POLYCTL_HOOK_PROBE_INDEX", os.path.abspath(os.path.join(root, "probe-index"))
     )
     monkeypatch.setenv(
         "GIT_INDEX_FILE", os.path.abspath(os.path.join(root, "different-index"))
@@ -787,7 +787,7 @@ def test_complete_hook_probe_binds_namespaced_index_to_git_index(
     output = _strip_colour(capsys.readouterr().out)
     assert "COMMIT REFUSED" in output
     assert "index does not match Git's active index" in output
-    assert "AO-HOOK-PROBE-REFUSED" not in output
+    assert "POLYCTL-HOOK-PROBE-REFUSED" not in output
 
 
 def test_installed_hook_resolves_relative_alternate_index_from_repository_root(
@@ -796,7 +796,7 @@ def test_installed_hook_resolves_relative_alternate_index_from_repository_root(
     root = Path(project["root"])
     _enroll_project(root)
     _git(root, "config", "core.hooksPath", ".githooks")
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
     assert cli.cmd_hooks(project, _args("install")) == 0
 
     alternate = root / "relative-hook-index"
@@ -821,7 +821,7 @@ def test_status_doctor_and_init_report_the_same_execution_proof(
     root = project["root"]
     _enroll_project(root)
     _git(root, "config", "core.hooksPath", ".githooks")
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
     assert cli.cmd_hooks(project, _args("install")) == 0
     capsys.readouterr()
 
@@ -853,7 +853,7 @@ def test_marker_preserving_exit_zero_and_misplaced_body_are_not_installed(
     with open(active, "wb") as fh:
         fh.write(
             b"#!/bin/sh\n"
-            b"# agent-orchestrator: ao-hook-v2 role=pre-commit binding=project-local\n"
+            b"# polyctl: polyctl-hook-v2 role=pre-commit binding=project-local\n"
             b"exit 0\n"
         )
     os.chmod(active, 0o755)
@@ -884,7 +884,7 @@ def test_nonzero_hook_without_nonce_bound_refusal_is_not_proof(
     root = project["root"]
     _enroll_project(root)
     _git(root, "config", "core.hooksPath", ".githooks")
-    _make_current_ao_available(monkeypatch, tmp_path, "#!/bin/sh\nexit 1\n")
+    _make_current_polyctl_available(monkeypatch, tmp_path, "#!/bin/sh\nexit 1\n")
     hooks = os.path.join(root, ".githooks")
     os.makedirs(hooks)
     path = os.path.join(hooks, "pre-commit")
@@ -892,10 +892,10 @@ def test_nonzero_hook_without_nonce_bound_refusal_is_not_proof(
         fh.write(cli._render_local_hook("pre-commit", "."))
     os.chmod(path, 0o755)
 
-    proof = cli._hook_execution_probe(cli._ao_hook_inventory(root))
+    proof = cli._hook_execution_probe(cli._polyctl_hook_inventory(root))
 
     assert proof["installed"] is False
-    assert "without AO's nonce-bound refusal proof" in proof["detail"]
+    assert "without polyctl's nonce-bound refusal proof" in proof["detail"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX executable mode is not a Windows hook property")
@@ -903,7 +903,7 @@ def test_non_executable_current_body_is_not_installed(project, tmp_path, monkeyp
     root = project["root"]
     _enroll_project(root)
     _git(root, "config", "core.hooksPath", ".githooks")
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
     hooks = os.path.join(root, ".githooks")
     os.makedirs(hooks)
     path = os.path.join(hooks, "pre-commit")
@@ -911,7 +911,7 @@ def test_non_executable_current_body_is_not_installed(project, tmp_path, monkeyp
         fh.write(cli._render_local_hook("pre-commit", "."))
     os.chmod(path, 0o644)
 
-    proof = cli._hook_execution_probe(cli._ao_hook_inventory(root))
+    proof = cli._hook_execution_probe(cli._polyctl_hook_inventory(root))
 
     assert proof["installed"] is False
     assert proof["exit"] != 0
@@ -927,10 +927,10 @@ def test_shared_worktree_hook_is_installed_only_after_scoped_route_executes(
     _enroll_project(root)
     linked = tmp_path / "linked-execution"
     _git(root, "worktree", "add", "-q", "-b", "linked-execution", str(linked))
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
 
     assert cli.cmd_hooks(project, _args("install", allow=True)) == 0
-    inventory = cli._ao_hook_inventory(root)
+    inventory = cli._polyctl_hook_inventory(root)
     target = _active(inventory, "pre-commit")
     proof = cli._hook_execution_probe(inventory)
 
@@ -940,9 +940,9 @@ def test_shared_worktree_hook_is_installed_only_after_scoped_route_executes(
 
 
 
-def test_fresh_repository_and_incidental_ao_directory_skip_hook_silently(tmp_path):
+def test_fresh_repository_and_incidental_polyctl_directory_skip_hook_silently(tmp_path):
     root = _init_repo(tmp_path / "plain")
-    (root / ".ao" / "ledger").mkdir(parents=True)
+    (root / ".polyctl" / "ledger").mkdir(parents=True)
     hooks = root / ".githooks"
     hooks.mkdir()
     hook = hooks / "pre-commit"
@@ -973,9 +973,9 @@ def test_fresh_repository_and_incidental_ao_directory_skip_hook_silently(tmp_pat
 )
 def test_project_enrollment_golden_config_states(tmp_path, payload, expected):
     root = _init_repo(tmp_path / "state")
-    (root / ".ao").mkdir()
+    (root / ".polyctl").mkdir()
     if payload is not None:
-        (root / ".ao" / "config.json").write_bytes(payload)
+        (root / ".polyctl" / "config.json").write_bytes(payload)
     _enroll_project(root, commit=False)
 
     state = cli._project_enrollment(str(root))
@@ -983,7 +983,7 @@ def test_project_enrollment_golden_config_states(tmp_path, payload, expected):
     assert state["state"] == expected
     if expected == "broken":
         assert cli.PROJECT_MARKER in state["detail"]
-        assert "AO project state is missing/unreadable" in state["detail"]
+        assert "polyctl project state is missing/unreadable" in state["detail"]
         assert cli.PROJECT_INIT_COMMAND in state["detail"]
     else:
         assert state["source"] == "index"
@@ -1017,8 +1017,8 @@ def test_project_config_resource_boundaries_are_shared_by_load_and_enforcement(
     tmp_path, capsys, case, payload, accepted, problem_fragment
 ):
     root = _init_repo(tmp_path / case)
-    (root / ".ao").mkdir()
-    (root / ".ao" / "config.json").write_bytes(payload)
+    (root / ".polyctl").mkdir()
+    (root / ".polyctl" / "config.json").write_bytes(payload)
     _enroll_project(root, commit=False)
 
     loaded = A.load_config(str(root))
@@ -1047,8 +1047,8 @@ def test_invalid_project_config_has_one_non_raising_pre_dispatch_result(
     tmp_path, payload
 ):
     root = _init_repo(tmp_path / "invalid-config")
-    (root / ".ao").mkdir()
-    (root / ".ao" / "config.json").write_bytes(payload)
+    (root / ".polyctl").mkdir()
+    (root / ".polyctl" / "config.json").write_bytes(payload)
 
     loaded = A.load_config(str(root))
     problem = cli._project_config_problem(str(root))
@@ -1064,11 +1064,11 @@ def test_first_adoption_carries_staged_marker_into_execution_probe(
     _commit_marker_absence(root)
     _enroll_project(root, commit=False)
     _git(root, "config", "core.hooksPath", ".githooks")
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
     assert cli.cmd_hooks(project, _args("install")) == 0
 
     state = cli._project_enrollment(root)
-    proof = cli._hook_execution_probe(cli._ao_hook_inventory(root))
+    proof = cli._hook_execution_probe(cli._polyctl_hook_inventory(root))
 
     assert state["state"] == "enrolled"
     assert state["source"] == "index"
@@ -1083,11 +1083,11 @@ def test_staged_marker_deletion_remains_enrolled_through_head(
     marker.unlink()
     _git(root, "add", "-u", "--", cli.PROJECT_MARKER)
     _git(root, "config", "core.hooksPath", ".githooks")
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
     assert cli.cmd_hooks(project, _args("install")) == 0
 
     state = cli._project_enrollment(root)
-    proof = cli._hook_execution_probe(cli._ao_hook_inventory(root))
+    proof = cli._hook_execution_probe(cli._polyctl_hook_inventory(root))
 
     assert state["state"] == "enrolled"
     assert state["source"] == "head"
@@ -1107,12 +1107,12 @@ def test_alternate_index_first_adoption_is_enrolled_and_probed(
     _git(root, "read-tree", "HEAD", env=env)
     _git(root, "add", cli.PROJECT_MARKER, env=env)
     _git(root, "config", "core.hooksPath", ".githooks")
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
     assert cli.cmd_hooks(project, _args("install")) == 0
     monkeypatch.setenv("GIT_INDEX_FILE", str(alternate))
 
     state = cli._project_enrollment(root)
-    proof = cli._hook_execution_probe(cli._ao_hook_inventory(root))
+    proof = cli._hook_execution_probe(cli._polyctl_hook_inventory(root))
 
     assert state["state"] == "enrolled"
     assert state["source"] == "index"
@@ -1156,13 +1156,13 @@ def test_empty_active_index_override_fails_closed(project, monkeypatch):
 def test_wrong_staged_marker_cannot_disable_canonical_head(project):
     root = project["root"]
     marker = _enroll_project(root)
-    marker.write_text("not-ao\n", encoding="utf-8")
+    marker.write_text("not-polyctl\n", encoding="utf-8")
     _git(root, "add", cli.PROJECT_MARKER)
 
     state = cli._project_enrollment(root)
 
     assert state["state"] == "broken"
-    assert "active index marker bytes are not ao-project-v1" in state["detail"]
+    assert "active index marker bytes are not polyctl-project-v1" in state["detail"]
 
 
 def test_linked_worktree_reads_canonical_head_marker(project, tmp_path):
@@ -1170,8 +1170,8 @@ def test_linked_worktree_reads_canonical_head_marker(project, tmp_path):
     _enroll_project(root)
     linked = tmp_path / "linked-marker"
     _git(root, "worktree", "add", "-q", "-b", "linked-marker", str(linked))
-    (linked / ".ao").mkdir()
-    (linked / ".ao" / "config.json").write_text(
+    (linked / ".polyctl").mkdir()
+    (linked / ".polyctl" / "config.json").write_text(
         '{"project":"linked"}\n', encoding="utf-8"
     )
 
@@ -1192,7 +1192,7 @@ def test_public_clone_marker_without_state_refuses_with_init_remediation(
     output = _strip_colour(capsys.readouterr().out)
 
     assert cli.PROJECT_MARKER in output
-    assert "AO project state is missing/unreadable" in output
+    assert "polyctl project state is missing/unreadable" in output
     assert cli.PROJECT_INIT_COMMAND in output
     assert "unconfigured" not in output
 
@@ -1203,12 +1203,12 @@ def test_exact_v2_hook_is_legacy_and_upgrades_to_the_current_hook(project):
     path.write_bytes(cli._render_v2_local_hook("pre-commit", "."))
     path.chmod(0o755)
 
-    before = _active(cli._ao_hook_inventory(root), "pre-commit")
+    before = _active(cli._polyctl_hook_inventory(root), "pre-commit")
     assert before["static_state"] == "legacy (behavior unverified)"
     assert cli.cmd_hooks(project, _args("install")) == 0
-    # In the git directory the body also names the ao that installed it (SAFE-REMOVE).
+    # In the git directory the body also names the polyctl that installed it (SAFE-REMOVE).
     assert path.read_bytes() == cli._render_local_hook("pre-commit", ".", cli._hook_fallback())
-    assert b"ao-hook-v7" in path.read_bytes()
+    assert b"polyctl-hook-v7" in path.read_bytes()
 
 
 def test_init_writes_exact_unstaged_marker_and_refuses_wrong_reinit(
@@ -1240,7 +1240,7 @@ def test_init_writes_exact_unstaged_marker_and_refuses_wrong_reinit(
         root, "ls-files", "--error-unmatch", "--", cli.PROJECT_MARKER,
         check=False,
     ).returncode == 1
-    manifest = (root / ".ao" / "init-manifest.json").read_text(encoding="utf-8")
+    manifest = (root / ".polyctl" / "init-manifest.json").read_text(encoding="utf-8")
     assert cli.PROJECT_MARKER in manifest
 
     marker.write_text("wrong-version\n", encoding="utf-8")
@@ -1248,13 +1248,13 @@ def test_init_writes_exact_unstaged_marker_and_refuses_wrong_reinit(
     assert cli.cmd_init(cfg, _init_args(profile="agy-codex")) == 1
     output = _strip_colour(capsys.readouterr().out)
     assert cli.PROJECT_MARKER in output
-    assert "AO project state is missing/unreadable" in output
+    assert "polyctl project state is missing/unreadable" in output
     assert cli.PROJECT_INIT_COMMAND in output
     assert marker.read_text(encoding="utf-8") == "wrong-version\n"
 
 
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlinks unavailable")
-@pytest.mark.parametrize("relative", (".ao/config.json", cli.PROJECT_MARKER))
+@pytest.mark.parametrize("relative", (".polyctl/config.json", cli.PROJECT_MARKER))
 def test_init_refuses_broken_symlink_state_without_replacing_it(
     tmp_path, capsys, relative
 ):
@@ -1273,7 +1273,7 @@ def test_init_refuses_broken_symlink_state_without_replacing_it(
         target = target[len("\\\\?\\"):]      # Windows reads an absolute target back with the prefix it stored (#71)
     assert target == str(missing)
     assert not missing.exists()
-    assert "AO project state is missing/unreadable" in output
+    assert "polyctl project state is missing/unreadable" in output
     assert cli.PROJECT_INIT_COMMAND in output
 
 
@@ -1291,7 +1291,7 @@ def test_remove_is_two_phase_and_keeps_state_until_marker_commit(
     phase_one = _strip_colour(capsys.readouterr().out)
     assert "phase 1/2" in phase_one
     assert not marker.exists()
-    assert Path(root, ".ao", "config.json").exists()
+    assert Path(root, ".polyctl", "config.json").exists()
     assert cli._project_enrollment(root)["state"] == "enrolled"
 
     _git(root, "add", "-u", "--", cli.PROJECT_MARKER)
@@ -1304,14 +1304,14 @@ def test_remove_is_two_phase_and_keeps_state_until_marker_commit(
         "commit",
         "-q",
         "-m",
-        "decommission ao marker",
+        "decommission polyctl marker",
     )
     assert cli._project_enrollment(root)["state"] == "uninitialized"
 
     assert cli.cmd_remove(project, args) == 0
     phase_two = _strip_colour(capsys.readouterr().out)
     assert "phase 2/2 complete" in phase_two
-    assert not Path(root, ".ao").exists()
+    assert not Path(root, ".polyctl").exists()
 
 
 
@@ -1323,10 +1323,10 @@ def test_complete_hook_probe_namespace_never_falls_through_to_live_commit(
     nonce = "0" * 32
     index = os.path.abspath(os.path.join(root, ".git", "index"))
     head = _git(root, "rev-parse", "HEAD").stdout.strip()
-    monkeypatch.setenv("AO_HOOK_PROBE_NONCE", nonce)
-    monkeypatch.setenv("AO_HOOK_PROBE_PATH", ".ao-hook-probe-" + nonce)
-    monkeypatch.setenv("AO_HOOK_PROBE_HEAD", head)
-    monkeypatch.setenv("AO_HOOK_PROBE_INDEX", index)
+    monkeypatch.setenv("POLYCTL_HOOK_PROBE_NONCE", nonce)
+    monkeypatch.setenv("POLYCTL_HOOK_PROBE_PATH", ".polyctl-hook-probe-" + nonce)
+    monkeypatch.setenv("POLYCTL_HOOK_PROBE_HEAD", head)
+    monkeypatch.setenv("POLYCTL_HOOK_PROBE_INDEX", index)
     monkeypatch.setenv("GIT_INDEX_FILE", index)
 
     assert cli.cmd_commit_check(project, SimpleNamespace()) == 1
@@ -1334,7 +1334,7 @@ def test_complete_hook_probe_namespace_never_falls_through_to_live_commit(
 
     assert "hook execution challenge does not match the synthetic index" in output
     assert "no recorded authority decision" not in output
-    assert "AO-HOOK-PROBE-REFUSED" not in output
+    assert "POLYCTL-HOOK-PROBE-REFUSED" not in output
 
 
 def test_direct_commit_check_resolves_relative_index_from_root_not_caller_cwd(
@@ -1360,13 +1360,13 @@ def test_direct_commit_check_resolves_relative_index_from_root_not_caller_cwd(
 
     assert "no recorded authority decision" in output
     assert "active index marker query failed" not in output
-    assert "AO project state is missing/unreadable" not in output
+    assert "polyctl project state is missing/unreadable" not in output
 
 
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlinks unavailable")
 def test_project_config_reader_rejects_symlink_with_one_shared_problem(project):
     root = Path(project["root"])
-    config = root / ".ao" / "config.json"
+    config = root / ".polyctl" / "config.json"
     target = root / "config-target.json"
     target.write_text('{"project":"target"}\n', encoding="utf-8")
     config.unlink()
@@ -1375,23 +1375,23 @@ def test_project_config_reader_rejects_symlink_with_one_shared_problem(project):
     document = A.project_config_document(str(root))
     loaded = A.load_config(str(root))
 
-    assert document["problem"] == ".ao/config.json is not a regular file"
+    assert document["problem"] == ".polyctl/config.json is not a regular file"
     assert loaded["_config_problem"] == document["problem"]
     assert cli._project_config_problem(str(root)) == document["problem"]
 
 
 def _legacy_project(tmp_path, monkeypatch, name="legacy"):
-    """A project initialised before .ao-project existed: config, and no marker, ever."""
+    """A project initialised before .polyctl-project existed: config, and no marker, ever."""
     import json
     root = _init_repo(tmp_path / name)
-    (root / ".ao" / "ledger").mkdir(parents=True)
+    (root / ".polyctl" / "ledger").mkdir(parents=True)
     cfg = {
         "project": name, "mailbox": "agent-mail", "reviews": "semantic-review",
         "implementer": {"adapter": "kiro", "session": "s1", "name": "kiro"},
         "architect": {"name": "fable", "argv": ["claude", "-p", "{prompt}"]},
     }
-    (root / ".ao" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
-    (root / ".ao" / "board.md").write_text(
+    (root / ".polyctl" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    (root / ".polyctl" / "board.md").write_text(
         "# Board\n\n## running\n\n## blocked\n\n## queued\n\n## inbox\n\n## verified\n\n## done\n",
         encoding="utf-8",
     )
@@ -1400,16 +1400,16 @@ def _legacy_project(tmp_path, monkeypatch, name="legacy"):
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     monkeypatch.setattr(A, "HOME", str(home))
-    from ao import watchdog as W
-    monkeypatch.setattr(W, "STATE_DIR", str(home / ".ao"))
+    from polyctl import watchdog as W
+    monkeypatch.setattr(W, "STATE_DIR", str(home / ".polyctl"))
     return root, dict(cfg, root=str(root))
 
 
 def _legacy_absolute_hook(root):
-    """The hook an early ao init wrote: exec ao commit-check, with no guard at all.
+    """The hook an early polyctl init wrote: exec polyctl commit-check, with no guard at all.
 
-    The root is quoted as ao quoted it (PRE_COMMIT_HOOK). Written bare, a Windows root's backslashes are
-    escapes to sh and to shlex alike, so the body was no hook any ao wrote there, and read as ambiguous.
+    The root is quoted as polyctl quoted it (PRE_COMMIT_HOOK). Written bare, a Windows root's backslashes are
+    escapes to sh and to shlex alike, so the body was no hook any polyctl wrote there, and read as ambiguous.
     """
     path = Path(_git(root, "rev-parse", "--git-path", "hooks/pre-commit").stdout.strip())
     if not path.is_absolute():
@@ -1417,8 +1417,8 @@ def _legacy_absolute_hook(root):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(
         b"#!/bin/sh\n"
-        b"# agent-orchestrator: commit authority is bound to Git's exact active index.\n"
-        + f"exec ao -C {shlex.quote(str(root))} commit-check\n".encode("utf-8")
+        b"# polyctl: commit authority is bound to Git's exact active index.\n"
+        + f"exec polyctl -C {shlex.quote(str(root))} commit-check\n".encode("utf-8")
     )
     path.chmod(0o755)
     return path
@@ -1455,15 +1455,15 @@ def test_completed_removal_leaves_the_remaining_config_unenforced(tmp_path, monk
     root, _ = _legacy_project(tmp_path, monkeypatch)
     _enroll_project(root, commit=True)
     _git(root, "rm", "-q", "--", cli.PROJECT_MARKER)
-    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "decommission ao marker")
+    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "decommission polyctl marker")
 
-    assert (root / ".ao" / "config.json").exists()
+    assert (root / ".polyctl" / "config.json").exists()
     assert cli._project_enrollment(str(root))["state"] == "uninitialized"
 
 
 def test_legacy_project_with_unreadable_config_is_broken(tmp_path, monkeypatch, capsys):
     root, cfg = _legacy_project(tmp_path, monkeypatch)
-    (root / ".ao" / "config.json").write_text("{", encoding="utf-8")
+    (root / ".polyctl" / "config.json").write_text("{", encoding="utf-8")
 
     state = cli._project_enrollment(str(root))
     assert state["state"] == "broken"
@@ -1497,4 +1497,4 @@ def test_doctor_advises_adopting_the_project_in_one_command(tmp_path, monkeypatc
     assert "commit-hook" in problems
     assert cli.PROJECT_ADOPT_COMMAND in problems["commit-hook"]
     assert "restore tracked hooks with Git" not in problems["commit-hook"]
-    assert "ao hooks install" not in problems["commit-hook"]
+    assert "polyctl hooks install" not in problems["commit-hook"]

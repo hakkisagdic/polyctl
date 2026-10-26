@@ -3,8 +3,8 @@ import json
 import os
 from types import SimpleNamespace
 
-from ao import cli, lib as A
-from ao.storage import read_chained_jsonl
+from polyctl import cli, lib as A
+from polyctl.storage import read_chained_jsonl
 
 # Built at run time, so no credential-shaped literal sits in this file.
 ANTHROPIC = "s" + "k-ant-" + "api03-" + "Q7" * 14
@@ -52,7 +52,7 @@ def test_verification_records_are_written_scanned(project):
     A.record_verification(root, {"id": "V-1", "passed": False, "gates": [
         {"name": "test", "detail": f"Authorization: Bearer {GITHUB}{GITHUB}", "exit": 1}]})
 
-    text = open(os.path.join(root, ".ao", "ledger", "verifications.jsonl"), encoding="utf-8").read()
+    text = open(os.path.join(root, ".polyctl", "ledger", "verifications.jsonl"), encoding="utf-8").read()
     assert GITHUB not in text and "[redacted:" in text
 
 

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_review_chain import _fake, _repo_with_change
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="the filter here is a POSIX shell script named git")
@@ -24,7 +24,7 @@ def _filter_in_front_of_git(tmp_path, monkeypatch):
     script = shim / "git"
     script.write_text(f"#!/bin/sh\necho '{MANGLED}'\n", encoding="utf-8")
     script.chmod(0o755)
-    monkeypatch.delenv("AO_GIT", raising=False)
+    monkeypatch.delenv("POLYCTL_GIT", raising=False)
     monkeypatch.setenv("PATH", str(shim) + os.pathsep + os.environ.get("PATH", ""))
     return str(script)
 
@@ -38,7 +38,7 @@ def test_a_verification_under_a_mangling_filter_records_the_true_numbers(project
     subprocess.run(["git", "add", "src"], cwd=root, check=True)
     spec = {"gates": {"test": {"run": shlex.join([sys.executable, "-c", "print('ok')"]), "timeout": 30}},
             "profiles": {"quick": ["test"]}, "default_profile": "quick"}
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         json.dump(spec, fh)
     monkeypatch.setattr(A, "GATE_LOCK", str(tmp_path / "gate.lock"))
     head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True,

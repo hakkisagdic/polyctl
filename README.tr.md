@@ -1,17 +1,17 @@
 [English](README.md) | **Türkçe**
 
-# agent-orchestrator
+# polyctl
 
 **Yapay zekâ ajanlarının commit ettiği kod ya önce gözden geçirilir, ya bir kişi gözden
-geçirmesini atlar ya da ao onu işaretler.** Varsayılan olarak başka bir model ailesi, ajanın stage
+geçirmesini atlar ya da polyctl onu işaretler.** Varsayılan olarak başka bir model ailesi, ajanın stage
 ettiği değişikliğin tam kendisini gözden geçirir; git hook'u gerisini `git commit` anında reddeder.
-Bir defter her kararı kaydeder; ao atlanan bir değişikliği indikten sonra gözden geçirir, içeriğine
-hiçbir gözden geçirmenin ya da atlamanın izin vermediği bir commit'i de `ao doctor` ve watchdog
-işaretler. Bir kişi bir projede gözden geçirmeyi kayda geçerek kapatabilir, `ao features off review --by
+Bir defter her kararı kaydeder; polyctl atlanan bir değişikliği indikten sonra gözden geçirir, içeriğine
+hiçbir gözden geçirmenin ya da atlamanın izin vermediği bir commit'i de `polyctl doctor` ve watchdog
+işaretler. Bir kişi bir projede gözden geçirmeyi kayda geçerek kapatabilir, `polyctl features off review --by
 <ad>`; o projenin commit'leri o zaman yalnızca doğrulamayla iner.
 
 Zaten kullandığın kodlama ajanlarını bırakmazsın: Claude Code, Codex, Kiro, Qoder, OpenCode ve
-aşağıdaki tablodaki diğerleri. `ao` onların üstünde durur. Bir ajanın stage ettiği değişikliğin
+aşağıdaki tablodaki diğerleri. `polyctl` onların üstünde durur. Bir ajanın stage ettiği değişikliğin
 tam kendisinde gate'lerini koşturur, o değişikliği başka aileden bir modele gözden geçirtir ve
 yalnızca o değişikliğin commit edilmesine izin verir. Gerisini hook `git commit` anında reddeder;
 her karar, kurcalandığını belli eden bir deftere yazılır.
@@ -19,99 +19,99 @@ her karar, kurcalandığını belli eden bir deftere yazılır.
 ## Neden
 
 - **Ajanlar kimsenin okuyabileceğinden hızlı commit eder.** Bir ağaçta geçen test, commit edilen
-  ağaç hakkında hiçbir şey söylemez. `ao` commit yetkisini tek bir stage edilmiş ağaca verir; hook
+  ağaç hakkında hiçbir şey söylemez. `polyctl` commit yetkisini tek bir stage edilmiş ağaca verir; hook
   başka her ağacı reddeder.
 - **Kendi ailesinin işini gözden geçiren model, o ailenin kör noktalarını paylaşır.** Gözden
   geçiren varsayılan olarak başka bir model ailesindendir ya da adını verdiğin bir kişidir, ve
   yalnızca okuyan araçlarla çalışır.
-- **Araçlarını bırakmazsın.** `ao` her ajanın kendi oturum deposunu okur ve komut satırını sürer.
+- **Araçlarını bırakmazsın.** `polyctl` her ajanın kendi oturum deposunu okur ve komut satırını sürer.
   Benimsemek, işini yeni bir şeyin içinde yeniden başlatmak demek değildir.
 
 ## İlk gözden geçirilmiş commit'e beş dakika
 
-Önce görmek istersen `ao demo`, bir değişikliği geçici bir projede ao'dan geçirir ([demo](docs/demo.md)).
+Önce görmek istersen `polyctl demo`, bir değişikliği geçici bir projede polyctl'den geçirir ([demo](docs/demo.md)).
 
 ```bash
-pip install ao-orchestrator          # ya da: uv tool install ao-orchestrator
+pip install polyctl          # ya da: uv tool install polyctl
 cd deponun-yolu
-ao init --profile agy-codex          # agy (Gemini 4 Argon) yazar, Codex (gpt-6-luna) gözden geçirir; ya da codex-agy, claude-codex
-git add .ao-project .gitignore && git commit -m "adopt ao"
-ao hooks install                     # bundan sonra yalnızca yetki verilmiş aday commit edilir
+polyctl init --profile agy-codex          # agy (Gemini 4 Argon) yazar, Codex (gpt-6-luna) gözden geçirir; ya da codex-agy, claude-codex
+git add .polyctl-project .gitignore && git commit -m "adopt polyctl"
+polyctl hooks install                     # bundan sonra yalnızca yetki verilmiş aday commit edilir
 ```
 
 Sonra, ajanının stage ettiği her değişiklik için:
 
 ```bash
-ao status                            # ajanların ne yapıyor, ne seni bekliyor
-ao verify                            # gate'lerin, stage edilmiş adayda
-ao review                            # başka aileden bir model tam o adayı gözden geçirir
-ao commit-ok                         # inebilir mi? kanıttan karar, reddin sebebiyle
-ao commit -m "feat: ne değişti"      # commit et; trailer'larıyla o kanıta bağlı
+polyctl status                            # ajanların ne yapıyor, ne seni bekliyor
+polyctl verify                            # gate'lerin, stage edilmiş adayda
+polyctl review                            # başka aileden bir model tam o adayı gözden geçirir
+polyctl commit-ok                         # inebilir mi? kanıttan karar, reddin sebebiyle
+polyctl commit -m "feat: ne değişti"      # commit et; trailer'larıyla o kanıta bağlı
 ```
 
-[Başlarken](docs/getting-started.md) bunu adım adım anlatır; `ao prove` güvenceleri anlatmak
+[Başlarken](docs/getting-started.md) bunu adım adım anlatır; `polyctl prove` güvenceleri anlatmak
 yerine atılacak bir adayda koşturur. [Profiller](docs/profiles.md) farklı ailelerden üç hazır
 kurulum sunar — `agy-codex` (`antigravity` `verified: full`, Gemini 4 Argon uygulayıcı ve `codex`
 `verified: partial`, `gpt-6-luna` gözden geçiren), `codex-agy` (`codex` `verified: partial`,
 `gpt-6-astra` uygulayıcı ve `antigravity` `verified: full`, Gemini 4 Argon salt okunur gözden
 geçiren ajanı) ve `claude-codex` (`claude-code` `verified: full` uygulayıcı ve `codex` `verified:
 partial`, `gpt-6-luna` gözden geçiren); her birinde mimar `claude-code` (`verified: full`). Her rol
-için tek harness kullanıyorsan (`--implementer claude-code`) `ao init` bir
+için tek harness kullanıyorsan (`--implementer claude-code`) `polyctl init` bir
 [gözden geçirme katmanı](docs/roles.md#review-tiers) ister: aynı aileden başka bir model ("daha
 zayıf bağımsızlık" etiketiyle) ya da bir kişi.
 
-`ao status`, ana oturum yavaşlarken, durmuşken veya boştayken en son etkin olan ikincil
-projeyi gösterir. `ao doctor`, `AO_GIT` ile seçilen bir betiği ve tanımadığı shell
+`polyctl status`, ana oturum yavaşlarken, durmuşken veya boştayken en son etkin olan ikincil
+projeyi gösterir. `polyctl doctor`, `POLYCTL_GIT` ile seçilen bir betiği ve tanımadığı shell
 hook'larını olası filtreler olarak bildirir; bkz. [gate'ler](docs/gates.md).
 
 ## Bir değişiklik nasıl iner
 
 ```text
 ajan düzenler ve stage eder
-  -> ao verify      gate'lerin, sonuçta hiçbir çıkarı olmayan bir şey tarafından yeniden koşturulur
-  -> ao review      başka bir model ailesi o adayı ve etrafındaki kodu okur
-  -> ao commit-ok   tam o ağaç için commit yetkisi, kanıttan verilir
-  -> ao commit      commit, onu yetkiye bağlayan trailer'ları taşır
+  -> polyctl verify      gate'lerin, sonuçta hiçbir çıkarı olmayan bir şey tarafından yeniden koşturulur
+  -> polyctl review      başka bir model ailesi o adayı ve etrafındaki kodu okur
+  -> polyctl commit-ok   tam o ağaç için commit yetkisi, kanıttan verilir
+  -> polyctl commit      commit, onu yetkiye bağlayan trailer'ları taşır
 pre-commit hook'u başka her commit'i reddeder; push asla yetkilendirilmez
 ```
 
 ## Başka ne yapar
 
-- **İzler.** `ao watch` canlı bir panel: her ajan ne yapıyor, bağlam ve maliyet, açık gözden
+- **İzler.** `polyctl watch` canlı bir panel: her ajan ne yapıyor, bağlam ve maliyet, açık gözden
   geçirmeler, board, ve bir ajanın *meşgul ama hiçbir şey üretmiyor* olup olmadığı.
 - **Yeniden başlatır.** Bir watchdog, iş ortasında duran bir turu fark eder ve dürter - asla bir
   sağlayıcı kesintisine, tur bütçesinin ötesine ya da bir kişinin devraldığı ağaca değil; bir ajanın
-  oraya yazdığı hook'lar ya da talimatlar bir kişinin okumasını beklerken de değil (`ao harness seen`).
+  oraya yazdığı hook'lar ya da talimatlar bir kişinin okumasını beklerken de değil (`polyctl harness seen`).
 - **Durmaz.** Önceden yetkilendirilmiş işlerden oluşan bir board: seni bekleyen dilim sebebiyle
   park edilir, kuyruk boşalınca onu doldurması için mimar uyandırılır.
-- **Telafi eder.** Atladığın bir gözden geçirme kaydedilir; `ao catchup` inen aralığı sonradan
+- **Telafi eder.** Atladığın bir gözden geçirme kaydedilir; `polyctl catchup` inen aralığı sonradan
   başka aileden bir gözden geçirene inceletir.
-- **Güvenle gözden geçirir.** Gözden geçiren yalnızca okuyan araçlarla çalışır ve ao bunu her
+- **Güvenle gözden geçirir.** Gözden geçiren yalnızca okuyan araçlarla çalışır ve polyctl bunu her
   harness için ölçer: kiro-cli, soracak kişi yokken güvenilmeyen araçları yine de çalıştırdığı
-  için Kiro gözden geçireni, ao'nun onun için yazdığı salt okur bir ajan olarak koşar.
+  için Kiro gözden geçireni, polyctl'in onun için yazdığı salt okur bir ajan olarak koşar.
 
 Her komut [docs/commands.tr.md](docs/commands.tr.md) içinde.
 
 ## Kurulum
 
-`pip install ao-orchestrator`, `uv tool install ao-orchestrator` ya da
-`brew install hakkisagdic/tap/agent-orchestrator`. Bilerek bağımlılık yok: ao, kontrol etmediği
+`pip install polyctl`, `uv tool install polyctl` ya da
+`brew install hakkisagdic/tap/polyctl`. Bilerek bağımlılık yok: polyctl, kontrol etmediği
 makinelerde ajanları izler ve bağımlılık tam orada eksik olabilecek bir şeydir. Hiçbir şey
 kurmadan, macOS'un ve çoğu Linux dağıtımının getirdiği Python ile bir klondan çalışır:
 
 ```bash
-git clone https://github.com/hakkisagdic/agent-orchestrator ~/ao
-mkdir -p ~/.local/bin && ln -s ~/ao/bin/ao ~/.local/bin/ao    # ~/.local/bin PATH'te olmalı
+git clone https://github.com/hakkisagdic/polyctl ~/polyctl
+mkdir -p ~/.local/bin && ln -s ~/polyctl/bin/polyctl ~/.local/bin/polyctl    # ~/.local/bin PATH'te olmalı
 ```
 
-Kabuk alias'ı değil, symlink: ao'nun commit hook'unu çalıştıran `/bin/sh` de, watchdog'un senin
-kabuğun olmadan başlattığı ajan da alias'ı göremez. **Windows**'ta `bin/ao.ps1`, hiçbir şey
+Kabuk alias'ı değil, symlink: polyctl'in commit hook'unu çalıştıran `/bin/sh` de, watchdog'un senin
+kabuğun olmadan başlattığı ajan da alias'ı göremez. **Windows**'ta `bin/polyctl.ps1`, hiçbir şey
 kurmadan `status`, `board` ve `doctor`'ı karşılar; gerisi için
-`winget install Python.Python.3.12 && pip install ao-orchestrator` ([windows](docs/windows.md)).
+`winget install Python.Python.3.12 && pip install polyctl` ([windows](docs/windows.md)).
 
-ao'yu yönettiği projelerin dışına kur, asla birinin içindeki bir `.venv`'e değil: oraya bir ajan
-yazabilir ve Python, orada bıraktığı bir `.pth` dosyasını ao başlamadan çalıştırır. ao böyle bir
-dosyanın adını verir, `ao doctor` da ağacın içindeki bir kurulumu söyler
+polyctl'i yönettiği projelerin dışına kur, asla birinin içindeki bir `.venv`'e değil: oraya bir ajan
+yazabilir ve Python, orada bıraktığı bir `.pth` dosyasını polyctl başlamadan çalıştırır. polyctl böyle bir
+dosyanın adını verir, `polyctl doctor` da ağacın içindeki bir kurulumu söyler
 ([safety](docs/safety.md#what-python-runs-as-it-starts-from-inside-the-tree)).
 
 > **Nereden çıktı.** Haftalarca tam olarak bu döngüyle geliştirilen 30 epic'lik
@@ -139,7 +139,7 @@ Bunlar üslup tercihi değil. Her biri gerçek saatlere mal olmuş bir arıza.
 
 ## Ajan desteği
 
-`ao` her ajanın kendi oturum deposunu okur; adaptör nerede ve hangi biçimde olduğunu
+`polyctl` her ajanın kendi oturum deposunu okur; adaptör nerede ve hangi biçimde olduğunu
 söyler.
 
 | doğrulama | adaptörler |
@@ -149,13 +149,13 @@ söyler.
 | **documented** — yayımlanmış dokümandan yazıldı, henüz koşulmadı | cursor-agent |
 | **untested** — şema hazır, ilk koşumu bekliyor | gemini, aider, amp, copilot, amazon-q, deepseek, ollama, droid, grok, hermes, kilocode, kimi, omp, pi, pr-agent, qwen, reasonix, trae |
 
-Warp, `oz` kullanır; ao, PATH üzerinde olmasa da programı `/Applications` veya
-`~/Applications` altındaki Warp uygulama paketinde bulur. `ao init --agent warp`
+Warp, `oz` kullanır; polyctl, PATH üzerinde olmasa da programı `/Applications` veya
+`~/Applications` altındaki Warp uygulama paketinde bulur. `polyctl init --agent warp`
 yalnızca dosyalarla çalışan kurulumu yapar; Warp için MCP kaydı oluşturmaz.
 Yanıtlar ve oturumlar henüz ölçülmedi; Warp inceleyici olarak uygun değildir.
 [Ölçüm notu](docs/audit/2026-10-15-warp-store.md).
 
-`ao adapters` bu tabloyu makinende gerçekte kurulu olanla yan yana gösterir; ve
+`polyctl adapters` bu tabloyu makinende gerçekte kurulu olanla yan yana gösterir; ve
 [keyflip](https://github.com/hakkisagdic/keyflip) varsa, CLI kurulu olmasa bile hesap
 olup olmadığını söyler. Yeni adaptör bir JSON dosyasıdır;
 [`docs/adapters.md`](docs/adapters.md).
@@ -180,6 +180,6 @@ lane'ler, bir lane'in rolü ve birleştirme kuyruğu bunlardan) ve projeler aras
 **koşum** (görünüm var; birkaç uygulayıcıyı aynı anda çalıştırmak makine gate kilidine bağlandı
 ama gerçek yükte denenmedi).
 
-ao'nun kendi defterlerinin bu depoda güvence hakkında gösterdikleri, ölçülmüş olarak: [kanıt](docs/evidence.md).
+polyctl'in kendi defterlerinin bu depoda güvence hakkında gösterdikleri, ölçülmüş olarak: [kanıt](docs/evidence.md).
 
 MIT.

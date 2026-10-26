@@ -1,6 +1,6 @@
 import os
 
-from ao import lib as A
+from polyctl import lib as A
 
 
 def _touch(dirpath, name="claude"):

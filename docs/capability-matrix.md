@@ -3,12 +3,12 @@
 The capability matrix is an **opt-in, fail-closed** declaration of which provider,
 model and tool a role intends to use. It gives review evidence and commit authority
 a stable, vendor-neutral identity to compare. Provider, model, tool, binding and
-family identifiers are project-owned opaque declarations; `ao` has no built-in
+family identifiers are project-owned opaque declarations; `polyctl` has no built-in
 vendor or model-family table.
 
 ## Version 1
 
-`.ao/config.json` may add a top-level `capability_matrix` and role binding
+`.polyctl/config.json` may add a top-level `capability_matrix` and role binding
 references:
 
 ```json
@@ -107,7 +107,7 @@ implementer `adapter`/`model` fields are configuration errors.
 A strict reviewer is ineligible when its binding equals the implementer binding
 **or** its bound model has the same `family` as the implementer's bound model.
 Inline `reviewer.family` and fallback `family` fields cannot change this: family
-comes only from the model declaration. Ineligible routes are never spawned. `ao`
+comes only from the model declaration. Ineligible routes are never spawned. `polyctl`
 continues in declaration order to the first independently eligible fallback.
 
 The one exception is the same-family [review tier](roles.md#review-tiers): once a
@@ -116,19 +116,19 @@ binding whose bound model has the implementer's family and a different `argument
 is eligible, and its reviews are labeled `same family: weaker independence`. The
 implementer's own binding, and a binding of the same model argument, never are.
 
-A retrospective review of a waived range (`ao catchup`) reviews whoever wrote the
+A retrospective review of a waived range (`polyctl catchup`) reviews whoever wrote the
 range, who need not hold the implementer binding by then. Its independence is judged
 against the family that wrote it instead: a binding whose bound model has that family
 is ineligible, and the implementer binding may review what another family wrote. The
 family comes from the grant under the waiver - the implementer binding's family when
-ao started the implementer's turn - or from a person, with
-`ao catchup --author-family <family> --by <name>`.
+polyctl started the implementer's turn - or from a person, with
+`polyctl catchup --author-family <family> --by <name>`.
 
 Among eligible reviewers, existing runtime behavior is preserved. Missing tools,
 timeouts, silence, quota and authentication failures advance to the next eligible
 fallback. A substantive response with malformed review output becomes `INVALID`;
 it does not shop the candidate to another reviewer. If every eligible route is
-runtime-unavailable, `ao review` exits 3 and records no review round.
+runtime-unavailable, `polyctl review` exits 3 and records no review round.
 
 ## Migration boundary
 
@@ -139,18 +139,18 @@ The boundary is the presence of the top-level key:
 - **Present:** strict version-1 validation applies. A malformed matrix fails
   closed and never falls back to legacy behavior.
 
-`ao init --profile ...` continues to write legacy role blocks. It does not opt an
+`polyctl init --profile ...` continues to write legacy role blocks. It does not opt an
 existing or new project into strict mode. Add the matrix and binding references as
 one deliberate configuration change. After opt-in, legacy review evidence cannot
 authorize a commit; after opt-out, a strict grant cannot authorize one either.
 
 Review-off or an explicit review waiver still bypasses the review gate, but the
 strict matrix and implementer identity must remain valid. Strict grants retain the
-safe matrix digest and identity needed for `ao commit-check` to detect later drift.
+safe matrix digest and identity needed for `polyctl commit-check` to detect later drift.
 
 ## Declared, not attested
 
-The matrix proves **configuration consistency**, not provider truth. `ao` does not
+The matrix proves **configuration consistency**, not provider truth. `polyctl` does not
 ask a provider which model actually ran, cryptographically attest a process, or
 verify that a declared family accurately describes a model. Evidence therefore
 means “these validated declarations selected this process,” not “the provider

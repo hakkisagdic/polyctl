@@ -19,7 +19,7 @@ is why the mailbox has been reliable. But deletion was never the guarantee itsel
 is that **the unhandled queue cannot drift from the truth** — and deletion buys it by destroying
 the record. The costs showed up in practice: a handled message is gone, so there is no corpus to
 search and #43 has nothing to read; a mailbox lives inside one repository, so an implementer had
-to file an agent-orchestrator finding into another project's mailbox because that was the only
+to file an polyctl finding into another project's mailbox because that was the only
 one it had; and one recipient is all a file can have.
 
 Deriving the queue from an absent handling record keeps the guarantee exactly — nothing is
@@ -43,7 +43,7 @@ the object store that is already installed and put the semantics on top:
 | search | `git log -S`, `git grep` over the ref |
 | reading without coordination | objects are immutable; readers take no lock |
 
-The store is a dedicated ref — `refs/ao/mail` — never a product branch, so message history never
+The store is a dedicated ref — `refs/polyctl/mail` — never a product branch, so message history never
 enters the code history. Local disk holds a recent window; older bodies compact to a stub
 carrying the digest and a pointer, and the full record stays in the ref.
 
@@ -99,49 +99,49 @@ pages anyone (notification belongs to the scheduled watcher), and a resolution i
 than the raise. Escalation by age belongs to `needs-decision` alone.
 
 What exists today, before the store below: a message declares its class in its envelope
-(`ao mail send --class needs-decision`), or it is read from its kind and headings. Unseen-message classification reads up to
+(`polyctl mail send --class needs-decision`), or it is read from its kind and headings. Unseen-message classification reads up to
 1,000,000 characters of the body, so a decision heading after a long introduction still
 escalates; beyond that bound, declare the class explicitly in the envelope. When a
-reader's own command puts a message in front of it - `ao mail list` or `read`, `ao_inbox`,
-the urgent banner - `.ao/ledger/mail.jsonl` records `seen` once, apart from deletion, so
+reader's own command puts a message in front of it - `polyctl mail list` or `read`, `polyctl_inbox`,
+the urgent banner - `.polyctl/ledger/mail.jsonl` records `seen` once, apart from deletion, so
 "nobody has been shown this" is no longer the same as "someone is working on it". An
 unseen `needs-decision` message climbs the ladder by age: past `mail.unseen_yellow_minutes`
 the architect is told, past `mail.unseen_orange_minutes` a person's desktop and phone, past
 `mail.unseen_red_minutes` e-mail, unless an alarm to a person already tells it, whose ladder it
-then follows ([alarms.md](alarms.md)). `ao status` names the oldest unseen message and its age.
+then follows ([alarms.md](alarms.md)). `polyctl status` names the oldest unseen message and its age.
 
-*In ao since slice JSON-OUTPUT: `ao status --json` names the marked messages and the unseen ones
-and records none of them as seen, under any AO_ROLE, as `ao_status` records none. A program reads
+*In polyctl since slice JSON-OUTPUT: `polyctl status --json` names the marked messages and the unseen ones
+and records none of them as seen, under any POLYCTL_ROLE, as `polyctl_status` records none. A program reads
 that document - a status bar, a scheduled job - and a message recorded as seen by a reader who never
 saw it would never climb the ladder.*
 
-Every message ao writes is created under a name no file or recorded message has: a second message of the same minute and
+Every message polyctl writes is created under a name no file or recorded message has: a second message of the same minute and
 subject is written beside the first, `-2` after its name and on, never over it, and the name it was
-written under is the one ao prints, records and puts in its envelope. A link left at a message's name
+written under is the one polyctl prints, records and puts in its envelope. A link left at a message's name
 is not written through. Acknowledging a message removes its view, but never frees its ID.
-On Windows, a native exclusive open refuses even a dangling link at that name; where ao has
+On Windows, a native exclusive open refuses even a dangling link at that name; where polyctl has
 no API to create without following a link, it refuses the write and says why (WINDOWS-TESTS-7).
 
 *Before TRIAGE-2-MEDIUM, a message was written over whatever stood at its name, so a second
-`ao note`, `ao mail send`, `ao_report` or hold release of the same minute and subject replaced the
+`polyctl note`, `polyctl mail send`, `polyctl_report` or hold release of the same minute and subject replaced the
 first, two writers that each found a name free both wrote to it, and a link left at the name was
 written through. SECRETS-2 keeps that writer as the sole allocator, including for handoffs and
 pull-request mail, and checks sends after acknowledgement and races for a numbered name.
 `tests/test_secrets_2.py`.*
 
 With `mail.store` set to `append-only`, nothing is deleted to prove it was handled. Each message
-is taken into `.ao/mail/store/` and a chained `.ao/ledger/mail-store.jsonl` row the first time the
-watchdog or a mail command sees it; `ao mail ack` and `ao_ack` append a `handled` record naming who
+is taken into `.polyctl/mail/store/` and a chained `.polyctl/ledger/mail-store.jsonl` row the first time the
+watchdog or a mail command sees it; `polyctl mail ack` and `polyctl_ack` append a `handled` record naming who
 handled it and how; and the unhandled queue is derived - a stored message with no handling record.
 The mailbox directory becomes a view of that queue: a file removed without a handling record is put
 back, because the actor deciding what was handled must not also be able to erase the question.
-`ao mail compact <days>` collapses bodies older than that many days - or than `12h`, `yesterday` or a
+`polyctl mail compact <days>` collapses bodies older than that many days - or than `12h`, `yesterday` or a
 date - to a stub with their digest and an archive pointer, and a stub still answers "unhandled".
-`ao room search` reads the stored messages of every registered
+`polyctl room search` reads the stored messages of every registered
 project. The default stays `deletion` until an implementer's steering says to acknowledge rather
 than delete; switching a live project first, with the old steering, would hand its handled mail back.
 
-`ao mail sync` takes the store off the machine. Locally it is committed under `refs/ao/mail`, a
+`polyctl mail sync` takes the store off the machine. Locally it is committed under `refs/polyctl/mail`, a
 dedicated ref that is never a product branch and never pushed to the product's remote. The sync
 target is one private repository holding every project's mail under `refs/mail/<project>`, named
 per project as `mail.sync_repo` - opt-in, and refused when it is the product's own remote, in any of
@@ -153,8 +153,8 @@ as git picks it - and the product's own remote is every URL origin fetches from 
 any config file, as written and as git rewrites it. At push time the host is asked whether the repository is private (a directory on this
 machine counts as private, and a URL is told from a directory as git tells it, so `host:path` is a
 host); GitHub is asked only about a repository on github.com itself. A public or unknown one is
-refused, named and logged, and so is a host ao cannot ask, such as an SSH alias. Every record is scanned for credentials before it leaves, compacted archives
-included. `ao doctor` reports a store whose ledger has moved past its private copy, a store never
+refused, named and logged, and so is a host polyctl cannot ask, such as an SSH alias. Every record is scanned for credentials before it leaves, compacted archives
+included. `polyctl doctor` reports a store whose ledger has moved past its private copy, a store never
 synced, and a target it could not verify or read. The concentration risk is real and stated: that one repository holds every
 project's decisions.
 
@@ -162,9 +162,9 @@ project's decisions.
 
 Two layers, because they answer different questions.
 
-**Local — `refs/ao/mail` in the project itself.** Works offline, needs no configuration, and is
+**Local — `refs/polyctl/mail` in the project itself.** Works offline, needs no configuration, and is
 never pushed to the product's own remote. That last clause is not caution, it is a fact about this
-repository: `hakkisagdic/agent-orchestrator` is **public**. Pushing a mail ref to a project's own
+repository: `hakkisagdic/polyctl` is **public**. Pushing a mail ref to a project's own
 remote would publish every decision, boundary, refusal and diff excerpt in its coordination — for
 this project, to the world. A side ref feels private and is not.
 
@@ -172,9 +172,9 @@ this project, to the world. A side ref feels private and is not.
 namespace (`refs/mail/<project>`). This is what makes the model worth the change:
 
 - **Cross-project addressing stops being a hack.** The reason a room is wanted at all is that mail
-  is trapped per repository — an implementer had to file an agent-orchestrator finding into
+  is trapped per repository — an implementer had to file an polyctl finding into
   another project's mailbox because that was the only one it had. Per-project refs inside each
-  product repo keep that trap; one mail repository removes it, and `ao room search` spans
+  product repo keep that trap; one mail repository removes it, and `polyctl room search` spans
   everything by construction.
 - **Visibility is decided once, correctly.** One private repository, no dependence on each product
   repo happening to be private.
@@ -227,7 +227,7 @@ already implied by the three records, and costs no new writing:
   in a new subsystem.
 - **Cross-project addressing.** A recipient is a role in a project; a message may name another
   project's role, which is what an implementer needed when it had to file a finding about
-  agent-orchestrator into a different project's mailbox.
+  polyctl into a different project's mailbox.
 
 What deliberately stays out: reactions, presence, priorities beyond the four classes, read
 receipts finer than `seen`, attachments. Those are chat features. This is a coordination log, and
@@ -246,7 +246,7 @@ by design, with `docs/safety.md` already conceding that a process running as the
 *detected*, not excluded. A chain of blocks on one disk, signed by a key on the same disk, is a
 longer hash chain with ceremony: whoever can rewrite the log can rewrite the chain.
 
-The affordable form of the same idea is already in the plan. When `refs/ao/mail` and the ledgers
+The affordable form of the same idea is already in the plan. When `refs/polyctl/mail` and the ledgers
 are pushed (#83), **the remote is the witness**: it holds what the local machine published, and a
 later attempt to rewrite that history shows up as a non-fast-forward push rather than a silent
 edit. One honest sentence of protection, for the cost of a `git push`, and it fails visibly rather

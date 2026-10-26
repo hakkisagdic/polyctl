@@ -1,12 +1,12 @@
 """tools/evidence.py measures what a checkout's ledgers show about the guarantee, and only reads (EVIDENCE).
 
-docs/evidence.md gives numbers about ao's own repository - commits whose tree a grant bound, trailers that match the
+docs/evidence.md gives numbers about polyctl's own repository - commits whose tree a grant bound, trailers that match the
 grant they name, reviews by kind, verdict, family and tier, waivers opened and how each closed - and a reader can make
 each again only if the tool that printed them counts right. These build a checkout whose answer is known - a commit
 no grant bound, a commit after the first trailers that carries none, a review by the author's own family, an
 artefact whose bytes changed, a waiver still open - and measure it as a reader would: in the checkout, from a copy of
 its ledgers, and in a clone that keeps none. A ledger whose chain does not validate is said, and nothing is measured.
-Platform lane runs recorded by `ao evidence` in `.ao/ledger/platform-runs.jsonl` are held below too (LANE-EVIDENCE).
+Platform lane runs recorded by `polyctl evidence` in `.polyctl/ledger/platform-runs.jsonl` are held below too (LANE-EVIDENCE).
 """
 import json
 import os
@@ -16,7 +16,7 @@ import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests import standin
 
 TOOL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "evidence.py")
@@ -94,7 +94,7 @@ def _files(folder):
 
 def test_a_checkout_s_answer_is_measured_as_it_is_and_nothing_in_it_is_written(project):
     root = _checkout(project)
-    before = _files(os.path.join(root, ".ao"))
+    before = _files(os.path.join(root, ".polyctl"))
 
     code, out, _ = _measure("--root", root, "--rev", "HEAD", "--json")
 
@@ -119,8 +119,8 @@ def test_a_checkout_s_answer_is_measured_as_it_is_and_nothing_in_it_is_written(p
     w = found["waivers"]
     assert (w["opened"], w["closed"], len(w["open"]), w["gates"]) == (3, 2, 1, {"review": 3})
     assert w["outcomes"] == {"review APPROVED": 1, "move proof": 1}
-    # It only read: no lock file was made beside a ledger, and no byte under .ao/ changed.
-    assert _files(os.path.join(root, ".ao")) == before
+    # It only read: no lock file was made beside a ledger, and no byte under .polyctl/ changed.
+    assert _files(os.path.join(root, ".polyctl")) == before
 
 
 def test_the_report_says_each_number_as_a_line(project):
@@ -138,7 +138,7 @@ def test_the_report_says_each_number_as_a_line(project):
 def test_a_copy_of_the_ledgers_measures_as_the_checkout_does_and_a_clone_checks_the_trailers_alone(project, tmp_path):
     root = _checkout(project)
     state = tmp_path / "state"
-    shutil.copytree(os.path.join(root, ".ao"), state / ".ao")
+    shutil.copytree(os.path.join(root, ".polyctl"), state / ".polyctl")
     shutil.copytree(os.path.join(root, "semantic-review"), state / "semantic-review")
     clone = tmp_path / "clone"
     _git(str(tmp_path), "clone", "-q", root, str(clone))
@@ -155,8 +155,8 @@ def test_a_copy_of_the_ledgers_measures_as_the_checkout_does_and_a_clone_checks_
 def test_a_ledger_whose_chain_does_not_validate_is_named_and_nothing_is_measured(project, tmp_path):
     root = _checkout(project)
     state = tmp_path / "state"
-    shutil.copytree(os.path.join(root, ".ao"), state / ".ao")
-    ledger = state / ".ao" / "ledger" / "authority.jsonl"
+    shutil.copytree(os.path.join(root, ".polyctl"), state / ".polyctl")
+    ledger = state / ".polyctl" / "ledger" / "authority.jsonl"
     ledger.write_text(ledger.read_text(encoding="utf-8").replace('"C-1"', '"C-9"'), encoding="utf-8")
 
     code, out, err = _measure("--root", root, "--state", str(state), "--rev", "HEAD")
@@ -175,7 +175,7 @@ def _tool():
 
 def test_an_empty_authority_ledger_is_passed_as_itself_and_counts_no_grant_on_record(tmp_path):
     """EVIDENCE-2, from the review of EVIDENCE: `tokens if authority else None` read an empty ledger as no ledger. The
-    trailers are held to the ledger as `ao commit-check` holds them - a grant the checkout's ledger does not hold fails
+    trailers are held to the ledger as `polyctl commit-check` holds them - a grant the checkout's ledger does not hold fails
     nothing, since a grant stays in the ledger of the checkout that made it - and the grant is counted as not on
     record."""
     root = str(tmp_path / "repo")
@@ -185,7 +185,7 @@ def test_an_empty_authority_ledger_is_passed_as_itself_and_counts_no_grant_on_re
         fh.write("a\n")
     _git(root, "add", "a.txt")
     tree = _git(root, "write-tree").strip()
-    _git(root, "commit", "-q", "-m", "a", "-m", f"Ao-Grant: C-1\nAo-Tree: {tree}\nAo-Verification: V-1\nAo-Review: r.md")
+    _git(root, "commit", "-q", "-m", "a", "-m", f"Polyctl-Grant: C-1\nPolyctl-Tree: {tree}\nPolyctl-Verification: V-1\nPolyctl-Review: r.md")
     tool = _tool()
 
     measured = tool._commits(root, "HEAD", [])
@@ -315,8 +315,8 @@ def test_doctor_is_quiet_without_a_recorded_run(project):
 
 def test_plain_or_uncheckpointed_rows_are_refused_as_current_evidence(project, tmp_path, monkeypatch, capsys):
     """LANE-EVIDENCE, from the review: `platform_runs` read plain legacy rows with no chain or checkpoint, so an
-    implementer could edit `.ao/ledger/platform-runs.jsonl` before any chained append to claim green at HEAD
-    and have `ao evidence show`, `ao gain`, and `ao doctor --check` treat it as green."""
+    implementer could edit `.polyctl/ledger/platform-runs.jsonl` before any chained append to claim green at HEAD
+    and have `polyctl evidence show`, `polyctl gain`, and `polyctl doctor --check` treat it as green."""
     root = project["root"]
     first = _head(root)
     gh = FakeGh(tmp_path, monkeypatch, root=root)
@@ -333,9 +333,9 @@ def test_plain_or_uncheckpointed_rows_are_refused_as_current_evidence(project, t
 
     assert A.platform_runs(root) == []
     assert cli.cmd_evidence(project, _args()) == 0
-    assert "does not record ao appending" in capsys.readouterr().out
+    assert "does not record polyctl appending" in capsys.readouterr().out
     problems = dict(cli.doctor_problems(project))
-    assert "evidence-unattested" in problems and "does not record ao appending" in problems["evidence-unattested"]
+    assert "evidence-unattested" in problems and "does not record polyctl appending" in problems["evidence-unattested"]
     assert "evidence-red:windows" not in problems
     assert cli.cmd_evidence(project, _args(action="record", platform="windows", run="new")) == 1
     assert "could not be written" in capsys.readouterr().out
@@ -345,7 +345,7 @@ def test_plain_or_uncheckpointed_rows_are_refused_as_current_evidence(project, t
                              "run": "forged", "conclusion": "success", "suite": "full"}) + "\n")
     assert A.platform_runs(root) == []
     problems = dict(cli.doctor_problems(project))
-    assert "evidence-unattested" in problems and "does not record ao appending" in problems["evidence-unattested"]
+    assert "evidence-unattested" in problems and "does not record polyctl appending" in problems["evidence-unattested"]
     assert cli.cmd_evidence(project, _args(action="record", platform="windows", run="new")) == 1
     capsys.readouterr()
 
@@ -384,7 +384,7 @@ def test_show_says_no_run_was_recorded_instead_of_zero(project, capsys):
     assert cli.cmd_evidence(project, _args()) == 0
 
     out = capsys.readouterr().out
-    assert "no platform run recorded" in out and ".ao/ledger/platform-runs.jsonl" in out
+    assert "no platform run recorded" in out and ".polyctl/ledger/platform-runs.jsonl" in out
 
 
 def test_a_rerun_in_the_same_second_replaces_the_earlier_run_by_ledger_order(project, tmp_path, monkeypatch, capsys):
@@ -599,7 +599,7 @@ class FakeGh:
 
 
 def test_record_reads_the_run_from_gh_and_takes_no_caller_asserted_outcome(project, tmp_path, monkeypatch, capsys):
-    """LANE-EVIDENCE, from the review: `ao evidence record` promoted caller-asserted `--passed 0 --commit HEAD`
+    """LANE-EVIDENCE, from the review: `polyctl evidence record` promoted caller-asserted `--passed 0 --commit HEAD`
     to a green attestation without checking that the lane ran. Evidence comes from CI through `gh`, never from
     what the caller asserts."""
     root = project["root"]
@@ -739,7 +739,7 @@ def test_unattested_rows_leave_attested_prefix_readable_and_clone_records_its_ow
     """LANE-EVIDENCE, from the review: `_require_checkpointed_runs` refused the whole ledger whenever its row count
     did not equal this machine's checkpoint count, breaking a clone/CI runner/moved checkout and discarding attested
     rows when an unattested row was appended after them."""
-    from ao.storage import CHAIN_PREVIOUS_FIELD, chained_row_digest
+    from polyctl.storage import CHAIN_PREVIOUS_FIELD, chained_row_digest
     monkeypatch.setattr(A, "session_paths", lambda cfg: (None, None))
     root = project["root"]
     first = _head(root)
@@ -760,26 +760,26 @@ def test_unattested_rows_leave_attested_prefix_readable_and_clone_records_its_ow
     assert [row["run"] for row in A.platform_runs(root)] == ["1"]
     assert cli.cmd_evidence(project, _args()) == 0
     show_out = capsys.readouterr().out
-    assert "the first 1 row(s) are ao's own and stay" in show_out and "run 1" in show_out
+    assert "the first 1 row(s) are polyctl's own and stay" in show_out and "run 1" in show_out
     problems = dict(cli.doctor_problems(project))
     assert "evidence-unattested" in problems
-    assert "the first 1 row(s) are ao's own and stay" in problems["evidence-unattested"]
+    assert "the first 1 row(s) are polyctl's own and stay" in problems["evidence-unattested"]
     assert "evidence-red:windows" in problems
     assert cli.cmd_evidence(project, _args(action="record", platform="windows", run="2")) == 1
-    assert "the first 1 row(s) are ao's own and stay" in capsys.readouterr().out
+    assert "the first 1 row(s) are polyctl's own and stay" in capsys.readouterr().out
 
     with open(ledger, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(existing[0]) + "\n")
     other_checkpoints = tmp_path / "other-machine-checkpoints.json"
-    monkeypatch.setenv("AO_LEDGER_CHECKPOINTS", str(other_checkpoints))
+    monkeypatch.setenv("POLYCTL_LEDGER_CHECKPOINTS", str(other_checkpoints))
     assert A.platform_runs(root) == []
     assert cli.cmd_evidence(project, _args()) == 0
     clone_show = capsys.readouterr().out
-    assert "no row of it is ao's own; a person moves the file aside" in clone_show
+    assert "no row of it is polyctl's own; a person moves the file aside" in clone_show
     assert cli.cmd_gain(project, SimpleNamespace(all=False, since=None, days=14, slices=False,
                                                  json=False, sources=False, quota=False)) == 0
     gain_out = capsys.readouterr().out
-    assert "does not record ao appending" in gain_out and "cannot read" not in gain_out
+    assert "does not record polyctl appending" in gain_out and "cannot read" not in gain_out
     clone_problems = dict(cli.doctor_problems(project))
     assert "evidence-unattested" in clone_problems and "evidence-ledger" not in clone_problems
 
@@ -838,7 +838,7 @@ def test_jobs_carry_only_gh_job_fields_and_doctor_reports_failed_jobs(project, t
 
 
 def test_record_without_gh_or_network_records_nothing_and_says_why(project, tmp_path, monkeypatch, capsys):
-    """LANE-EVIDENCE, from the review: with no `gh`, or no network, ao records nothing and says why."""
+    """LANE-EVIDENCE, from the review: with no `gh`, or no network, polyctl records nothing and says why."""
     root = project["root"]
     monkeypatch.setattr(A, "runnable_binary", lambda name: None)
 

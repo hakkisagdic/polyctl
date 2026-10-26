@@ -1,7 +1,7 @@
 # AO53 hook-path surface inventory
 
 Inventory revision ID: `AO53-I3`. The stable evidence path is intentional. Every
-review request and artefact must record both this revision ID and AO's exact
+review request and artefact must record both this revision ID and polyctl's exact
 candidate digest/tree; either mismatch makes the request stale. The file cannot
 embed its own candidate digest without a recursive self-hash.
 
@@ -12,7 +12,7 @@ obligations, not completed proof; only the measured-defect table describes the
 current implementation.
 
 Human decision `D-1788908734=a` keeps backlog #53 as one slice. AO53 fixes where
-AO resolves, reads, creates, upgrades, reports, and removes Git hooks. Any
+polyctl resolves, reads, creates, upgrades, reports, and removes Git hooks. Any
 mutation in a shared or external hook directory, or at a target selected by a
 winning system/global `core.hooksPath`, is refused by default and needs explicit
 `--allow-shared-hooks`. Backlog #59 separately proves execution and enforcement.
@@ -30,13 +30,13 @@ run a synthetic Git commit, or call static presence `installed`.
    fields — scope, origin, value — with no remainder; NUL separation preserves
    tabs/newlines in origin or value. The value may be empty and is still set:
    Git resolves an empty value through `--git-path hooks` (the admitted Git
-   returns `./`), so AO uses that non-empty path result rather than treating the
+   returns `./`), so polyctl uses that non-empty path result rather than treating the
    config as unset. Malformed output or any other status is failure.
 4. Preserve absolute output; normalize relative output against top. Never guess
    `.git/hooks`. Use normalized paths for I/O/display; use `realpath` plus
    `commonpath` (never string prefix) for identity.
 
-`--git-path hooks` runs from top, so nested explicit `ao -C` cannot rebind a
+`--git-path hooks` runs from top, so nested explicit `polyctl -C` cannot rebind a
 relative hooksPath. Without configuration Git supplies common hooks, not a
 linked-worktree private dir. Tests cover the installed Git and capture argv; no
 older-binary qualification is claimed and `--path-format` is not used.
@@ -51,7 +51,7 @@ config-injection, discovery, and pathspec overrides removed: `GIT_DIR`,
 `GIT_DISCOVERY_ACROSS_FILESYSTEM`, and all Git pathspec-mode variables.
 Repository path queries pass Git global `--literal-pathspecs`.
 
-Resolution contains AO root/top/project-relative path; active/private/common
+Resolution contains polyctl root/top/project-relative path; active/private/common
 dirs and canonical identities; worktree records; each reachable worktree's
 effective hooks; raw hooksPath plus winning scope/origin; family identity;
 sharing and global-configuration authorization facts; deduplicated legacy and
@@ -103,10 +103,10 @@ hooksPath history registry.
 
 | Git measurement in admitted linked worktree | Absolute result |
 |---|---|
-| `--git-dir` | parent `.git/worktrees/agent-orchestrator-ao53-hook-paths` |
+| `--git-dir` | parent `.git/worktrees/polyctl-ao53-hook-paths` |
 | `--git-common-dir` | parent `.git` |
 | `--git-path hooks` with local `.githooks` | this worktree `.githooks` |
-| current AO resolver | private worktree git-dir `/hooks` (dead) |
+| current polyctl resolver | private worktree git-dir `/hooks` (dead) |
 
 Effective `.githooks` has tracked custom `pre-push` and no `pre-commit`; current
 status/doctor inspect the dead private dir.
@@ -118,9 +118,9 @@ invokes `push check`; legacy may name another same-family worktree.
 
 - `absent`: `lexists` false; target track state is still measured.
 - `foreign`: symlink, unreadable, undecodable, or custom content without
-  plausible non-comment AO role invocation. Marker alone is foreign, so
+  plausible non-comment polyctl role invocation. Marker alone is foreign, so
   repository test `.githooks/pre-push` stays custom.
-- `ambiguous-ao`: plausible AO invocation not exact current/legacy; never mutate.
+- `ambiguous-polyctl`: plausible polyctl invocation not exact current/legacy; never mutate.
 - `current-local (behavior unverified)`: byte-exact canonical portable
   project-local generated body, or byte-exact repository pre-commit at canonical
   tracked `<top>/.githooks/pre-commit`.
@@ -161,23 +161,23 @@ deleted-but-indexed repository hook must be restored by Git rather than replaced
 ## Two generated bodies
 
 A project-local generated body is portable: it embeds only the project-relative
-AO root, derives it from Git's documented initial top-level hook cwd, and checks
-`[ -d "$root/.ao" ] || exit 0` before Git/AO lookup. It resolves `ao` at runtime
+polyctl root, derives it from Git's documented initial top-level hook cwd, and checks
+`[ -d "$root/.polyctl" ] || exit 0` before Git/polyctl lookup. It resolves `polyctl` at runtime
 with `command -v`, absolutizes relative `GIT_INDEX_FILE` against initial cwd,
 and invokes the role command. It contains no machine absolute path or family
 identity, so an untracked local `.githooks/pre-commit` accidentally staged into
 source is portable rather than machine-bound (but remains behavior-unverified).
 
-A shared/external body embeds canonical family identity, relative AO root, and
+A shared/external body embeds canonical family identity, relative polyctl root, and
 class. It absolutizes/preserves index, clears repository exports, resolves
 common dir relative to initial cwd via Git plus `CDPATH= cd "$path" && pwd -P`,
 and exits 0 on measured family mismatch. After a match it resolves top/root,
-exits 0 without `.ao`, and invokes AO; matching-family failure is nonzero. If
+exits 0 without `.polyctl`, and invokes polyctl; matching-family failure is nonzero. If
 family cannot be measured it exits 0 to avoid denying an unrelated/bare repo.
 Status/doctor therefore label it `routing unprobed`; #59 owns runtime proof.
 
 Tracked repository pre-commit uses the portable local body, starts with the
-no-`.ao` check, and is recognized as repository-owned only at its canonical
+no-`.polyctl` check, and is recognized as repository-owned only at its canonical
 tracked project-local path.
 
 ## Install, modes, and authorization
@@ -201,7 +201,7 @@ exact `0o755`, and `os.replace`. Never overwrite except eligible legacy. Install
 returns 0 only when both roles end current; otherwise 1, although an eligible
 other role is safely installed when no command-wide authorization refusal
 exists. Custom pre-push therefore stays byte-identical while pre-commit is
-created and the command explicitly reports AO push-window hook unavailable.
+created and the command explicitly reports polyctl push-window hook unavailable.
 
 Writer tests assert canonical bytes and `0o755`. The tracked repository file is
 validated as canonical LF bytes and `0o755` in this checkout and Git index mode
@@ -228,7 +228,7 @@ success. Protected files remain byte-identical and are reported with class,
 track state, and reachability.
 
 After attempted deletion uninstall returns 1 whenever any current/legacy/
-ambiguous AO form remains `potentially-effective`; it returns 0 only when none
+ambiguous polyctl form remains `potentially-effective`; it returns 0 only when none
 does. A protected `dead-misplaced` form warns but does not alone make the result
 nonzero. Foreign custom hooks also do not alone fail uninstall. Therefore, when
 the tracked canonical repository pre-commit is effective, uninstall preserves
@@ -252,21 +252,21 @@ and preflights everything before deleting state:
   effective only there, not common fallback, not shared/external/
   globally-configured, and not a legacy location;
 - only that protected potentially-effective current-local may remain after a
-  successful remove: its no-`.ao` check occurs before Git/AO lookup, so deleting
+  successful remove: its no-`.polyctl` check occurs before Git/polyctl lookup, so deleting
   this project's state makes it statically inert; report preserved-and-inert;
 - foreign remains user-owned.
 
 A protected shared/external/globally-configured hook is never called inert:
 another same-family worktree or globally selected repository may still have
-`.ao`, so remove must delete it with authorization or abort while retaining
+`.polyctl`, so remove must delete it with authorization or abort while retaining
 state.
 
 ## Status and doctor
 
 `hooks status` prints resolver failure or effective path/class/facts, winning
 hooksPath scope/origin (including a set-but-empty value), both active
-static/track states, and every AO misplaced path with reachability, including
-inactive canonical `<top>/.githooks` AO content.
+static/track states, and every polyctl misplaced path with reachability, including
+inactive canonical `<top>/.githooks` polyctl content.
 
 Interactive doctor prints commit and push states. Commit
 absent/foreign/ambiguous/legacy or potentially-effective misplaced pre-commit is
@@ -279,7 +279,7 @@ and uses its existing notifier for both problem keys.
 
 AO53 deliberately creates no pre-push `doctor_problems` key. Absent, foreign,
 ambiguous, legacy, misplaced, and scoped-routing-unprobed pre-push states are
-always explicit informational output (`AO push-window hook unavailable` or
+always explicit informational output (`polyctl push-window hook unavailable` or
 `behavior unverified`) and any non-current active state makes `hooks install`
 return 1. This covers absent as well as this repository's intentionally
 preserved tracked custom pre-push without creating an unfixable hourly alarm.
@@ -287,8 +287,8 @@ Chaining/replacing custom pre-push and runtime enforcement are outside #53.
 
 ## Implementation entry-point map
 
-- `src/ao/cli.py`: replace `PRE_COMMIT_HOOK`/`PRE_PUSH_HOOK` text constants with
-  canonical byte renderers; replace `_ao_hook_state` and `_ao_hook_paths` with
+- `src/polyctl/cli.py`: replace `PRE_COMMIT_HOOK`/`PRE_PUSH_HOOK` text constants with
+  canonical byte renderers; replace `_polyctl_hook_state` and `_polyctl_hook_paths` with
   the resolver/inventory/classifier while retaining compatibility only where
   tests need a direct helper; route `cmd_hooks`, the `cmd_remove` hook preflight,
   `doctor_problems`, interactive `cmd_doctor`, `_doctor_check`, and the `hooks`
@@ -299,16 +299,16 @@ Chaining/replacing custom pre-push and runtime enforcement are outside #53.
 - `tests/test_hook_paths.py`: new real-topology and matrix coverage, including
   NUL config parsing, empty configured value, authorization all-or-nothing,
   fresh-clone dead tracked source, and autocrlf checkout.
-- `tests/test_skill.py`: update its direct `_ao_hook_paths` coupling and existing
+- `tests/test_skill.py`: update its direct `_polyctl_hook_paths` coupling and existing
   remove/interactive-doctor expectations; `tests/test_switches_and_bypass.py`
   updates only corrected hook path/state/role expectations.
 - `README.md`, `README.tr.md`, `docs/features.md`, and `docs/safety.md`: document
   `--allow-shared-hooks`, refusal for shared/external/global configuration,
   independent role outcomes, truthful install/uninstall status, and that a
   recognized static hook is intended to invoke `commit-check` but remains
-  behavior-unverified until #59 probes execution. CLI help in `src/ao/cli.py`
+  behavior-unverified until #59 probes execution. CLI help in `src/polyctl/cli.py`
   states the same authorization contract.
-- `src/ao/skill/SKILL.md`: apply the same static-intent/runtime-proof wording to
+- `src/polyctl/skill/SKILL.md`: apply the same static-intent/runtime-proof wording to
   the payload installed into other repositories; no generated client-specific
   copy is edited by hand.
 
@@ -320,16 +320,16 @@ Chaining/replacing custom pre-push and runtime enforcement are outside #53.
 | sharing/legacy | main/linked/bare/live/stale/locked/unknown facts; configured shared path; globally-configured authorization; complete safe private/common/sibling and canonical repository-source candidates |
 | target ownership | existing and absent literal index checks; tracked-missing refusal; unobserved external explicit creation; bare-dotfiles preservation; canonical LF/current, autocrlf checkout, untracked CRLF legacy, tracked CRLF restore, mixed/undecodable refusal |
 | install | independent active-role matrix; local portable vs scoped body; mkdir/recheck; command-wide auth-first; canonical binary write; `0755`; custom sibling preserved; truthful exit |
-| status | exact path/class/config facts/states/misplaced reachability; set-empty config; inactive tracked repository AO hook; scoped routing-unprobed label |
+| status | exact path/class/config facts/states/misplaced reachability; set-empty config; inactive tracked repository polyctl hook; scoped routing-unprobed label |
 | uninstall | active plus every misplaced candidate; eligible dead cleanup; command-wide auth-first/no partial local delete; effective tracked hook remains/nonzero; dead protected warning |
 | remove | shared/global/protected effective blocker retains state; dead protected never blocks; only provably single-worktree early-inert effective local current survives |
 | doctor | commit placement and scoped-routing problems notify; tracked CRLF has restore path; every non-current push state is explicit non-alarming information |
-| templates | local contains no machine path and early no-`.ao`; scoped mismatch/no-AO/unmeasurable routing; relative index reaches AO test double unchanged |
+| templates | local contains no machine path and early no-`.polyctl`; scoped mismatch/no-POLYCTL/unmeasurable routing; relative index reaches polyctl test double unchanged |
 | repository hooks | `.gitattributes` forces LF for pre-commit; pre-commit exact canonical portable body, local file `0755`, index `100755`; pre-push byte-identical custom/foreign |
 | docs/help/payload | EN/TR command rows, features, safety, parser help, and installed skill payload agree on authorization, static intent, behavior-unverified status, and exits |
 | init/generic status | unchanged except the corrected skill payload text; existing regressions; #59 execution probe excluded |
 
-The similarly named `cmd_remove` `~/.ao` substring cleanup defect is confirmed:
+The similarly named `cmd_remove` `~/.polyctl` substring cleanup defect is confirmed:
 `if key in f` can remove another worktree's `push-<key>.ok`. Decision
 `D-1788908734=a` did not admit this per-user-state namespace into AO53, so it is
 unchanged and no AO53 evidence claims it fixed. Backlog #66 owns the defect:

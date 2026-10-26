@@ -17,14 +17,14 @@ import time
 
 import pytest
 
-from ao import lib as A, watchdog as W
+from polyctl import lib as A, watchdog as W
 from tests.scenarios import World
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 WRITER = """
 import sys, time
 sys.path.insert(0, {src!r})
-from ao import storage, watchdog as W
+from polyctl import storage, watchdog as W
 W.STATE_DIR = {state_dir!r}
 W.save_state({root!r}, {{"n": 1, "pad": "x" * 400000}})
 replace = storage.replace_file_durably
@@ -92,7 +92,7 @@ print("the last words of a failed wake", flush=True)
 def test_a_log_trimmed_while_its_process_writes_keeps_what_the_process_writes_after(project, tmp_path):
     """A log replaced by a new file left its process writing into the old one, and the failure it wrote last
     never reached the log the watchdog reads a wake's failure from."""
-    from ao import lib as A
+    from polyctl import lib as A
     log = tmp_path / "escalate.log"
     script = tmp_path / "child.py"
     script.write_text(CHILD, encoding="utf-8")
@@ -196,7 +196,7 @@ def test_catchup_closes_deferred_work_once_its_work_was_done(project, monkeypatc
     """Catchup closed every deferral as replayed and then ran its cycle, or skipped it: a cycle that did not run
     left the deferred wake forgotten. Then it closed every row once its cycle ran, though that cycle could not do
     the work either and had just deferred it again (JOURNAL-4-2): a row closes on the work it waited for."""
-    from ao import cli
+    from polyctl import cli
     from tests.test_waiver_bounds import NAMED
     root = project["root"]
     deferred = A.deferred_append(root, "wake", reason="architect quota")
@@ -226,7 +226,7 @@ def test_catchup_closes_deferred_work_once_its_work_was_done(project, monkeypatc
 
 
 def test_a_wake_started_after_a_deferral_closes_it_in_the_next_cycle(world):
-    """A deferred wake stayed open after the wake it waited for, and piled up for `ao doctor` and catchup; it is
+    """A deferred wake stayed open after the wake it waited for, and piled up for `polyctl doctor` and catchup; it is
     closed a cycle later, so the notice a silence owes still names it in the cycle that woke."""
     deferred = A.deferred_append(world.root, "wake", reason="architect quota")
     world.transcript_age(900)
@@ -253,11 +253,11 @@ def _stops(running, stopped):
 
 
 def test_a_turn_a_cycle_starts_while_a_hold_is_placed_is_stopped_with_the_rest(project, monkeypatch):
-    """`ao hold` counted the turns and then wrote the hold: a turn the watchdog started between the two read no
+    """`polyctl hold` counted the turns and then wrote the hold: a turn the watchdog started between the two read no
     hold and ran on under it."""
     from types import SimpleNamespace
-    from ao import cli
-    from ao.storage import _exclusive_lock
+    from polyctl import cli
+    from polyctl.storage import _exclusive_lock
     root = project["root"]
     running, stopped = [], []
     monkeypatch.setattr(A, "agent_pids", lambda root_, adapter, headless_only=False: list(running))
@@ -299,10 +299,10 @@ def test_a_park_whose_transcript_is_gone_is_told_and_its_alarm_stands(world):
 
 def test_a_hold_whose_wait_on_a_running_cycle_times_out_stops_what_it_counted_and_says_so(project, monkeypatch,
                                                                                          capsys):
-    """JOURNAL-6-2: after a minute's wait on a cycle that began before the hold, `ao hold` counted the turns as they
+    """JOURNAL-6-2: after a minute's wait on a cycle that began before the hold, `polyctl hold` counted the turns as they
     stood, said HELD and exited 0; a turn that cycle started after the count ran on and nobody was told."""
     from types import SimpleNamespace
-    from ao import cli, storage
+    from polyctl import cli, storage
     root = project["root"]
     running, stopped = [7001], []
     monkeypatch.setattr(A, "agent_pids", lambda root_, adapter, headless_only=False: list(running))
@@ -330,14 +330,14 @@ def test_a_hold_whose_wait_on_a_running_cycle_times_out_stops_what_it_counted_an
 
     out = capsys.readouterr().out
     assert code == 1
-    assert "still running after a minute" in out and "`ao hold` again stops it" in out
+    assert "still running after a minute" in out and "`polyctl hold` again stops it" in out
     assert stopped == [7001] and A.hold_state(root)["stopped"] == [7001]
 
 
 def test_a_report_wake_reads_a_hold_placed_while_its_window_rotated(world, monkeypatch):
     """JOURNAL-6-2: the report wake read the hold before it rotated the architect's window, which can wait minutes
     on keyflip, and woke the architect under a hold placed meanwhile."""
-    from ao.storage import replace_file_durably
+    from polyctl.storage import replace_file_durably
     world.transcript_age(900)
     world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
 
@@ -357,7 +357,7 @@ def test_a_report_wake_reads_a_hold_placed_while_its_window_rotated(world, monke
 # ---- shared records changed one writer at a time (JOURNAL-7) ------------------------------------------------------
 
 def test_two_writers_of_the_alarm_episodes_lose_neither_ones_raises(project):
-    """Every project's watchdog shares ~/.ao/alarms.json, and each read it, changed it and wrote it back."""
+    """Every project's watchdog shares ~/.polyctl/alarms.json, and each read it, changed it and wrote it back."""
     def raise_often(key):
         for _ in range(40):
             A.alarm_touch("proj", key, "orange")
@@ -372,11 +372,11 @@ def test_two_writers_of_the_alarm_episodes_lose_neither_ones_raises(project):
 
 
 def test_a_sections_journal_one_review_holds_is_not_asked_by_a_second(project, tmp_path):
-    from ao import cli
+    from polyctl import cli
     journal = str(tmp_path / "sections" / "abc.jsonl")
     src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
     holder = subprocess.Popen([sys.executable, "-c", (
-        f"import sys, time; sys.path.insert(0, {src!r}); from ao import cli\n"
+        f"import sys, time; sys.path.insert(0, {src!r}); from polyctl import cli\n"
         f"lease = cli._section_lease({journal!r}); print('held', flush=True); time.sleep(60)")],
         stdout=subprocess.PIPE, text=True)
     try:
@@ -393,7 +393,7 @@ def test_a_sections_journal_one_review_holds_is_not_asked_by_a_second(project, t
 
 def test_a_review_finds_its_sections_journal_held_and_asks_nothing(project, tmp_path, monkeypatch):
     from tests.test_review_sections import SCENARIOS, _args, _setup
-    from ao import cli
+    from polyctl import cli
     root, cfg, calls = _setup(project, tmp_path, monkeypatch, "- [S1] the claim journal")
     monkeypatch.setattr(cli, "_section_lease", lambda journal: None)
 
@@ -405,7 +405,7 @@ def test_a_review_finds_its_sections_journal_held_and_asks_nothing(project, tmp_
 def test_an_alarm_change_is_not_written_blind_when_the_store_is_busy(project, monkeypatch):
     """JOURNAL-7-2: past ten seconds without the store's lock a change was written without it, and the stalled
     holder's copy then overwrote it; a person's unsnooze lost that way silenced an alarm until its date."""
-    from ao import storage
+    from polyctl import storage
     real = storage._exclusive_lock
     monkeypatch.setattr(storage, "_exclusive_lock",                       # the ten seconds, made short
                         lambda path, timeout=10.0: real(path, timeout=min(timeout, 0.2)))
@@ -427,7 +427,7 @@ def test_an_alarm_change_is_not_written_blind_when_the_store_is_busy(project, mo
 
 
 def test_a_notice_still_rings_while_the_alarm_store_is_busy(project, monkeypatch):
-    from ao import email, storage, telegram
+    from polyctl import email, storage, telegram
     real = storage._exclusive_lock
     monkeypatch.setattr(storage, "_exclusive_lock", lambda path, timeout=10.0: real(path, timeout=min(timeout, 0.2)))
     rung = []
@@ -446,7 +446,7 @@ def test_a_notice_still_rings_while_the_alarm_store_is_busy(project, monkeypatch
 def test_a_mail_whose_mark_the_busy_store_could_not_take_goes_once_more(project, monkeypatch, capsys):
     """JOURNAL-7-3: a mark that a notice went is never written blind and is not kept, so the next cycle mails the red
     once more and records it - told twice, never not at all, and not a third time."""
-    from ao import email, storage, telegram
+    from polyctl import email, storage, telegram
     real = storage._exclusive_lock
     monkeypatch.setattr(storage, "_exclusive_lock", lambda path, timeout=10.0: real(path, timeout=min(timeout, 0.2)))
     mails = []
@@ -474,7 +474,7 @@ def test_a_mail_whose_mark_the_busy_store_could_not_take_goes_once_more(project,
 LEASE_CONTENDER = """
 import os, sys, time
 sys.path.insert(0, {src!r})
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 journal, me, other, gate = sys.argv[1:5]
 real = A._pid_alive
 def judged_after_both_read(pid):          # a lease read as a holder's pid was judged after both reviews read it
@@ -516,12 +516,12 @@ def test_two_reviews_that_find_a_dead_holder_do_not_both_hold_the_lease(tmp_path
 def test_a_review_that_finds_the_lease_held_asks_nothing(project, tmp_path, monkeypatch):
     import glob
     from tests.test_review_sections import SCENARIOS, _args, _setup
-    from ao import cli, storage
+    from polyctl import cli, storage
     root, cfg, calls = _setup(project, tmp_path, monkeypatch, "- [S1] the claim journal", fail="Scenario 3")
     assert cli.cmd_review(cfg, _args(SCENARIOS)) == 3                     # cut off at its third section
-    [journal] = glob.glob(os.path.join(root, ".ao", "reviews", "sections", "*.jsonl"))
+    [journal] = glob.glob(os.path.join(root, ".polyctl", "reviews", "sections", "*.jsonl"))
     calls.write_text("", encoding="utf-8")
-    monkeypatch.setenv("AO_TEST_FAIL", "")
+    monkeypatch.setenv("POLYCTL_TEST_FAIL", "")
 
     with storage._exclusive_lock(journal + ".lease", timeout=1):           # held as a running review holds it
         assert cli.cmd_review(cfg, _args(SCENARIOS)) == 3
@@ -535,7 +535,7 @@ BLOCKED = "# queue empty\n\n## KARAR GEREKLİ\n"
 
 
 def test_a_step_is_claimed_once_while_its_lease_holds_and_again_once_it_has_passed(tmp_path):
-    from ao import journal as J
+    from polyctl import journal as J
     path = str(tmp_path / "journal.db")
 
     assert J.claim(path, "wake:s1:abc", "architect", 900, now=1000.0)
@@ -549,7 +549,7 @@ def test_a_step_is_claimed_once_while_its_lease_holds_and_again_once_it_has_pass
 
 
 def test_of_many_claims_at_once_one_holds(tmp_path):
-    from ao import journal as J
+    from polyctl import journal as J
     path = str(tmp_path / "journal.db")
     held, start = [], threading.Barrier(8)
 
@@ -602,7 +602,7 @@ def test_a_wake_cut_off_after_its_process_started_is_not_started_again(world, mo
 
 
 def test_a_wake_cut_off_before_its_start_was_written_holds_its_claim_for_its_lease(world, monkeypatch):
-    from ao import journal as J
+    from polyctl import journal as J
     world.transcript_age(900)
     world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
     started = J.started
@@ -670,7 +670,7 @@ def _nudge_cut_off_in_its_first_seconds(world, monkeypatch):
         pid, returncode = 99999, None
 
         def poll(self):
-            raise KeyboardInterrupt                                  # Ctrl+C on ao catchup, a bootout, a stop
+            raise KeyboardInterrupt                                  # Ctrl+C on polyctl catchup, a bootout, a stop
     monkeypatch.setattr(W.subprocess, "Popen", lambda argv, **kw: world.spawned.append(argv) or Running())
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
     monkeypatch.setattr(A, "_process_start", lambda pid, refresh=False: "the turn's start")
@@ -742,7 +742,7 @@ class _Clock:
 
 
 def _deferred_rows(root):
-    path = os.path.join(root, ".ao", "ledger", "deferred.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "deferred.jsonl")
     return [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()] if os.path.exists(path) else []
 
 
@@ -780,7 +780,7 @@ def _running_nudge(world, monkeypatch):
 
 
 def test_a_row_catchups_cycle_writes_because_it_still_cannot_nudge_stays_open(world, capsys):
-    from ao import cli
+    from polyctl import cli
     from tests.test_waiver_bounds import NAMED
     world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(3600)
     world.quota = False
@@ -793,7 +793,7 @@ def test_a_row_catchups_cycle_writes_because_it_still_cannot_nudge_stays_open(wo
 
 
 def test_a_standing_row_its_cycle_still_cannot_do_stays_open(world, monkeypatch):
-    from ao import cli
+    from polyctl import cli
     from tests.test_waiver_bounds import NAMED
     world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(3600)
     world.quota = False
@@ -806,7 +806,7 @@ def test_a_standing_row_its_cycle_still_cannot_do_stays_open(world, monkeypatch)
 
 
 def test_a_row_whose_nudge_catchups_cycle_starts_closes_as_done(world, monkeypatch, capsys):
-    from ao import cli
+    from polyctl import cli
     from tests.test_waiver_bounds import NAMED
     world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(3600)
     standing = _deferred_earlier(monkeypatch, world.root, "nudge", reason="implementer quota")
@@ -821,7 +821,7 @@ def test_a_row_whose_nudge_catchups_cycle_starts_closes_as_done(world, monkeypat
 
 
 def test_a_wake_row_inside_its_quota_window_stays_open(world, monkeypatch):
-    from ao import cli
+    from polyctl import cli
     from tests.test_waiver_bounds import NAMED
     world.transcript_age(900)
     world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
@@ -838,11 +838,11 @@ def test_a_wake_row_inside_its_quota_window_stays_open(world, monkeypatch):
 
 
 def test_a_cycle_that_stops_at_a_hold_leaves_the_row_open(world, monkeypatch):
-    from ao import cli
+    from polyctl import cli
     from tests.test_waiver_bounds import NAMED
     world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(3600)
     standing = _deferred_earlier(monkeypatch, world.root, "nudge", reason="implementer quota")
-    with open(os.path.join(world.root, ".ao", "hold"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(world.root, ".polyctl", "hold"), "w", encoding="utf-8") as fh:
         json.dump({"by": "A. Person", "reason": "looking at it", "at": time.time()}, fh)
     _old_heartbeat(world.root)
 
@@ -868,7 +868,7 @@ def test_a_nudge_a_fraction_of_a_second_before_a_deferral_does_not_close_it(proj
 def test_a_whole_second_row_on_disk_counts_from_the_end_of_its_second(project):
     root = project["root"]
     second = 1_791_200_100
-    path = os.path.join(root, ".ao", "ledger", "deferred.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "deferred.jsonl")
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"event": "deferred", "id": f"DF-{second}-nudge", "kind": "nudge", "at": second}) + "\n")
 
@@ -880,7 +880,7 @@ def test_a_whole_second_row_on_disk_counts_from_the_end_of_its_second(project):
 
 
 def test_a_cycle_that_ran_inside_one_timestamp_quantum_is_read_as_run(world, monkeypatch, capsys):
-    from ao import cli
+    from polyctl import cli
     from tests.test_waiver_bounds import NAMED
     world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(3600)
     standing = _deferred_earlier(monkeypatch, world.root, "nudge", reason="implementer quota")
@@ -903,8 +903,8 @@ def test_a_cycle_that_ran_inside_one_timestamp_quantum_is_read_as_run(world, mon
 
 
 def test_another_cycles_beat_is_not_read_as_catchups_cycle(world, monkeypatch, capsys):
-    from ao import cli
-    from ao.storage import _exclusive_lock
+    from polyctl import cli
+    from polyctl.storage import _exclusive_lock
     from tests.test_waiver_bounds import NAMED
     world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(3600)
     world.quota = False
@@ -936,12 +936,12 @@ ARCH = {"argv": ["claude", "--resume", "{session}", "-p", "{prompt}"]}
 def _architect(world, **fields):
     world.cfg["architect"] = dict(world.cfg["architect"], **fields)
     stored = {k: v for k, v in world.cfg.items() if k != "root"}
-    with open(os.path.join(world.root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(world.root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(stored, fh)
 
 
 def test_a_started_step_is_read_whatever_its_lease(tmp_path):
-    from ao import journal as J
+    from polyctl import journal as J
     path = str(tmp_path / "journal.db")
     assert J.claim(path, "wake:new:abc", "architect", 900, now=1000.0)
     J.started(path, "wake:new:abc", 4242, 999.5)
@@ -1018,7 +1018,7 @@ def test_an_architect_a_cut_off_cycle_started_is_adopted_and_neither_reaped_nor_
 def test_of_many_processes_opening_a_new_journal_at_once_none_is_refused(tmp_path):
     """Switching a new journal to WAL answered `database is locked` at once to a second opener, past the busy
     timeout, and a claim failed as if the journal could not be written."""
-    child = ("import sys, time, json\nsys.path.insert(0, %r)\nfrom ao import journal as J\n"
+    child = ("import sys, time, json\nsys.path.insert(0, %r)\nfrom polyctl import journal as J\n"
              "at = float(sys.argv[1])\nwhile time.time() < at: pass\n"
              "print(json.dumps(J.claim(sys.argv[2], 'refill:s1:1', 'architect', 900)))\n") % SRC
     for round_ in range(5):
@@ -1034,7 +1034,7 @@ def test_of_many_processes_opening_a_new_journal_at_once_none_is_refused(tmp_pat
 def test_a_journal_that_cannot_be_written_starts_the_step_and_tells_a_person(world, monkeypatch):
     """Failing open is meant - a broken journal must not stop every wake - but nobody was told the single-owner
     guarantee was off."""
-    from ao import journal as J
+    from polyctl import journal as J
 
     def unwritable(*args, **kwargs):
         raise J.sqlite3.OperationalError("disk I/O error")
@@ -1059,14 +1059,14 @@ def test_a_journal_that_cannot_be_written_starts_the_step_and_tells_a_person(wor
     (["docker", "run", "--label=" + SID, "img"], False),
 ])
 def test_only_the_architects_harness_resumes_its_session(monkeypatch, argv, hit):
-    from ao import procs
+    from polyctl import procs
     monkeypatch.setattr(procs, "all_pids", lambda: [4242])
     monkeypatch.setattr(procs, "argv", lambda pid: argv if pid == 4242 else None)
     assert (A.session_in_use(SID, ARCH) == [4242]) is hit
 
 
 def test_an_equals_form_harness_still_counts(monkeypatch):
-    from ao import procs
+    from polyctl import procs
     monkeypatch.setattr(procs, "all_pids", lambda: [4242])
     monkeypatch.setattr(procs, "argv", lambda pid: ["agy", f"--conversation={SID}", "--print=x"])
     assert A.session_in_use(SID, {"argv": ["agy", "--conversation={session}", "--print={prompt}"]}) == [4242]
@@ -1100,7 +1100,7 @@ def test_a_whole_second_row_closes_on_work_started_at_the_start_of_the_next_seco
     work started after it."""
     root = project["root"]
     second = 1_791_200_100
-    path = os.path.join(root, ".ao", "ledger", "deferred.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "deferred.jsonl")
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"event": "deferred", "id": f"DF-{second}-nudge", "kind": "nudge", "at": second}) + "\n")
 
@@ -1112,7 +1112,7 @@ def test_a_whole_second_row_closes_on_work_started_at_the_start_of_the_next_seco
 def test_a_deferral_catchups_cycle_closes_is_reported_and_counted(project, monkeypatch, capsys):
     """JOURNAL-4-3: the cycle closes what it did itself, before catchup asks: catchup reported nothing and counted
     nothing for the deferral its own cycle replayed."""
-    from ao import cli
+    from polyctl import cli
     from tests.test_waiver_bounds import NAMED
     root = project["root"]
     deferred = A.deferred_append(root, "wake", reason="architect quota")
@@ -1138,7 +1138,7 @@ def test_a_deferral_catchups_cycle_closes_is_reported_and_counted(project, monke
 
 def test_a_journal_that_cannot_be_written_starts_the_step_even_where_its_alarm_cannot_ring(world, monkeypatch):
     """Failing open is meant, and it hung on the alarm: a notify that raised made the claim raise with it."""
-    from ao import journal as J
+    from polyctl import journal as J
 
     def unwritable(*args, **kwargs):
         raise J.sqlite3.OperationalError("disk I/O error")
@@ -1154,7 +1154,7 @@ def test_a_journal_that_cannot_be_written_starts_the_step_even_where_its_alarm_c
 def test_an_architect_a_runtime_runs_is_known_by_the_program_it_runs(monkeypatch):
     """`node` was the identity of an architect run as `node /opt/claude-code/cli.js`, and any node process naming the
     session held every wake."""
-    from ao import procs
+    from polyctl import procs
     arch = {"argv": ["node", "/opt/claude-code/cli.js", "--resume", "{session}", "-p", "{prompt}"]}
     table = {4242: ["node", "/opt/tools/indexer.js", SID], 4243: ["node", "/opt/claude-code/cli.js", "--resume", SID]}
     monkeypatch.setattr(procs, "all_pids", lambda: list(table))
@@ -1166,7 +1166,7 @@ def test_an_architect_a_runtime_runs_is_known_by_the_program_it_runs(monkeypatch
 def test_an_architect_run_as_a_module_or_after_options_is_known_by_that_program(monkeypatch):
     """JOURNAL-2-4: the word after the runtime was taken for the program, so `python -m claude` named `-m`, and any
     `python -m` process carrying the session held every wake."""
-    from ao import procs
+    from polyctl import procs
     arch = {"argv": ["python", "-m", "claude", "--resume", "{session}"]}
     table = {5151: ["python", "-m", "worker", SID], 5152: ["python3", "-X", "utf8", "-m", "claude", "--resume", SID],
              5153: ["python", "-c", "print(1)", SID]}
@@ -1184,7 +1184,7 @@ def test_an_architect_run_as_a_module_or_after_options_is_known_by_that_program(
 def test_a_version_named_python_or_inline_code_names_the_architect_by_its_program(monkeypatch):
     """JOURNAL-2-5: `python3.12` was no runtime by the exact list, and was taken for the architect itself; and code
     given inline left the runtime as the architect, matching every process of it."""
-    from ao import procs
+    from polyctl import procs
     table = {6161: ["/usr/local/bin/python3.12", "-m", "worker", SID], 6162: ["node", "worker.js", SID]}
     monkeypatch.setattr(procs, "all_pids", lambda: list(table))
     monkeypatch.setattr(procs, "argv", lambda pid: table.get(pid))

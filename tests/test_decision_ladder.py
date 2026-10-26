@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from ao import lib as A, watchdog as W
+from polyctl import lib as A, watchdog as W
 from tests.scenarios import World
 
 BLOCKED = "# queue empty\n\n## KARAR GEREKLİ\n"

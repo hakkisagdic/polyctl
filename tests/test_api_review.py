@@ -1,7 +1,7 @@
-"""A reviewer reached through an OpenAI-compatible chat API, as a tool ao runs over the candidate (API-REVIEWER).
+"""A reviewer reached through an OpenAI-compatible chat API, as a tool polyctl runs over the candidate (API-REVIEWER).
 
-`ao-api-review` is ao's own stdlib client. It asks a provider the machine names in `review.api_providers` once,
-with the review prompt as the only message, and writes the answer where ao reads a tool's answer. It has no
+`polyctl-api-review` is polyctl's own stdlib client. It asks a provider the machine names in `review.api_providers` once,
+with the review prompt as the only message, and writes the answer where polyctl reads a tool's answer. It has no
 tools: the model reads what the prompt carries. These run it against a stand-in of the endpoint on this machine.
 """
 import http.server
@@ -11,7 +11,7 @@ import threading
 
 import pytest
 
-from ao import api_review, cli, lib as A, storage
+from polyctl import api_review, cli, lib as A, storage
 from tests.test_language_prompts import _newest_review
 from tests.test_review_chain import _args, _repo_with_change
 
@@ -93,7 +93,7 @@ def _providers(monkeypatch, tmp_path, *entries):
     """The machine's settings, holding these providers; the suite's own home stays as it is."""
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"review": {"api_providers": list(entries)}}), encoding="utf-8")
-    monkeypatch.setenv("AO_SETTINGS", str(path))
+    monkeypatch.setenv("POLYCTL_SETTINGS", str(path))
     return path
 
 
@@ -110,8 +110,8 @@ def _run(tmp_path, model, prompt="review this", tree=None):
 
 def test_the_client_asks_its_provider_once_and_writes_the_answer(monkeypatch, tmp_path, endpoint, capsys):
     served = endpoint()
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", "a-key-for-this-test")
 
     code, answer = _run(tmp_path, "local/glm-5.3", "the review prompt, the diff in it")
 
@@ -125,14 +125,14 @@ def test_the_client_asks_its_provider_once_and_writes_the_answer(monkeypatch, tm
 
 
 @pytest.mark.parametrize("entry, why", [
-    ("remote http://example.com/v1 AO_TEST_API_KEY", "https"),
+    ("remote http://example.com/v1 POLYCTL_TEST_API_KEY", "https"),
     ("remote https://example.com/v1 not-a-name", "environment variable"),
     ("remote https://example.com/v1", "a word, a base URL and"),
 ])
 def test_a_provider_whose_key_could_leave_unprotected_is_refused_before_anything_is_sent(
         monkeypatch, tmp_path, capsys, entry, why):
     _providers(monkeypatch, tmp_path, entry)
-    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", "a-key-for-this-test")
 
     code, answer = _run(tmp_path, "remote/m")
 
@@ -141,11 +141,11 @@ def test_a_provider_whose_key_could_leave_unprotected_is_refused_before_anything
 
 def test_a_provider_not_named_or_a_key_not_set_is_said_and_nothing_is_sent(monkeypatch, tmp_path, endpoint, capsys):
     served = endpoint()
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.delenv("AO_TEST_API_KEY", raising=False)
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.delenv("POLYCTL_TEST_API_KEY", raising=False)
 
     assert _run(tmp_path, "elsewhere/m")[0] == 2 and "review.api_providers names no elsewhere" in capsys.readouterr().err
-    assert _run(tmp_path, "local/m")[0] == 2 and "AO_TEST_API_KEY is not set" in capsys.readouterr().err
+    assert _run(tmp_path, "local/m")[0] == 2 and "POLYCTL_TEST_API_KEY is not set" in capsys.readouterr().err
     assert _run(tmp_path, "no-provider")[0] == 2 and "<provider>/<model>" in capsys.readouterr().err
     assert served.requests == []
 
@@ -153,8 +153,8 @@ def test_a_provider_not_named_or_a_key_not_set_is_said_and_nothing_is_sent(monke
 def test_a_redirect_is_not_followed_with_the_key(monkeypatch, tmp_path, endpoint, capsys):
     elsewhere = endpoint()
     served = endpoint(location=elsewhere.url + "/chat/completions")
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", "a-key-for-this-test")
 
     code, answer = _run(tmp_path, "local/m")
 
@@ -164,14 +164,14 @@ def test_a_redirect_is_not_followed_with_the_key(monkeypatch, tmp_path, endpoint
 
 def test_an_error_or_an_empty_answer_writes_nothing(monkeypatch, tmp_path, endpoint, capsys):
     failing, silent = endpoint(status=503), endpoint(answer="")
-    _providers(monkeypatch, tmp_path, f"failing {failing.url} AO_TEST_API_KEY", f"silent {silent.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+    _providers(monkeypatch, tmp_path, f"failing {failing.url} POLYCTL_TEST_API_KEY", f"silent {silent.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", "a-key-for-this-test")
 
     assert _run(tmp_path, "failing/m") == (1, None) and "HTTP 503" in capsys.readouterr().err
     assert _run(tmp_path, "silent/m") == (1, None) and "no answer" in capsys.readouterr().err
 
 
-def test_the_adapter_composes_a_tool_reviewer_ao_may_run():
+def test_the_adapter_composes_a_tool_reviewer_polyctl_may_run():
     adapter = A.load_adapter("openai-api")
 
     assert A.reviewer_eligibility(adapter) == (True, None) and A.tool_review_problems(adapter) == []
@@ -181,23 +181,23 @@ def test_the_adapter_composes_a_tool_reviewer_ao_may_run():
 
 
 def test_a_review_through_the_api_reviewer_is_read_and_recorded(project, monkeypatch, tmp_path, endpoint):
-    """End to end: ao writes the candidate, runs the client as a tool in a directory of its own, and reads the
+    """End to end: polyctl writes the candidate, runs the client as a tool in a directory of its own, and reads the
     answer the stand-in endpoint gave."""
     root = project["root"]
     _repo_with_change(root)
     served = endpoint()
     home = tmp_path / "home"
-    (home / ".ao").mkdir(parents=True, exist_ok=True)
-    (home / ".ao" / "settings.json").write_text(json.dumps(
-        {"review": {"api_providers": [f"local {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
-    monkeypatch.setenv("HOME", str(home))                    # the tool reads the machine's settings as ao does
+    (home / ".polyctl").mkdir(parents=True, exist_ok=True)
+    (home / ".polyctl" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {served.url} POLYCTL_TEST_API_KEY"]}}), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))                    # the tool reads the machine's settings as polyctl does
     monkeypatch.setenv("USERPROFILE", str(home))             # where Windows finds the home
-    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
-    client = cli._tool_beside_interpreter("ao-api-review")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", "a-key-for-this-test")
+    client = cli._tool_beside_interpreter("polyctl-api-review")
     if client is None:
-        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+        pytest.skip("the client's script is installed with polyctl, and this interpreter has none")
     monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root, name: (
-        (client, "ao-api-review") if name == "ao-api-review" else (None, None)))
+        (client, "polyctl-api-review") if name == "polyctl-api-review" else (None, None)))
     route = dict(A.compose_reviewer("openai-api", model="local/glm-5.3", family="zhipu"), id="rv")
 
     code = cli.cmd_review(dict(project, reviewer=route), _args())
@@ -215,17 +215,17 @@ def test_a_prompt_past_one_argument_reaches_the_client_on_its_standard_input(pro
     _repo_with_change(root)
     served = endpoint()
     home = tmp_path / "home"
-    (home / ".ao").mkdir(parents=True, exist_ok=True)
-    (home / ".ao" / "settings.json").write_text(json.dumps(
-        {"review": {"api_providers": [f"local {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    (home / ".polyctl").mkdir(parents=True, exist_ok=True)
+    (home / ".polyctl" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {served.url} POLYCTL_TEST_API_KEY"]}}), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
-    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
-    client = cli._tool_beside_interpreter("ao-api-review")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", "a-key-for-this-test")
+    client = cli._tool_beside_interpreter("polyctl-api-review")
     if client is None:
-        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+        pytest.skip("the client's script is installed with polyctl, and this interpreter has none")
     monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root, name: (
-        (client, "ao-api-review") if name == "ao-api-review" else (None, None)))
+        (client, "polyctl-api-review") if name == "polyctl-api-review" else (None, None)))
     monkeypatch.setattr(A, "argument_overflow", lambda argv, env=None: "this platform carries less in one argument")
     started, real = [], cli.subprocess.Popen
     monkeypatch.setattr(cli.subprocess, "Popen", lambda argv, *a, **kw: started.append(list(argv)) or real(argv, *a, **kw))
@@ -243,8 +243,8 @@ def test_a_provider_on_this_machine_is_asked_directly_whatever_proxy_is_named(mo
     """API-REVIEWER-2: urllib sent a request for 127.0.0.1 through the proxy the environment named, its key in plain
     text, and took that proxy's answer for the provider's."""
     served, proxy = endpoint(), endpoint()
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", "a-key-for-this-test")
     for name in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"):
         monkeypatch.setenv(name, proxy.url.rsplit("/", 1)[0])
     for name in ("no_proxy", "NO_PROXY"):
@@ -260,24 +260,24 @@ def test_a_key_no_header_carries_is_refused_and_never_shown(monkeypatch, tmp_pat
     """API-REVIEWER-2: the error that refused a key holding a line break named the header's value, and the key was
     printed with it."""
     served = endpoint()
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", "a-key\nfor-this-test")
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", "a-key\nfor-this-test")
 
     code, answer = _run(tmp_path, "local/m")
 
     said = capsys.readouterr().err
     assert code == 2 and answer is None and served.requests == []
-    assert "AO_TEST_API_KEY" in said and "a-key" not in said and "for-this-test" not in said
+    assert "POLYCTL_TEST_API_KEY" in said and "a-key" not in said and "for-this-test" not in said
 
 
 def test_the_doctor_finds_the_client_where_a_review_finds_it(project, monkeypatch, tmp_path):
     """API-REVIEWER-2: an interpreter installed for everyone on Windows keeps its scripts in Scripts, not beside
-    python.exe; a review found the client there, and `ao doctor` named it absent."""
+    python.exe; a review found the client there, and `polyctl doctor` named it absent."""
     import sys
     import sysconfig
     scripts, real = tmp_path / "Scripts", sysconfig.get_path
     scripts.mkdir()
-    client = scripts / ("ao-api-review.exe" if os.name == "nt" else "ao-api-review")
+    client = scripts / ("polyctl-api-review.exe" if os.name == "nt" else "polyctl-api-review")
     client.write_text("", encoding="utf-8")
     client.chmod(0o755)
     monkeypatch.setattr(A, "binary_candidates", lambda name, path=None: [])
@@ -286,10 +286,10 @@ def test_the_doctor_finds_the_client_where_a_review_finds_it(project, monkeypatc
                         else real(name, *a, **kw))
     cfg = dict(project, implementer={"adapter": "openai-api", "session": "s1", "name": "dev"})
 
-    assert A.absent_adapter_binaries(cfg) == [] and cli._tool_beside_interpreter("ao-api-review") == str(client)
+    assert A.absent_adapter_binaries(cfg) == [] and cli._tool_beside_interpreter("polyctl-api-review") == str(client)
 
     client.unlink()
-    assert A.absent_adapter_binaries(cfg) == [("dev", "openai-api", ["ao-api-review"])]
+    assert A.absent_adapter_binaries(cfg) == [("dev", "openai-api", ["polyctl-api-review"])]
 
 
 def test_a_protocol_error_that_echoes_the_key_never_shows_it(monkeypatch, tmp_path, capsys):
@@ -307,8 +307,8 @@ def test_a_protocol_error_that_echoes_the_key_never_shows_it(monkeypatch, tmp_pa
     server = http.server.HTTPServer(("127.0.0.1", 0), Echo)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        _providers(monkeypatch, tmp_path, f"local http://127.0.0.1:{server.server_address[1]}/v1 AO_TEST_API_KEY")
-        monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+        _providers(monkeypatch, tmp_path, f"local http://127.0.0.1:{server.server_address[1]}/v1 POLYCTL_TEST_API_KEY")
+        monkeypatch.setenv("POLYCTL_TEST_API_KEY", "a-key-for-this-test")
         code, answer = _run(tmp_path, "local/m")
     finally:
         server.shutdown()
@@ -337,8 +337,8 @@ def test_a_model_that_spent_its_answer_reasoning_is_said_so(monkeypatch, tmp_pat
                                           "finish_reason": "length"}],
                              "usage": {"completion_tokens": 16384,
                                        "completion_tokens_details": {"reasoning_tokens": 16384}}})
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", "a-key-for-this-test")
 
     code, answer = _run(tmp_path, "local/glm-5.3")
 
@@ -350,8 +350,8 @@ def test_a_model_that_spent_its_answer_reasoning_is_said_so(monkeypatch, tmp_pat
 
 def test_an_empty_answer_that_did_not_run_out_is_still_no_answer(monkeypatch, tmp_path, endpoint, capsys):
     served = endpoint(reply={"choices": [{"message": {"role": "assistant", "content": ""}, "finish_reason": "stop"}]})
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", "a-key-for-this-test")
 
     assert _run(tmp_path, "local/m")[0] == 1 and "local gave no answer for m" in capsys.readouterr().err
 
@@ -375,8 +375,8 @@ def test_the_client_with_a_tree_runs_read_grep_glob_and_list_and_answers(monkeyp
         ),
     ]
     served = endpoint(turns=turns)
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
 
     code, answer = _run(tmp_path, "local/m", "review prompt", tree=tree)
 
@@ -428,8 +428,8 @@ def test_confinement_refuses_absolute_paths_parent_escapes_and_links_out_and_kee
         ),
     ]
     served = endpoint(turns=turns)
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
 
     code, answer = _run(tmp_path, "local/m", tree=tree)
 
@@ -469,8 +469,8 @@ def test_harness_configuration_is_hidden_from_the_tools_at_every_depth(monkeypat
         ),
     ]
     served = endpoint(turns=turns)
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
 
     code, answer = _run(tmp_path, "local/m", tree=tree)
 
@@ -508,8 +508,8 @@ def test_each_answer_bound_and_each_turn_bound_tells_the_model_and_asks_for_a_ve
             ("list", {"path": "."}),
         ),
     ])
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
     code, answer = _run(tmp_path, "local/m", tree=tree)
     assert code == 0 and answer == APPROVED
     ans_tools = [m["content"] for m in served.requests[1]["body"]["messages"] if m["role"] == "tool"]
@@ -530,7 +530,7 @@ def test_each_answer_bound_and_each_turn_bound_tells_the_model_and_asks_for_a_ve
         _tool_turn(("list", {"path": "."})),
         _tool_turn(("list", {"path": "."})),
     ])
-    _providers(monkeypatch, tmp_path, f"local {served_rounds.url} AO_TEST_API_KEY")
+    _providers(monkeypatch, tmp_path, f"local {served_rounds.url} POLYCTL_TEST_API_KEY")
     code, answer = _run(tmp_path, "local/m", tree=tree)
     assert code == 0 and answer == APPROVED and len(served_rounds.requests) == 3
     assert served_rounds.requests[0]["body"]["tools"] == api_review.TOOLS
@@ -544,7 +544,7 @@ def test_each_answer_bound_and_each_turn_bound_tells_the_model_and_asks_for_a_ve
     monkeypatch.setattr(api_review, "TURN_MAX_ROUNDS", 24)
     monkeypatch.setattr(api_review, "TURN_MAX_READ_BYTES", 25)
     served_bytes = endpoint(turns=[_tool_turn(("read", {"path": "f0.py"}))])
-    _providers(monkeypatch, tmp_path, f"local {served_bytes.url} AO_TEST_API_KEY")
+    _providers(monkeypatch, tmp_path, f"local {served_bytes.url} POLYCTL_TEST_API_KEY")
     code, answer = _run(tmp_path, "local/m", tree=tree)
     assert code == 0 and answer == APPROVED and len(served_bytes.requests) == 2
     assert served_bytes.requests[1]["body"]["tools"] == api_review.TOOLS
@@ -557,7 +557,7 @@ def test_each_answer_bound_and_each_turn_bound_tells_the_model_and_asks_for_a_ve
     monkeypatch.setattr(api_review, "TURN_MAX_READ_BYTES", 2_097_152)
     monkeypatch.setattr(api_review, "TURN_MAX_SECONDS", 0.0)
     served_time = endpoint(turns=[_tool_turn(("read", {"path": "f0.py"}))])
-    _providers(monkeypatch, tmp_path, f"local {served_time.url} AO_TEST_API_KEY")
+    _providers(monkeypatch, tmp_path, f"local {served_time.url} POLYCTL_TEST_API_KEY")
     code, answer = _run(tmp_path, "local/m", tree=tree)
     assert code == 0 and answer == APPROVED and len(served_time.requests) == 2
     assert served_time.requests[1]["body"]["tools"] == api_review.TOOLS
@@ -571,8 +571,8 @@ def test_a_provider_that_refuses_tools_makes_the_review_unavailable_and_says_so(
     tree = tmp_path / "tree"
     tree.mkdir()
     refusing = endpoint(turns=[(400, {"error": {"message": "tools are not supported by this model"}})])
-    _providers(monkeypatch, tmp_path, f"local {refusing.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    _providers(monkeypatch, tmp_path, f"local {refusing.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
 
     code, answer = _run(tmp_path, "local/m", tree=tree)
 
@@ -602,18 +602,18 @@ def test_a_route_opting_into_tree_gets_the_tree_and_evidence_while_a_route_witho
         ),
     ])
     home = tmp_path / "home"
-    (home / ".ao").mkdir(parents=True, exist_ok=True)
-    (home / ".ao" / "settings.json").write_text(json.dumps(
-        {"review": {"api_providers": [f"local {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    (home / ".polyctl").mkdir(parents=True, exist_ok=True)
+    (home / ".polyctl" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {served.url} POLYCTL_TEST_API_KEY"]}}), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("PYTHONPATH", os.path.join(A.REPO, "src"))
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
-    client = cli._tool_beside_interpreter("ao-api-review")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
+    client = cli._tool_beside_interpreter("polyctl-api-review")
     if client is None:
-        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+        pytest.skip("the client's script is installed with polyctl, and this interpreter has none")
     monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root_, name: (
-        (client, "ao-api-review") if name in ("ao-api-review", client) else (None, None)))
+        (client, "polyctl-api-review") if name in ("polyctl-api-review", client) else (None, None)))
 
     # 1. Opted-in route with --tree {tree}
     composed = A.compose_reviewer("openai-api", model="local/m", family="zhipu")
@@ -643,8 +643,8 @@ def test_a_route_opting_into_tree_gets_the_tree_and_evidence_while_a_route_witho
 
     # 2. Route without --tree {tree}: one request, no tools, no tree note
     plain_served = endpoint()
-    (home / ".ao" / "settings.json").write_text(json.dumps(
-        {"review": {"api_providers": [f"local {plain_served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    (home / ".polyctl" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {plain_served.url} POLYCTL_TEST_API_KEY"]}}), encoding="utf-8")
     plain_route = dict(composed, id="rv-plain")
 
     assert cli.cmd_review(dict(project, reviewer=plain_route), _args()) == 0
@@ -664,27 +664,27 @@ def test_a_route_opting_into_tree_drops_the_tree_flag_on_probe_and_keeps_it_on_r
     import secrets
     root = project["root"]
     _repo_with_change(root)
-    client = cli._tool_beside_interpreter("ao-api-review")
+    client = cli._tool_beside_interpreter("polyctl-api-review")
     if client is None:
-        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+        pytest.skip("the client's script is installed with polyctl, and this interpreter has none")
     monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root_, name: (
-        (client, "ao-api-review") if name in ("ao-api-review", client) else (None, None)))
+        (client, "polyctl-api-review") if name in ("polyctl-api-review", client) else (None, None)))
     home = tmp_path / "home"
-    (home / ".ao").mkdir(parents=True, exist_ok=True)
+    (home / ".polyctl").mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("PYTHONPATH", os.path.join(A.REPO, "src"))
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
 
     composed = A.compose_reviewer("openai-api", model="local/m", family="zhipu")
     tree_route = dict(composed, id="rv-tree", argv=composed["argv"][:-1] + ["--tree", "{tree}", composed["argv"][-1]])
 
     # 1. Reviewer probe of the route with `--tree {tree}`: no candidate tree, so `--tree {tree}` leaves and the
     # prompt is not misread as `--tree`'s argument.
-    monkeypatch.setattr(cli, "_reviewer_probe_nonce", lambda: "AO-REVIEWER-PROBE-deadbeef")
-    probe_served = endpoint(answer="AO-REVIEWER-PROBE-deadbeef")
-    (home / ".ao" / "settings.json").write_text(json.dumps(
-        {"review": {"api_providers": [f"local {probe_served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    monkeypatch.setattr(cli, "_reviewer_probe_nonce", lambda: "POLYCTL-REVIEWER-PROBE-deadbeef")
+    probe_served = endpoint(answer="POLYCTL-REVIEWER-PROBE-deadbeef")
+    (home / ".polyctl" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {probe_served.url} POLYCTL_TEST_API_KEY"]}}), encoding="utf-8")
 
     probe = cli._reviewer_probe(dict(project, reviewer=tree_route), timeout=30)
 
@@ -692,13 +692,13 @@ def test_a_route_opting_into_tree_drops_the_tree_flag_on_probe_and_keeps_it_on_r
     (probe_req,) = probe_served.requests
     assert "tools" not in probe_req["body"]
     probe_prompt = probe_req["body"]["messages"][0]["content"]
-    assert "AO-REVIEWER-PROBE-deadbeef" in probe_prompt
+    assert "POLYCTL-REVIEWER-PROBE-deadbeef" in probe_prompt
     assert cli._tree_note(project, True) not in probe_prompt
 
     # 2. A review of the same route with a candidate fills `--tree {tree}` and offers tools.
     review_served = endpoint(turns=[_tool_turn(("read", {"path": "src/a.py"}))])
-    (home / ".ao" / "settings.json").write_text(json.dumps(
-        {"review": {"api_providers": [f"local {review_served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    (home / ".polyctl" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {review_served.url} POLYCTL_TEST_API_KEY"]}}), encoding="utf-8")
 
     assert cli.cmd_review(dict(project, reviewer=tree_route), _args()) == 0
 
@@ -709,65 +709,65 @@ def test_a_route_opting_into_tree_drops_the_tree_flag_on_probe_and_keeps_it_on_r
     assert len(tool_msgs) == 1 and "x = 2" in tool_msgs[0]["content"]
 
 
-def test_ao_runs_its_own_installations_client_before_path_and_doctor_names_a_mismatched_path_copy(
+def test_polyctl_runs_its_own_installations_client_before_path_and_doctor_names_a_mismatched_path_copy(
         project, monkeypatch, tmp_path, endpoint):
-    """API-REVIEWER-TOOLS-2: a tool that ships with ao runs from the installation of the ao that runs it first, and
-    `ao doctor` names a PATH copy whose version differs from ao's own."""
+    """API-REVIEWER-TOOLS-2: a tool that ships with polyctl runs from the installation of the polyctl that runs it first, and
+    `polyctl doctor` names a PATH copy whose version differs from polyctl's own."""
     import secrets
     import sys
     root = project["root"]
     _repo_with_change(root)
-    client = cli._tool_beside_interpreter("ao-api-review")
+    client = cli._tool_beside_interpreter("polyctl-api-review")
     if client is None:
-        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+        pytest.skip("the client's script is installed with polyctl, and this interpreter has none")
 
-    # Put an older `ao-api-review` (0.5.2, which rejects `--tree`) first on PATH.
+    # Put an older `polyctl-api-review` (0.5.2, which rejects `--tree`) first on PATH.
     stale_bin = tmp_path / "stale-bin"
     stale_bin.mkdir()
     stale_marker = tmp_path / "stale-ran"
-    stale_script = stale_bin / ("ao-api-review.cmd" if os.name == "nt" else "ao-api-review")
+    stale_script = stale_bin / ("polyctl-api-review.cmd" if os.name == "nt" else "polyctl-api-review")
     if os.name == "nt":
         stale_script.write_text(
-            f'@echo off\nif "%1"=="--version" (\n  echo ao-api-review 0.5.2\n  exit /b 0\n)\n'
+            f'@echo off\nif "%1"=="--version" (\n  echo polyctl-api-review 0.5.2\n  exit /b 0\n)\n'
             f'echo stale > "{stale_marker}"\nexit /b 2\n',
             encoding="utf-8",
         )
     else:
         stale_script.write_text(
-            f"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo \"ao-api-review 0.5.2\"\n  exit 0\nfi\n"
+            f"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo \"polyctl-api-review 0.5.2\"\n  exit 0\nfi\n"
             f"echo stale > {str(stale_marker)!r}\nexit 2\n",
             encoding="utf-8",
         )
         stale_script.chmod(0o755)
     monkeypatch.setenv("PATH", str(stale_bin) + os.pathsep + os.environ.get("PATH", ""))
 
-    # 1. `ao doctor` names the mismatched PATH copy, and says nothing when its version matches ao's own.
+    # 1. `polyctl doctor` names the mismatched PATH copy, and says nothing when its version matches polyctl's own.
     lines = cli._shipped_tool_lines(root)
     assert len(lines) == 1
     assert str(stale_script) in lines[0] and "0.5.2" in lines[0] and cli.__version__ in lines[0]
 
     matching_bin = tmp_path / "matching-bin"
     matching_bin.mkdir()
-    matching_script = matching_bin / ("ao-api-review.cmd" if os.name == "nt" else "ao-api-review")
+    matching_script = matching_bin / ("polyctl-api-review.cmd" if os.name == "nt" else "polyctl-api-review")
     if os.name == "nt":
-        matching_script.write_text(f"@echo off\necho ao-api-review {cli.__version__}\n", encoding="utf-8")
+        matching_script.write_text(f"@echo off\necho polyctl-api-review {cli.__version__}\n", encoding="utf-8")
     else:
-        matching_script.write_text(f"#!/bin/sh\necho \"ao-api-review {cli.__version__}\"\n", encoding="utf-8")
+        matching_script.write_text(f"#!/bin/sh\necho \"polyctl-api-review {cli.__version__}\"\n", encoding="utf-8")
         matching_script.chmod(0o755)
     monkeypatch.setenv("PATH", str(matching_bin))
     assert cli._shipped_tool_lines(root) == []
 
-    # 2. With the stale copy first on PATH, a review still runs this ao's own installation's copy beside sys.executable.
+    # 2. With the stale copy first on PATH, a review still runs this polyctl's own installation's copy beside sys.executable.
     monkeypatch.setenv("PATH", str(stale_bin) + os.pathsep + os.environ.get("PATH", ""))
     served = endpoint(turns=[_tool_turn(("read", {"path": "src/a.py"}))])
     home = tmp_path / "home"
-    (home / ".ao").mkdir(parents=True, exist_ok=True)
-    (home / ".ao" / "settings.json").write_text(json.dumps(
-        {"review": {"api_providers": [f"local {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    (home / ".polyctl").mkdir(parents=True, exist_ok=True)
+    (home / ".polyctl" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {served.url} POLYCTL_TEST_API_KEY"]}}), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("PYTHONPATH", os.path.join(A.REPO, "src"))
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
     composed = A.compose_reviewer("openai-api", model="local/m", family="zhipu")
     tree_route = dict(composed, id="rv-tree", argv=composed["argv"][:-1] + ["--tree", "{tree}", composed["argv"][-1]])
 
@@ -808,8 +808,8 @@ def test_tool_calls_without_ids_or_with_duplicate_ids_receive_unique_matching_id
         }, "finish_reason": "tool_calls"}]},
     ]
     served = endpoint(turns=turns)
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
 
     code, answer = _run(tmp_path, "local/m", tree=tree)
 
@@ -857,8 +857,8 @@ def test_raised_bounds_and_tool_prompt_note_and_follow_up_requests_carry_tools_a
 
     # 1. One tool call before any bound: next request carries the same `tools` and no `tool_choice`.
     served = endpoint(turns=[_tool_turn(("read", {"path": "large.py", "first_line": 1, "line_count": 2_000}))])
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
 
     code, answer = _run(tmp_path, "local/m", "initial review prompt", tree=tree)
 
@@ -876,7 +876,7 @@ def test_raised_bounds_and_tool_prompt_note_and_follow_up_requests_carry_tools_a
     # 2. One tool call that reaches a bound: next request still carries `tools` AND `tool_choice: "none"`.
     monkeypatch.setattr(api_review, "TURN_MAX_ROUNDS", 1)
     served_bound = endpoint(turns=[_tool_turn(("list", {"path": "."}))])
-    _providers(monkeypatch, tmp_path, f"local {served_bound.url} AO_TEST_API_KEY")
+    _providers(monkeypatch, tmp_path, f"local {served_bound.url} POLYCTL_TEST_API_KEY")
 
     code, answer = _run(tmp_path, "local/m", "initial review prompt", tree=tree)
 
@@ -902,8 +902,8 @@ def test_read_window_bounds_lines_and_bytes_and_pages_with_first_line_and_line_c
         _tool_turn(("read", {"path": "by_lines.py"})),
         _tool_turn(("read", {"path": "by_lines.py", "first_line": 2_001, "line_count": 500})),
     ])
-    _providers(monkeypatch, tmp_path, f"local {served_lines.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    _providers(monkeypatch, tmp_path, f"local {served_lines.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
 
     code, answer = _run(tmp_path, "local/m", tree=tree)
 
@@ -959,7 +959,7 @@ def test_still_calling_tools_under_none_answers_once_without_running_them_and_en
     (tree / "ok.py").write_text("OK = 1\n", encoding="utf-8")
     (tree / "canary.py").write_text("CANARY_NEVER_READ = 1\n", encoding="utf-8")
     monkeypatch.setattr(api_review, "TURN_MAX_ROUNDS", 1)
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
 
     # 1. Provider calls a tool once under `tool_choice: "none"`, receives "no more tools: give the verdict", and then
     # gives its verdict.
@@ -970,7 +970,7 @@ def test_still_calling_tools_under_none_answers_once_without_running_them_and_en
             ("list", {"path": "."}),
         ),
     ])
-    _providers(monkeypatch, tmp_path, f"local {served_once.url} AO_TEST_API_KEY")
+    _providers(monkeypatch, tmp_path, f"local {served_once.url} POLYCTL_TEST_API_KEY")
 
     code, answer = _run(tmp_path, "local/m", tree=tree)
 
@@ -988,7 +988,7 @@ def test_still_calling_tools_under_none_answers_once_without_running_them_and_en
     stats = json.loads((tmp_path / "answer.md.tool.json").read_text(encoding="utf-8"))
     assert stats["rounds"] == 1 and stats["read_bytes"] == len(b"OK = 1\n")
 
-    # 2. Provider calls tools a second time under `tool_choice: "none"`: client exits 1 saying so, and `ao review`
+    # 2. Provider calls tools a second time under `tool_choice: "none"`: client exits 1 saying so, and `polyctl review`
     # records UNAVAILABLE.
     (tmp_path / "answer.md").unlink()
     served_twice = endpoint(turns=[
@@ -996,7 +996,7 @@ def test_still_calling_tools_under_none_answers_once_without_running_them_and_en
         _tool_turn(("read", {"path": "canary.py"})),
         _tool_turn(("read", {"path": "canary.py"})),
     ])
-    _providers(monkeypatch, tmp_path, f"local {served_twice.url} AO_TEST_API_KEY")
+    _providers(monkeypatch, tmp_path, f"local {served_twice.url} POLYCTL_TEST_API_KEY")
 
     code2, answer2 = _run(tmp_path, "local/m", tree=tree)
 
@@ -1006,16 +1006,16 @@ def test_still_calling_tools_under_none_answers_once_without_running_them_and_en
 
     root = project["root"]
     _repo_with_change(root)
-    client = cli._tool_beside_interpreter("ao-api-review")
+    client = cli._tool_beside_interpreter("polyctl-api-review")
     if client is None:
-        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+        pytest.skip("the client's script is installed with polyctl, and this interpreter has none")
     monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root_, name: (
-        (client, "ao-api-review") if name in ("ao-api-review", client) else (None, None)))
+        (client, "polyctl-api-review") if name in ("polyctl-api-review", client) else (None, None)))
     served_review = endpoint(turns=[_tool_turn(("read", {"path": "src/a.py"})) for _ in range(26)])
     home = tmp_path / "home"
-    (home / ".ao").mkdir(parents=True, exist_ok=True)
-    (home / ".ao" / "settings.json").write_text(json.dumps(
-        {"review": {"api_providers": [f"local {served_review.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    (home / ".polyctl").mkdir(parents=True, exist_ok=True)
+    (home / ".polyctl" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {served_review.url} POLYCTL_TEST_API_KEY"]}}), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("PYTHONPATH", os.path.join(A.REPO, "src"))
@@ -1035,37 +1035,37 @@ def test_grep_across_a_multi_mib_tree_keeps_tools_and_read_pages_past_two_mib(mo
     subsequent `read` calls, and `read` can page through a file past 2 MiB."""
     import secrets
     tree = tmp_path / "tree"
-    src_ao = tree / "src" / "ao"
-    src_ao.mkdir(parents=True)
+    src_polyctl = tree / "src" / "polyctl"
+    src_polyctl.mkdir(parents=True)
     # Ten ~350 KiB modules (~3.5 MiB total > 2 MiB turn bound), matching in the first and last modules.
     filler = ("filler_line = '0123456789abcdef0123456789abcdef0123456789abcdef'\n" * 5_400)
     for i in range(10):
         tail = f"target_hook_{i} = {i}\n" if i in (0, 9) else "no_target_here = 0\n"
-        (src_ao / f"mod_{i:02d}.py").write_text(filler + tail, encoding="utf-8")
+        (src_polyctl / f"mod_{i:02d}.py").write_text(filler + tail, encoding="utf-8")
     # A single ~2.34 MiB file (45,000 lines > 2 MiB) whose last 500 lines sit past byte 2,097,152.
     huge_lines = [f"huge_row_{idx:05d} = '{'x' * 30}'\n" for idx in range(1, 45_001)]
-    (src_ao / "huge.py").write_text("".join(huge_lines), encoding="utf-8")
+    (src_polyctl / "huge.py").write_text("".join(huge_lines), encoding="utf-8")
 
     served = endpoint(turns=[
-        _tool_turn(("grep", {"pattern": r"target_hook_\d+", "path": "src/ao"})),
+        _tool_turn(("grep", {"pattern": r"target_hook_\d+", "path": "src/polyctl"})),
         _tool_turn(
-            ("read", {"path": "src/ao/mod_09.py", "first_line": 5_400, "line_count": 2}),
-            ("read", {"path": "src/ao/huge.py", "first_line": 44_501, "line_count": 500}),
+            ("read", {"path": "src/polyctl/mod_09.py", "first_line": 5_400, "line_count": 2}),
+            ("read", {"path": "src/polyctl/huge.py", "first_line": 44_501, "line_count": 500}),
         ),
     ])
-    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
-    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    _providers(monkeypatch, tmp_path, f"local {served.url} POLYCTL_TEST_API_KEY")
+    monkeypatch.setenv("POLYCTL_TEST_API_KEY", secrets.token_hex(8))
 
     code, answer = _run(tmp_path, "local/m", tree=tree)
 
     assert code == 0 and answer == APPROVED and len(served.requests) == 3
-    # Round 1: grep searched all 3.5+ MiB of src/ao, returned matches from both mod_00 and mod_09, and did not hit
+    # Round 1: grep searched all 3.5+ MiB of src/polyctl, returned matches from both mod_00 and mod_09, and did not hit
     # the turn bound or set tool_choice="none".
     assert "tool_choice" not in served.requests[1]["body"]
     assert served.requests[1]["body"]["tools"] == api_review.TOOLS
     grep_out = [m["content"] for m in served.requests[1]["body"]["messages"] if m["role"] == "tool"][0]
-    assert "src/ao/mod_00.py:5401: target_hook_0 = 0" in grep_out
-    assert "src/ao/mod_09.py:5401: target_hook_9 = 9" in grep_out
+    assert "src/polyctl/mod_00.py:5401: target_hook_0 = 0" in grep_out
+    assert "src/polyctl/mod_09.py:5401: target_hook_9 = 9" in grep_out
     assert "turn bound reached" not in grep_out
 
     # Round 2: read ran on mod_09 and paged the tail of huge.py past the 2 MiB mark.

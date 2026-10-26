@@ -1,6 +1,6 @@
 import time
 
-from ao import watchdog as W
+from polyctl import watchdog as W
 
 
 def _log(tmp_path, *segments):

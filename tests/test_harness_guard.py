@@ -11,7 +11,7 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-ADAPTERS = ROOT / "src" / "ao" / "adapters"
+ADAPTERS = ROOT / "src" / "polyctl" / "adapters"
 # Commands that are ordinary words first - an A2A role is "agent" - say nothing about a harness.
 ORDINARY = {"agent", "amp", "cloud", "cmd", "cursor", "pi", "q"}
 
@@ -72,7 +72,7 @@ def test_no_core_module_names_a_harness():
     words, markers = _harness_words()
     assert {"kiro", "claude-code", "kiro-cli", "codex", "qwen"} <= words and {".kiro", "CLAUDE.md"} <= markers
 
-    found = [hit for path in sorted((ROOT / "src" / "ao").rglob("*.py")) for hit in _hits(path, words, markers)]
+    found = [hit for path in sorted((ROOT / "src" / "polyctl").rglob("*.py")) for hit in _hits(path, words, markers)]
 
     assert found == []
 

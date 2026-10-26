@@ -1,8 +1,8 @@
-"""A lock ao keeps is a file an agent can replace, and a link put in its place was followed.
+"""A lock polyctl keeps is a file an agent can replace, and a link put in its place was followed.
 
 `_exclusive_lock` opened its file "a+b", which follows a final link and creates the file it names, and wrote a byte
-into a file it found empty: a link put where a lock is kept - `.ao/` in the working tree holds several, the reviews'
-submission lock among them - had ao create a file wherever the link pointed, outside the tree an agent may write,
+into a file it found empty: a link put where a lock is kept - `.polyctl/` in the working tree holds several, the reviews'
+submission lock among them - had polyctl create a file wherever the link pointed, outside the tree an agent may write,
 and write into it. A lock is now opened through no final link, and only as a regular file; anything else is refused
 and named (LOCK-LINKS).
 """
@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import storage
+from polyctl import storage
 
 
 def _link(target, at):
@@ -82,7 +82,7 @@ def test_a_file_with_another_name_where_a_lock_is_kept_is_refused_and_stays_empt
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows cannot unlink a file held open")
 def test_a_lock_file_that_lost_its_name_as_it_was_opened_is_refused(tmp_path, monkeypatch):
-    """A file with no name left is no lock another writer of ao can find: every count of names but one is refused."""
+    """A file with no name left is no lock another writer of polyctl can find: every count of names but one is refused."""
     lock = tmp_path / "ledger.jsonl.lock"
     real_open = os.open
 

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from ao import cli, lib as A, mcp, storage
-from ao.storage import append_jsonl
+from polyctl import cli, lib as A, mcp, storage
+from polyctl.storage import append_jsonl
 
 
 def _meta(version=mcp.PROTOCOL_2026, **extra):
@@ -25,7 +25,7 @@ def _with_meta(params, version):
 
 
 def _serve(monkeypatch, capsys, root, requests, *extra_argv):
-    argv = ["ao-mcp"]
+    argv = ["polyctl-mcp"]
     if root is not None:
         argv += ["-C", str(root)]
     argv += list(extra_argv)
@@ -47,7 +47,7 @@ def _tree(root):
 def _make_project(tmp_path, name, slice_id="S1"):
     root = tmp_path / name
     root.mkdir()
-    (root / ".ao" / "ledger").mkdir(parents=True)
+    (root / ".polyctl" / "ledger").mkdir(parents=True)
     (root / "agent-mail").mkdir()
     (root / "semantic-review").mkdir()
     cfg = {
@@ -61,15 +61,15 @@ def _make_project(tmp_path, name, slice_id="S1"):
         },
         "roles": {"architect": "claude-arch", "implementer": "kiro-impl", "reviewer": "codex-rev"},
     }
-    (root / ".ao" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
-    (root / ".ao" / "board.md").write_text(
+    (root / ".polyctl" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    (root / ".polyctl" / "board.md").write_text(
         f"# Board\n\n## running\n- [{slice_id}] Slice for {name} · acceptance: tests pass\n\n"
         "## blocked\n\n## queued\n\n## inbox\n\n## verified\n\n## done\n",
         encoding="utf-8",
     )
     A.record_slice_move(str(root), slice_id, "queued", "running", by="implementer", why="start")
     storage.append_chained_jsonl(
-        str(root / ".ao" / "ledger" / "decisions.jsonl"),
+        str(root / ".polyctl" / "ledger" / "decisions.jsonl"),
         {"id": "DEC-1", "decision": f"Use stdlib in {name}", "why": "zero deps", "scope": "mcp", "at": 1700000010},
         A.DECISION_CHAIN,
     )
@@ -80,18 +80,18 @@ def _make_project(tmp_path, name, slice_id="S1"):
 @pytest.mark.parametrize("version", [mcp.PROTOCOL_2026, mcp.PROTOCOL, None])
 def test_resources_and_templates_list_and_read_under_every_protocol_version(project, monkeypatch, capsys, version):
     root = project["root"]
-    Path(root, ".ao", "board.md").write_text(
+    Path(root, ".polyctl", "board.md").write_text(
         "# Board\n\n## running\n- [MCP-RES] Resources and prompts · acceptance: spec compliant\n\n"
         "## blocked\n\n## queued\n\n## inbox\n\n## verified\n\n## done\n",
         encoding="utf-8",
     )
     A.record_slice_move(root, "MCP-RES", "queued", "running", by="implementer", why="start")
     storage.append_chained_jsonl(
-        str(Path(root, ".ao", "ledger", "decisions.jsonl")),
+        str(Path(root, ".polyctl", "ledger", "decisions.jsonl")),
         {"id": "DEC-9", "decision": "Keep authority in the CLI", "why": "separation of duties", "at": 1700000100},
         A.DECISION_CHAIN,
     )
-    A.ask(root, "Keep URI scheme ao://?", ["yes", "no"], slice_id="MCP-RES", cfg=project)
+    A.ask(root, "Keep URI scheme polyctl://?", ["yes", "no"], slice_id="MCP-RES", cfg=project)
 
     requests = []
     if version is None:
@@ -101,11 +101,11 @@ def test_resources_and_templates_list_and_read_under_every_protocol_version(proj
     requests += [
         {"id": 1, "method": "resources/list", "params": _with_meta({}, version)},
         {"id": 2, "method": "resources/templates/list", "params": _with_meta({}, version)},
-        {"id": 3, "method": "resources/read", "params": _with_meta({"uri": "ao://proj/board"}, version)},
-        {"id": 4, "method": "resources/read", "params": _with_meta({"uri": "ao://proj/roles"}, version)},
-        {"id": 5, "method": "resources/read", "params": _with_meta({"uri": "ao://proj/ledger"}, version)},
-        {"id": 6, "method": "resources/read", "params": _with_meta({"uri": "ao://proj/decisions"}, version)},
-        {"id": 7, "method": "resources/read", "params": _with_meta({"uri": "ao://proj/unknown"}, version)},
+        {"id": 3, "method": "resources/read", "params": _with_meta({"uri": "polyctl://proj/board"}, version)},
+        {"id": 4, "method": "resources/read", "params": _with_meta({"uri": "polyctl://proj/roles"}, version)},
+        {"id": 5, "method": "resources/read", "params": _with_meta({"uri": "polyctl://proj/ledger"}, version)},
+        {"id": 6, "method": "resources/read", "params": _with_meta({"uri": "polyctl://proj/decisions"}, version)},
+        {"id": 7, "method": "resources/read", "params": _with_meta({"uri": "polyctl://proj/unknown"}, version)},
     ]
 
     before = _tree(root)
@@ -114,19 +114,19 @@ def test_resources_and_templates_list_and_read_under_every_protocol_version(proj
 
     listed = answers[1]["result"]["resources"]
     assert [r["uri"] for r in listed] == [
-        "ao://proj/board",
-        "ao://proj/roles",
-        "ao://proj/ledger",
-        "ao://proj/decisions",
+        "polyctl://proj/board",
+        "polyctl://proj/roles",
+        "polyctl://proj/ledger",
+        "polyctl://proj/decisions",
     ]
     assert all(r["mimeType"] == "application/json" and r["name"].startswith("proj/") for r in listed)
 
     templates = answers[2]["result"]["resourceTemplates"]
     assert [t["uriTemplate"] for t in templates] == [
-        "ao://{project}/board",
-        "ao://{project}/roles",
-        "ao://{project}/ledger",
-        "ao://{project}/decisions",
+        "polyctl://{project}/board",
+        "polyctl://{project}/roles",
+        "polyctl://{project}/ledger",
+        "polyctl://{project}/decisions",
     ]
     assert all(t["mimeType"] == "application/json" for t in templates)
 
@@ -141,22 +141,22 @@ def test_resources_and_templates_list_and_read_under_every_protocol_version(proj
         assert answers[7]["error"]["code"] == -32002
 
     board = json.loads(answers[3]["result"]["contents"][0]["text"])
-    assert board["project"] == "proj" and board["uri"] == "ao://proj/board" and board["authority"] == "none"
+    assert board["project"] == "proj" and board["uri"] == "polyctl://proj/board" and board["authority"] == "none"
     assert board["counts"]["running"] == 1
 
     roles = json.loads(answers[4]["result"]["contents"][0]["text"])
-    assert roles["project"] == "proj" and roles["uri"] == "ao://proj/roles" and roles["authority"] == "none"
+    assert roles["project"] == "proj" and roles["uri"] == "polyctl://proj/roles" and roles["authority"] == "none"
     assert set(roles["roles"]) == {"architect", "implementer", "reviewer"}
 
     ledger = json.loads(answers[5]["result"]["contents"][0]["text"])
-    assert ledger["project"] == "proj" and ledger["uri"] == "ao://proj/ledger" and ledger["authority"] == "none"
+    assert ledger["project"] == "proj" and ledger["uri"] == "polyctl://proj/ledger" and ledger["authority"] == "none"
     assert ledger["counts"]["slices"] == 1
     assert ledger["counts"]["decisions"] == 1
     assert ledger["latest_slice"]["slice"] == "MCP-RES"
     assert "token" not in json.dumps(ledger)
 
     decisions = json.loads(answers[6]["result"]["contents"][0]["text"])
-    assert decisions["project"] == "proj" and decisions["uri"] == "ao://proj/decisions" and decisions["authority"] == "none"
+    assert decisions["project"] == "proj" and decisions["uri"] == "polyctl://proj/decisions" and decisions["authority"] == "none"
     assert decisions["decisions"][-1]["decision"] == "Keep authority in the CLI"
     assert decisions["open_count"] == 1
 
@@ -182,17 +182,17 @@ def test_prompts_list_and_get_under_every_protocol_version(project, monkeypatch,
     assert [p["name"] for p in prompts] == ["status", "land-slice", "stuck"]
     by_name = {p["name"]: p for p in prompts}
     assert by_name["status"]["arguments"] == [
-        {"name": "project", "description": "Project name in ao's project registry", "required": False}
+        {"name": "project", "description": "Project name in polyctl's project registry", "required": False}
     ]
     assert by_name["land-slice"]["arguments"] == [
-        {"name": "project", "description": "Project name in ao's project registry", "required": False},
+        {"name": "project", "description": "Project name in polyctl's project registry", "required": False},
         {"name": "slice", "description": "Slice id on the project's board to land", "required": True},
     ]
 
     for req_id, expected_tools in (
-        (2, ("ao_status", "ao_board", "ao_decisions", "ao_notices")),
-        (3, ("ao_board", "ao_status", "ao_inbox", "ao_decisions", "ao_verify", "ao_candidate")),
-        (4, ("ao_status", "ao_board", "ao_decisions", "ao_notices", "ao_watchdog", "ao_inbox")),
+        (2, ("polyctl_status", "polyctl_board", "polyctl_decisions", "polyctl_notices")),
+        (3, ("polyctl_board", "polyctl_status", "polyctl_inbox", "polyctl_decisions", "polyctl_verify", "polyctl_candidate")),
+        (4, ("polyctl_status", "polyctl_board", "polyctl_decisions", "polyctl_notices", "polyctl_watchdog", "polyctl_inbox")),
     ):
         res = answers[req_id]["result"]
         if version == mcp.PROTOCOL_2026:
@@ -229,21 +229,21 @@ def test_project_all_serves_every_registered_project_and_refuses_any_outside_the
         {"id": 2, "method": "resources/list", "params": {"_meta": _meta("2026-07-28")}},
         {"id": 3, "method": "prompts/list", "params": {"_meta": _meta("2026-07-28")}},
         {"id": 4, "method": "tools/call",
-         "params": {"name": "ao_board", "arguments": {"project": "alpha"}, "_meta": _meta("2026-07-28")}},
+         "params": {"name": "polyctl_board", "arguments": {"project": "alpha"}, "_meta": _meta("2026-07-28")}},
         {"id": 5, "method": "tools/call",
-         "params": {"name": "ao_board", "arguments": {"project": "beta"}, "_meta": _meta("2026-07-28")}},
+         "params": {"name": "polyctl_board", "arguments": {"project": "beta"}, "_meta": _meta("2026-07-28")}},
         {"id": 6, "method": "tools/call",
-         "params": {"name": "ao_board", "arguments": {"project": "outsider"}, "_meta": _meta("2026-07-28")}},
+         "params": {"name": "polyctl_board", "arguments": {"project": "outsider"}, "_meta": _meta("2026-07-28")}},
         {"id": 7, "method": "tools/call",
-         "params": {"name": "ao_board", "arguments": {}, "_meta": _meta("2026-07-28")}},
+         "params": {"name": "polyctl_board", "arguments": {}, "_meta": _meta("2026-07-28")}},
         {"id": 8, "method": "resources/read",
-         "params": {"uri": "ao://alpha/board", "_meta": _meta("2026-07-28")}},
+         "params": {"uri": "polyctl://alpha/board", "_meta": _meta("2026-07-28")}},
         {"id": 9, "method": "resources/read",
-         "params": {"uri": "ao://beta/ledger", "_meta": _meta("2026-07-28")}},
+         "params": {"uri": "polyctl://beta/ledger", "_meta": _meta("2026-07-28")}},
         {"id": 10, "method": "resources/read",
-         "params": {"uri": "ao://outsider/board", "_meta": _meta("2026-07-28")}},
+         "params": {"uri": "polyctl://outsider/board", "_meta": _meta("2026-07-28")}},
         {"id": 11, "method": "resources/read",
-         "params": {"uri": "ao://outsider/board", "_meta": _meta("2025-06-18")}},
+         "params": {"uri": "polyctl://outsider/board", "_meta": _meta("2025-06-18")}},
         {"id": 12, "method": "prompts/get",
          "params": {"name": "land-slice", "arguments": {"project": "alpha", "slice": "A-1"},
                     "_meta": _meta("2026-07-28")}},
@@ -263,8 +263,8 @@ def test_project_all_serves_every_registered_project_and_refuses_any_outside_the
 
     uris = [r["uri"] for r in answers[2]["result"]["resources"]]
     assert uris == [
-        "ao://alpha/board", "ao://alpha/roles", "ao://alpha/ledger", "ao://alpha/decisions",
-        "ao://beta/board", "ao://beta/roles", "ao://beta/ledger", "ao://beta/decisions",
+        "polyctl://alpha/board", "polyctl://alpha/roles", "polyctl://alpha/ledger", "polyctl://alpha/decisions",
+        "polyctl://beta/board", "polyctl://beta/roles", "polyctl://beta/ledger", "polyctl://beta/decisions",
     ]
     assert all("outsider" not in uri for uri in uris)
 
@@ -279,7 +279,7 @@ def test_project_all_serves_every_registered_project_and_refuses_any_outside_the
     assert board_beta["project"] == "beta" and board_beta["states"]["running"][0]["id"] == "B-1"
 
     refused_tool = json.loads(answers[6]["result"]["content"][0]["text"])
-    assert "not in ao's project registry" in refused_tool["error"]
+    assert "not in polyctl's project registry" in refused_tool["error"]
     missing_proj_tool = json.loads(answers[7]["result"]["content"][0]["text"])
     assert "project is required with --project all" in missing_proj_tool["error"]
 
@@ -289,28 +289,28 @@ def test_project_all_serves_every_registered_project_and_refuses_any_outside_the
     assert read_beta["project"] == "beta" and read_beta["latest_slice"]["slice"] == "B-1"
 
     assert answers[10]["error"]["code"] == -32602
-    assert "not in ao's project registry" in answers[10]["error"]["message"]
+    assert "not in polyctl's project registry" in answers[10]["error"]["message"]
     assert answers[11]["error"]["code"] == -32002
-    assert "not in ao's project registry" in answers[11]["error"]["message"]
+    assert "not in polyctl's project registry" in answers[11]["error"]["message"]
 
     prompt_alpha = answers[12]["result"]["messages"][0]["content"]["text"]
     assert "Project: alpha" in prompt_alpha and "Slice: A-1" in prompt_alpha
     assert answers[13]["error"]["code"] == -32602
-    assert "not in ao's project registry" in answers[13]["error"]["message"]
+    assert "not in polyctl's project registry" in answers[13]["error"]["message"]
     assert answers[14]["error"]["code"] == -32602
 
 
 def test_unknown_project_scope_stops_the_server_and_cli_config_carries_project_all(project, monkeypatch, capsys):
     root = project["root"]
-    monkeypatch.setattr("sys.argv", ["ao-mcp", "-C", root, "--project", "other"])
+    monkeypatch.setattr("sys.argv", ["polyctl-mcp", "-C", root, "--project", "other"])
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
     assert mcp.main() == 2
     assert "--project 'other' is not 'all'" in capsys.readouterr().err
 
-    monkeypatch.setattr(A, "ao_program", lambda: "/opt/ao/bin/ao")
+    monkeypatch.setattr(A, "polyctl_program", lambda: "/opt/polyctl/bin/polyctl")
     assert cli.main(["-C", root, "mcp", "config", "--project", "all", "--role", "reviewer"]) == 0
     out = capsys.readouterr().out
-    server = json.loads(out[out.index("{"):])["mcpServers"]["agent-orchestrator"]
+    server = json.loads(out[out.index("{"):])["mcpServers"]["polyctl"]
     assert server["args"] == ["-C", root, "mcp", "serve", "--project", "all", "--role", "reviewer"]
 
 
@@ -318,16 +318,16 @@ def test_authority_stays_in_the_cli_and_no_authority_command_is_reachable(projec
     root = project["root"]
     question = A.ask(root, "Approve the change?", ["yes", "no"], slice_id="S1", cfg=project)
     authority_tools = (
-        "ao_commit_ok", "ao_commit", "ao_waive", "ao_answer",
-        "ao_person_review", "ao_collect_review", "ao_harness_seen", "ao_review",
+        "polyctl_commit_ok", "polyctl_commit", "polyctl_waive", "polyctl_answer",
+        "polyctl_person_review", "polyctl_collect_review", "polyctl_harness_seen", "polyctl_review",
     )
     assert set(mcp.EVERY_TOOL).isdisjoint(authority_tools)
 
     requests = [
-        {"id": 1, "method": "resources/read", "params": {"uri": "ao://proj/board"}},
-        {"id": 2, "method": "resources/read", "params": {"uri": "ao://proj/roles"}},
-        {"id": 3, "method": "resources/read", "params": {"uri": "ao://proj/ledger"}},
-        {"id": 4, "method": "resources/read", "params": {"uri": "ao://proj/decisions"}},
+        {"id": 1, "method": "resources/read", "params": {"uri": "polyctl://proj/board"}},
+        {"id": 2, "method": "resources/read", "params": {"uri": "polyctl://proj/roles"}},
+        {"id": 3, "method": "resources/read", "params": {"uri": "polyctl://proj/ledger"}},
+        {"id": 4, "method": "resources/read", "params": {"uri": "polyctl://proj/decisions"}},
         {"id": 5, "method": "prompts/get", "params": {"name": "status"}},
         {"id": 6, "method": "prompts/get", "params": {"name": "land-slice", "arguments": {"slice": "S1"}}},
         {"id": 7, "method": "prompts/get", "params": {"name": "stuck"}},
@@ -375,7 +375,7 @@ def test_prompt_menu_and_prompt_get_are_filtered_against_the_server_role(project
     assert "messages" in impl_answers[2]["result"]
     assert "messages" in impl_answers[4]["result"]
     assert impl_answers[3]["error"]["code"] == -32602
-    assert "ao_candidate" in impl_answers[3]["error"]["message"]
+    assert "polyctl_candidate" in impl_answers[3]["error"]["message"]
 
     arch_answers, _ = _serve(monkeypatch, capsys, root, requests, "--role", "architect")
     assert [p["name"] for p in arch_answers[1]["result"]["prompts"]] == ["status", "land-slice", "stuck"]
@@ -383,7 +383,7 @@ def test_prompt_menu_and_prompt_get_are_filtered_against_the_server_role(project
 
 def test_resource_uris_percent_encode_project_keys_with_spaces_or_reserved_characters(
         tmp_path, monkeypatch, capsys):
-    """A registered project whose name contains a space emits a percent-encoded ao:// URI and reads back (MCP-2026-2)."""
+    """A registered project whose name contains a space emits a percent-encoded polyctl:// URI and reads back (MCP-2026-2)."""
     spaced = _make_project(tmp_path, "Research Workspace", slice_id="RW-1")
     registry_file = Path(A.project_registry_path())
     registry_file.parent.mkdir(parents=True, exist_ok=True)
@@ -394,24 +394,24 @@ def test_resource_uris_percent_encode_project_keys_with_spaces_or_reserved_chara
     requests = [
         {"id": 1, "method": "resources/list", "params": {"_meta": _meta("2026-07-28")}},
         {"id": 2, "method": "resources/read",
-         "params": {"uri": "ao://Research%20Workspace/board", "_meta": _meta("2026-07-28")}},
+         "params": {"uri": "polyctl://Research%20Workspace/board", "_meta": _meta("2026-07-28")}},
         {"id": 3, "method": "resources/read",
-         "params": {"uri": "ao://Research Workspace/board", "_meta": _meta("2026-07-28")}},
+         "params": {"uri": "polyctl://Research Workspace/board", "_meta": _meta("2026-07-28")}},
     ]
 
     answers, _ = _serve(monkeypatch, capsys, spaced, requests, "--project", "all")
     uris = [r["uri"] for r in answers[1]["result"]["resources"]]
     assert uris == [
-        "ao://Research%20Workspace/board",
-        "ao://Research%20Workspace/roles",
-        "ao://Research%20Workspace/ledger",
-        "ao://Research%20Workspace/decisions",
+        "polyctl://Research%20Workspace/board",
+        "polyctl://Research%20Workspace/roles",
+        "polyctl://Research%20Workspace/ledger",
+        "polyctl://Research%20Workspace/decisions",
     ]
     assert all(" " not in uri for uri in uris)
 
     board = json.loads(answers[2]["result"]["contents"][0]["text"])
     assert board["project"] == "Research Workspace"
-    assert board["uri"] == "ao://Research%20Workspace/board"
+    assert board["uri"] == "polyctl://Research%20Workspace/board"
     assert board["states"]["running"][0]["id"] == "RW-1"
     assert answers[3]["error"]["code"] == -32602
 
@@ -427,21 +427,21 @@ def test_prompt_suggested_cli_commands_shell_quote_project_paths_and_slice_ids(t
     ]
 
     answers, _ = _serve(monkeypatch, capsys, spaced, requests)
-    expected_prefix = f"ao -C {shlex.quote(str(spaced))}"
+    expected_prefix = f"polyctl -C {shlex.quote(str(spaced))}"
     for req_id in (1, 2, 3):
         text = answers[req_id]["result"]["messages"][0]["content"]["text"]
-        assert f"ao -C {spaced} " not in text
-        commands = re.findall(r"`(ao -C [^`]+)`", text)
+        assert f"polyctl -C {spaced} " not in text
+        commands = re.findall(r"`(polyctl -C [^`]+)`", text)
         assert commands, f"no CLI commands found in prompt {req_id}"
         for cmd in commands:
             assert cmd.startswith(expected_prefix + " ")
             tokens = shlex.split(cmd)
-            assert tokens[:3] == ["ao", "-C", str(spaced)]
+            assert tokens[:3] == ["polyctl", "-C", str(spaced)]
     land_text = answers[2]["result"]["messages"][0]["content"]["text"]
     assert f"--slice {shlex.quote('RW-1')}" in land_text
     assert shlex.split(
-        next(cmd for cmd in re.findall(r"`(ao -C [^`]+)`", land_text) if " commit " in cmd)
-    ) == ["ao", "-C", str(spaced), "commit", "-m", "RW-1: SUMMARY"]
+        next(cmd for cmd in re.findall(r"`(polyctl -C [^`]+)`", land_text) if " commit " in cmd)
+    ) == ["polyctl", "-C", str(spaced), "commit", "-m", "RW-1: SUMMARY"]
 
 
 def test_suggested_command_templates_quote_every_word_and_refuse_hostile_caller_ids(project, monkeypatch, capsys):
@@ -467,15 +467,15 @@ def test_suggested_command_templates_quote_every_word_and_refuse_hostile_caller_
             {"id": req_id + 2, "method": "prompts/get",
              "params": {"name": "status", "arguments": {"project": hostile}, "_meta": _meta("2026-07-28")}},
             {"id": req_id + 3, "method": "tools/call",
-             "params": {"name": "ao_ask",
+             "params": {"name": "polyctl_ask",
                         "arguments": {"question": "Proceed?", "options": ["yes", "no"], "slice": hostile},
                         "_meta": _meta("2026-07-28")}},
             {"id": req_id + 4, "method": "tools/call",
-             "params": {"name": "ao_report",
+             "params": {"name": "polyctl_report",
                         "arguments": {"kind": "status", "summary": "ok", "slice": hostile},
                         "_meta": _meta("2026-07-28")}},
             {"id": req_id + 5, "method": "tools/call",
-             "params": {"name": "ao_board", "arguments": {"project": hostile}, "_meta": _meta("2026-07-28")}},
+             "params": {"name": "polyctl_board", "arguments": {"project": hostile}, "_meta": _meta("2026-07-28")}},
         ])
         req_id += 6
 
@@ -539,7 +539,7 @@ def test_project_keys_with_accents_spaces_parentheses_and_plus_work_across_every
     real_run = sp.run
 
     def fake_verify_run(cmd, *args, **kwargs):
-        if isinstance(cmd, list) and len(cmd) >= 5 and cmd[1:3] == ["-m", "ao"] and cmd[4] == "verify":
+        if isinstance(cmd, list) and len(cmd) >= 5 and cmd[1:3] == ["-m", "polyctl"] and cmd[4] == "verify":
             return SimpleNamespace(returncode=0, stdout="PASS\n", stderr="")
         return real_run(cmd, *args, **kwargs)
 
@@ -570,21 +570,21 @@ def test_project_keys_with_accents_spaces_parentheses_and_plus_work_across_every
 
     def tool_calls_for(key, slice_id):
         return [
-            ("ao_status", {"project": key}),
-            ("ao_board", {"project": key}),
-            ("ao_next", {"project": key}),
-            ("ao_candidate", {"project": key}),
-            ("ao_notices", {"project": key, "limit": 5}),
-            ("ao_fleet", {"project": key}),
-            ("ao_inbox", {"project": key}),
-            ("ao_ack", {"project": key, "id": mail_ids[key], "outcome": "applied"}),
-            ("ao_report", {"project": key, "kind": "status", "summary": f"ok in {key}", "slice": slice_id}),
-            ("ao_ask", {"project": key, "question": f"Continue {key}?", "options": ["yes", "no"], "slice": slice_id}),
-            ("ao_decisions", {"project": key}),
-            ("ao_propose", {"project": key, "text": f"Keep rule in {key}", "why": "clarity"}),
-            ("ao_fanout", {"project": key, "agents": 2}),
-            ("ao_watchdog", {"project": key, "action": "trace", "last": 5}),
-            ("ao_verify", {"project": key}),
+            ("polyctl_status", {"project": key}),
+            ("polyctl_board", {"project": key}),
+            ("polyctl_next", {"project": key}),
+            ("polyctl_candidate", {"project": key}),
+            ("polyctl_notices", {"project": key, "limit": 5}),
+            ("polyctl_fleet", {"project": key}),
+            ("polyctl_inbox", {"project": key}),
+            ("polyctl_ack", {"project": key, "id": mail_ids[key], "outcome": "applied"}),
+            ("polyctl_report", {"project": key, "kind": "status", "summary": f"ok in {key}", "slice": slice_id}),
+            ("polyctl_ask", {"project": key, "question": f"Continue {key}?", "options": ["yes", "no"], "slice": slice_id}),
+            ("polyctl_decisions", {"project": key}),
+            ("polyctl_propose", {"project": key, "text": f"Keep rule in {key}", "why": "clarity"}),
+            ("polyctl_fanout", {"project": key, "agents": 2}),
+            ("polyctl_watchdog", {"project": key, "action": "trace", "last": 5}),
+            ("polyctl_verify", {"project": key}),
         ]
 
     assert [name for name, _ in tool_calls_for("café", "CF-1")] == list(mcp.EVERY_TOOL)
@@ -629,7 +629,7 @@ def test_project_keys_with_accents_spaces_parentheses_and_plus_work_across_every
     for bad_project in unregistered_names:
         requests.extend([
             {"id": req_id, "method": "tools/call",
-             "params": {"name": "ao_board", "arguments": {"project": bad_project}, "_meta": _meta("2026-07-28")}},
+             "params": {"name": "polyctl_board", "arguments": {"project": bad_project}, "_meta": _meta("2026-07-28")}},
             {"id": req_id + 1, "method": "resources/read",
              "params": {"uri": mcp.resource_uri(bad_project, "board"), "_meta": _meta("2026-07-28")}},
             {"id": req_id + 2, "method": "prompts/get",
@@ -660,11 +660,11 @@ def test_project_keys_with_accents_spaces_parentheses_and_plus_work_across_every
         proj_root = str(roots[key])
         assert f"Project: {key}" in text
         assert json.dumps({"project": key}, ensure_ascii=False) in text
-        commands = re.findall(r"`(ao -C [^`]+)`", text)
+        commands = re.findall(r"`(polyctl -C [^`]+)`", text)
         assert commands
         for cmd in commands:
             words = shlex.split(cmd)
-            assert words[:3] == ["ao", "-C", proj_root]
+            assert words[:3] == ["polyctl", "-C", proj_root]
             assert Path(words[2]).name == key
 
     for (key, tool_name), rid in tool_reqs.items():
@@ -674,11 +674,11 @@ def test_project_keys_with_accents_spaces_parentheses_and_plus_work_across_every
 
     for tool_rid, res_rid, prompt_rid in refused_reqs:
         tool_payload = json.loads(answers[tool_rid]["result"]["content"][0]["text"])
-        assert "not in ao's project registry" in tool_payload["error"]
+        assert "not in polyctl's project registry" in tool_payload["error"]
         assert answers[res_rid]["error"]["code"] == -32602
-        assert "not in ao's project registry" in answers[res_rid]["error"]["message"]
+        assert "not in polyctl's project registry" in answers[res_rid]["error"]["message"]
         assert answers[prompt_rid]["error"]["code"] == -32602
-        assert "not in ao's project registry" in answers[prompt_rid]["error"]["message"]
+        assert "not in polyctl's project registry" in answers[prompt_rid]["error"]["message"]
 
     for key, slice_id in keys_and_slices:
         proj_root = roots[key]
@@ -691,9 +691,9 @@ def test_project_keys_with_accents_spaces_parentheses_and_plus_work_across_every
             {"id": 4, "method": "prompts/get",
              "params": {"name": "status", "arguments": {"project": key}, "_meta": _meta("2026-07-28")}},
             {"id": 5, "method": "tools/call",
-             "params": {"name": "ao_board", "arguments": {"project": key}, "_meta": _meta("2026-07-28")}},
+             "params": {"name": "polyctl_board", "arguments": {"project": key}, "_meta": _meta("2026-07-28")}},
             {"id": 6, "method": "tools/call",
-             "params": {"name": "ao_board", "arguments": {"project": f" {key}"}, "_meta": _meta("2026-07-28")}},
+             "params": {"name": "polyctl_board", "arguments": {"project": f" {key}"}, "_meta": _meta("2026-07-28")}},
         ]
         single_answers, _ = _serve(monkeypatch, capsys, proj_root, single_reqs, "--allow-verify")
         assert [r["uri"] for r in single_answers[1]["result"]["resources"]] == [
@@ -703,7 +703,7 @@ def test_project_keys_with_accents_spaces_parentheses_and_plus_work_across_every
         assert board_body["project"] == key
         for pid in (3, 4):
             ptext = single_answers[pid]["result"]["messages"][0]["content"]["text"]
-            for cmd in re.findall(r"`(ao -C [^`]+)`", ptext):
-                assert shlex.split(cmd)[:3] == ["ao", "-C", str(proj_root)]
+            for cmd in re.findall(r"`(polyctl -C [^`]+)`", ptext):
+                assert shlex.split(cmd)[:3] == ["polyctl", "-C", str(proj_root)]
         assert "error" not in json.loads(single_answers[5]["result"]["content"][0]["text"])
         assert "not served by this server" in json.loads(single_answers[6]["result"]["content"][0]["text"])["error"]

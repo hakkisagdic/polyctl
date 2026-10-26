@@ -2,8 +2,8 @@
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A
-from ao import watchdog as W
+from polyctl import cli, lib as A
+from polyctl import watchdog as W
 from tests.test_nested_git import _outer_with_subproject, _plant
 
 
@@ -27,8 +27,8 @@ def test_redirected_doctor_continues_checks_and_human_notifications(tmp_path, mo
     assert "PROBLEM transcript-missing:" in out
     assert ("doctor:transcript-missing", "human") in raised
     assert ("doctor:repository-redirect", "human") in raised
-    assert not (inner_git / "ao-enrolled.json").exists()
-    assert not (outer / ".git" / "ao-enrolled.json").exists()
+    assert not (inner_git / "polyctl-enrolled.json").exists()
+    assert not (outer / ".git" / "polyctl-enrolled.json").exists()
 
 
 def test_manual_doctor_reports_redirect_and_continues(tmp_path, monkeypatch, capsys):

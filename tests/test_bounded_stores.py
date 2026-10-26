@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from ao import lib as A, storage
+from polyctl import lib as A, storage
 
 
 def _grants(root, count):
@@ -14,7 +14,7 @@ def _grants(root, count):
 
 def test_the_authority_chain_verifies_across_a_seal_and_gives_the_same_answer(project):
     root = project["root"]
-    path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     _grants(root, 9)
     before = A.latest_authority_decision(root)
     newest = A.authority_rows(root)[-3:]
@@ -31,7 +31,7 @@ def test_the_authority_chain_verifies_across_a_seal_and_gives_the_same_answer(pr
 
 def test_a_seal_removed_or_forged_is_refused_like_a_broken_chain(project):
     root = project["root"]
-    path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     _grants(root, 5)
     storage.seal_chained_jsonl(path, A.AUTHORITY_CHAIN, keep=2)
     seal_file = storage.seal_path(path)
@@ -54,10 +54,10 @@ def test_a_seal_removed_or_forged_is_refused_like_a_broken_chain(project):
 
 def test_a_seal_intent_in_the_tree_is_refused_and_left_where_it_is(project):
     """LEDGER-HISTORY: an intent in the tree was settled - finished when the ledger started after it, dropped
-    otherwise - whoever wrote it. ao records its intent outside the repository now (tests/test_ledger_history.py),
+    otherwise - whoever wrote it. polyctl records its intent outside the repository now (tests/test_ledger_history.py),
     so one in the tree is no seal of its own: refused, named and kept, the ledger and its record untouched."""
     root = project["root"]
-    path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     _grants(root, 4)
     whole = open(path, "rb").read()
     intent = {"chain": A.AUTHORITY_CHAIN, "retired": 2, "digest": "sha256:" + "0" * 64, "archives": [], "at": 1}
@@ -73,7 +73,7 @@ def test_a_seal_intent_in_the_tree_is_refused_and_left_where_it_is(project):
 
 def test_a_referenced_verification_survives_a_prune_that_removes_its_neighbours(project):
     root = project["root"]
-    path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "verifications.jsonl")
     for n in range(6):
         A.record_verification(root, {"id": f"V-{n}", "at": n, "passed": True})
     A.record_authority(root, True, [], "sha256:t", "V-1", "C-1")
@@ -89,8 +89,8 @@ def test_a_referenced_verification_survives_a_prune_that_removes_its_neighbours(
 
 def test_an_observation_store_is_held_to_its_bound_as_it_is_written(project):
     root = project["root"]
-    notices = os.path.join(root, ".ao", "ledger", "notices.jsonl")
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    notices = os.path.join(root, ".polyctl", "ledger", "notices.jsonl")
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(dict({k: v for k, v in project.items() if k != "root"}, retention={"observation_kb": 64}), fh)
     for n in range(900):
         A.record_notice(root, f"notice {n}", "x" * 80, False, key=f"k{n}")
@@ -105,7 +105,7 @@ def test_the_log_an_architect_wake_writes_is_held_to_the_bound(project, tmp_path
     under another name than the escalate log the bound holds. It is that log, and it is held."""
     root, state = project["root"], tmp_path / "state"
     state.mkdir()
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(dict({k: v for k, v in project.items() if k != "root"}, retention={"observation_kb": 64}), fh)
     wake_log = state / A.project_file_name("escalate-log", A.project_key(root))
     wake_log.write_text("".join(f"=== wake {n} ===\n" + "y" * 200 + "\n" for n in range(2000)), encoding="utf-8")

@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from ao import lib as A, storage, watchdog as W
+from polyctl import lib as A, storage, watchdog as W
 from tests.scenarios import World
 
 BLOCKED = "# queue empty\n\n## KARAR GEREKLİ\n"
@@ -25,7 +25,7 @@ def _architect(world, **fields):
     """Change the architect in the config the watchdog reads, which is the one on disk."""
     world.cfg["architect"] = dict(world.cfg["architect"], **fields)
     stored = {k: v for k, v in world.cfg.items() if k != "root"}
-    with open(os.path.join(world.root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(world.root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(stored, fh)
 
 
@@ -164,7 +164,7 @@ def test_the_watchdogs_own_anomaly_wakes_the_architect_once(world, monkeypatch):
     world.cycle(dry_run=False)
 
     assert len(_architect_wakes(world)) == 1
-    ledger = os.path.join(world.root, ".ao", "ledger", "notices.jsonl")
+    ledger = os.path.join(world.root, ".polyctl", "ledger", "notices.jsonl")
     lines = open(ledger, encoding="utf-8").read().splitlines() if os.path.exists(ledger) else []
     rows = [json.loads(line) for line in lines if '"anomaly:busy-without-progress"' in line]
     assert len(rows) <= 1
@@ -180,19 +180,19 @@ def test_the_architects_note_to_itself_is_not_a_request(project):
     assert A.waiting_on_architect(root, cfg) is None
 
 
-def test_a_flag_ao_adds_to_an_actor_is_recorded_once_per_change(project):
+def test_a_flag_polyctl_adds_to_an_actor_is_recorded_once_per_change(project):
     root = project["root"]
     for _ in range(3):
         A.record_actor_flags(root, "implementer", ["--trust-all-tools"], "no tool scope in the resume argv")
     A.record_actor_flags(root, "implementer", ["--trust-tools=read"], "scoped")
 
-    rows = storage.read_jsonl(os.path.join(root, ".ao", "ledger", "actor-flags.jsonl"))
+    rows = storage.read_jsonl(os.path.join(root, ".polyctl", "ledger", "actor-flags.jsonl"))
     assert [row["flags"] for row in rows] == [["--trust-all-tools"], ["--trust-tools=read"]]
 
 
 def test_redaction_masks_tokens_and_keeps_paths():
     github = "gh" + "p_" + "16C7e42F292c6912E7710c838347Ae178B4a"
-    path = "/srv/someone/Projects/agent-orchestrator/src/ao/cli.py"
+    path = "/srv/someone/Projects/polyctl/src/polyctl/cli.py"
     masked = A.redact(f"Error: auth failed for {TOKEN} and {github} reading {path}")
     assert TOKEN not in masked and github not in masked
     assert path in masked

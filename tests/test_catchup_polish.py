@@ -16,8 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, features as F, lib as A
-from ao import watchdog as W
+from polyctl import cli, features as F, lib as A
+from polyctl import watchdog as W
 from tests.test_catchup_ready import (APPROVED, PERSON, _approved, _catchup, _configure, _git, _land,
                                       _legacy_waiver, _reviews)
 from tests.test_noise_repeats import BLOCKED, DAY, HOUR, REQUEST, _heartbeat, _world
@@ -85,7 +85,7 @@ def test_limit_counts_only_what_a_later_run_would_review_and_the_run_still_close
 # ---- 3. a run whose reviews decided nothing exits 3; progress and nothing to do exit 0 -------------
 
 def test_a_run_whose_reviews_all_decided_nothing_exits_3_whatever_else_it_closed(project, monkeypatch, capsys):
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     root = project["root"]
     _waived_ranges(root, "B1", "B2")
     empty = A.waive(root, "review", "B9", "quota", by="A. Person", hours=0.0002)
@@ -287,7 +287,7 @@ def _commits(root, count, start, path):
 def _granted_and_landed(project, monkeypatch, capsys):
     """A change granted under a review waiver for a running slice, and committed: (waiver, grant, commit)."""
     root = project["root"]
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     text = open(board, encoding="utf-8").read()
     with open(board, "w", encoding="utf-8") as fh:
         fh.write(text.replace("## running\n", "## running\n- [B7] slice · since: 2026-09-15 10:00\n"))

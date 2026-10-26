@@ -1,10 +1,10 @@
-"""ao instructs its agents in the project's language, a Turkish project's as it always did (LANGUAGE-PROMPTS).
+"""polyctl instructs its agents in the project's language, a Turkish project's as it always did (LANGUAGE-PROMPTS).
 
 The reviewer's prompt and the markers between its parts, a stand-in review request, the bug hunter's prompt, and
-the nudge, wake and refill the watchdog sends were Turkish in every project. They come from src/ao/language.py in
+the nudge, wake and refill the watchdog sends were Turkish in every project. They come from src/polyctl/language.py in
 the project's `language` now: English by default, and with `tr` the Turkish texts byte for byte, pinned here by
 digest, so a Turkish project's agents read what they read before and its review prompt measures as it did. What
-ao reads back is spelled the same in both languages: an answer carrying either language's headings is one verdict
+polyctl reads back is spelled the same in both languages: an answer carrying either language's headings is one verdict
 with the same findings, a hunter's leads and a stand-in's nonce read the same, no code reads a marker back, and a
 Turkish project's review cut off before the change resumes from its section journal.
 """
@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, language, lib as A, storage
+from polyctl import cli, language, lib as A, storage
 from tests.scenarios import World
 from tests.test_bug_hunter import _repo as _hunted_repo
 from tests.test_review_chain import _args, _fake, _repo_with_change
@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TURKISH_LETTER = re.compile("[çğıİöşüÇĞÖŞÜ]")
 LANGUAGES = [None, "tr"]            # a project that sets none, and one that chose Turkish
 
-# sha256 of each Turkish text as ao gave it before LANGUAGE-PROMPTS, its placeholders unfilled. A change here is a
+# sha256 of each Turkish text as polyctl gave it before LANGUAGE-PROMPTS, its placeholders unfilled. A change here is a
 # change to what a Turkish project's agents read, and to how its review prompt measures: the claims that prompt
 # leaves room for key the section journal an in-flight review resumes from. Change a digest only on purpose.
 TURKISH = {
@@ -39,27 +39,27 @@ TURKISH = {
     "prompt.review-candidate": "7bf44715ae9eb215bd3b32103c60c71fa279428f260f58022c0f3cf18615f3ea",
     "prompt.review-context": "9bfb71d0c42537524d6beab52e7c014721d8e9261e56cad906c29ac581b6cfb1",
     # Empty withheld trees are distinguished from failed unpacking in both notes (TRIAGE-4-REST).
-    "prompt.review-tree": "48875a3fa1d8fdfafc9351a71c170e02528cad89d94ce6b5acca6710c8c70462",
-    "prompt.review-range-tree": "cdc95470e65d6d1a081b5c81a3f92c58e9bd0f915cd929d4b52f4458562258c4",
+    "prompt.review-tree": "c5ed1b74852f0ab65ddbb10813950b9eeb836cb21e7479994779b98604e20f47",
+    "prompt.review-range-tree": "d8f424f9c6b0115755ed4a4c03e2b47c0efa03609e2940119fc8510163219b3f",
     # Added by CRITERIA-VERDICTS, after the tree's note: a boundary that lists criteria is asked about each.
     "prompt.review-criteria": "6c45e0b98838460856ce9c6054e9686cb6f8c4427e454486d15610b2149beb8a",
     # Narrowed BLOCKER/HIGH to the five gate outcomes and capped non-core forged-input findings at MEDIUM (REVIEW-SCOPE).
-    "prompt.review-threat-model": "3abc0e5ed2f70716cf14bf991129e953fda0e1fef941ddba5bd7f868133259ca",
-    # Added by REVIEW-REASK: the note a reviewer is asked again with when ao could not read its answer.
-    "prompt.review-reask": "efe205b3487739b4e973da8223710cc762a1daa0db032c14c4fe0d00bb3d331d",
+    "prompt.review-threat-model": "2a18a5d8e5b5be2469e9c8a0d35ca3a3e9943057ada0047313d65884d660b1b3",
+    # Added by REVIEW-REASK: the note a reviewer is asked again with when polyctl could not read its answer.
+    "prompt.review-reask": "17480f1882cdd38553d82f555705eea4d58331681648d7a77262f9bdfbb811fc",
     "prompt.review-section": "8063a940247fdbf8be4db5d8445f9945c817b3a0970c601e8bfb39155dc6ce60",
     "prompt.review-request": "1ab6ef78285dbd1b7ed1dd26dfeeb46c167013bde8bdb16d8702007f6c792072",
     # Added by LEADS-REVIEW: the note above a candidate whose diff is not UTF-8, which is shown escaped.
-    "prompt.review-escaped": "6b9f826e07aaa1773a52b4e761068678c54123161e130462245641e048e703a3",
+    "prompt.review-escaped": "2888b64eedcd122843d46cf3807f27e2e18d18e4175b725dd002084f9778cdb9",
     "prompt.hunt": "6dfafb32102cade4747e8ff833ee05d5591e5409948142a3bc64331b50042553",
     # Added by BUG-HUNTER-3: the heading of a file a hunt reads a piece at a time.
     "prompt.hunt-part": "5833217b32b84cb335e15a05bb269df155190347e0600bcd653e7c541c6db8c0",
-    "prompt.nudge": "9282c72232f39ab53301411c00144e59a375e7b3d4b7b9b309ba6578d82b15b4",
+    "prompt.nudge": "be7c9ffb0cb4afb9fbe10129694ef911e968ddc1299e7e0356e79a01bf4b0605",
     "prompt.nudge-parked": "ddaa03c5459c39bbecb304588aef4f67fe30245fbbf041601a1e0bd45e012b44",
     "prompt.nudge-secondary": "635dc74bb018c36284083d373ddf93cef5d2fb6d222c63dd19c698dec7ffa25a",
     "prompt.nudge-editing": "5c84dd61201804d13ac3ec00ea81b5b9013fbd824bf0aea356f00dc13ba44e6a",
-    "prompt.wake": "f64e9e18ae0e753f4048a3de7f3bb60679d32ac32ae1dd9e32101c3b10e09ad6",
-    "prompt.refill": "049bdca4daf5e861c68d46f45663e87fd722f2ad7d665896e8cb00d0dcfef71e",
+    "prompt.wake": "cbcb816b6173b343d69351582acf6cef16f0eceae89b4f1746c5bb29a82365b8",
+    "prompt.refill": "04b2c5be8d6c79392d21c9ada3ec6ad36568ad338821fce9774a282f8bea015c",
 }
 REVIEW_MARKERS = ("prompt.review-candidate", "prompt.review-context", "prompt.review-section", "prompt.review-tree",
                   "prompt.review-criteria", "prompt.review-reask", "prompt.review-range-tree")
@@ -67,32 +67,32 @@ HEADINGS = ("urgent", "stop", "decision")           # the markers a prompt tells
 # The words a reader acts on, spelled the same in both languages: the answer schema, the board's and the
 # protocol's words, and what an agent may not do.
 PROTOCOL = re.compile(r"(?<![\w-])(VERDICT: APPROVED|NEEDS_CHANGES|BLOCKER: <n>|HIGH: <n>|MEDIUM: <n>|LOW: <n>|"
-                      r"- \[SEVERITY\]|READY|NONCE: |ANOMALY|AO_ROLE=architect|blocked|shape|agent-mail|inbox|"
+                      r"- \[SEVERITY\]|READY|NONCE: |ANOMALY|POLYCTL_ROLE=architect|blocked|shape|agent-mail|inbox|"
                       r"PUSH|push|force-push|PR|local commit)(?![\w-])")
 APPROVED = "VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0\n"
-# A reviewer that keeps every prompt it is handed, fails a section named in AO_TEST_FAIL, and otherwise answers
-# with the file AO_TEST_ANSWER names.
+# A reviewer that keeps every prompt it is handed, fails a section named in POLYCTL_TEST_FAIL, and otherwise answers
+# with the file POLYCTL_TEST_ANSWER names.
 REVIEWER = """
 import json, os, re, sys
 prompt = sys.argv[1]
-with open(os.environ["AO_TEST_PROMPTS"], "a", encoding="utf-8") as fh:
+with open(os.environ["POLYCTL_TEST_PROMPTS"], "a", encoding="utf-8") as fh:
     fh.write(json.dumps(prompt) + "\\n")
 asked = re.findall(r"Scenario \\d+", prompt)
-if asked and asked[-1] in os.environ["AO_TEST_FAIL"].split(","):
+if asked and asked[-1] in os.environ["POLYCTL_TEST_FAIL"].split(","):
     sys.exit(1)
-with open(os.environ["AO_TEST_ANSWER"], encoding="utf-8") as fh:
+with open(os.environ["POLYCTL_TEST_ANSWER"], encoding="utf-8") as fh:
     sys.stdout.write(fh.read())
 """
 # A hunter that keeps its prompt and names one lead.
 HUNTER = ("import os, sys\n"
-          "open(os.environ['AO_TEST_PROMPTS'], 'w', encoding='utf-8').write(sys.argv[1])\n"
+          "open(os.environ['POLYCTL_TEST_PROMPTS'], 'w', encoding='utf-8').write(sys.argv[1])\n"
           "print('- [clock] src/a.py:1 f - a reset named for tomorrow is read as today')\n")
 
 
 def _choose(project, chosen):
     """(the project with `language` set as every reader loads it, the language it writes); None sets nothing."""
     cfg = project if chosen is None else dict(project, language=chosen)
-    with open(os.path.join(project["root"], ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(project["root"], ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in cfg.items() if key != "root"}, fh)
     assert language.of(cfg) == (chosen or "en")
     return cfg, chosen or "en"
@@ -106,9 +106,9 @@ def _reviewer(tmp_path, monkeypatch, answer=APPROVED, fail=""):
     """(a reviewer route, what it has been handed so far)."""
     kept, reply = tmp_path / "prompts.jsonl", tmp_path / "answer.txt"
     reply.write_text(answer, encoding="utf-8")
-    monkeypatch.setenv("AO_TEST_PROMPTS", str(kept))
-    monkeypatch.setenv("AO_TEST_ANSWER", str(reply))
-    monkeypatch.setenv("AO_TEST_FAIL", fail)
+    monkeypatch.setenv("POLYCTL_TEST_PROMPTS", str(kept))
+    monkeypatch.setenv("POLYCTL_TEST_ANSWER", str(reply))
+    monkeypatch.setenv("POLYCTL_TEST_FAIL", fail)
 
     def handed():
         return [json.loads(line) for line in kept.read_text(encoding="utf-8").splitlines()] if kept.exists() else []
@@ -150,7 +150,7 @@ def _named(text, lang):
     written = {language.MARKERS[key][form] for key in HEADINGS for form in language.LANGUAGES}
     named = {re.sub(r"<[^<>]*>", "<>", span) for span in re.findall(r"`([^`]*)`", text)
              if span not in written and not TURKISH_LETTER.search(span)}
-    named |= set(re.findall(r"\.ao/[\w.<>/-]*\w", text)) | set(PROTOCOL.findall(text))
+    named |= set(re.findall(r"\.polyctl/[\w.<>/-]*\w", text)) | set(PROTOCOL.findall(text))
     named |= {name for _, name, _, _ in string.Formatter().parse(text) if name}
     named |= {key for key in HEADINGS if language.MARKERS[key][lang] in text}
     # The review prompt names the candidate's marker whole and the context's by how it begins.
@@ -182,13 +182,13 @@ def test_the_turkish_prompts_are_the_ones_every_project_was_given_and_the_englis
 
 
 def test_no_code_reads_a_review_marker_back():
-    """A marker is written into a prompt for a reviewer to read. A reader in ao would have to read every language's
+    """A marker is written into a prompt for a reviewer to read. A reader in polyctl would have to read every language's
     form, so none may hold one: the texts live in the catalogue, and only the prompt's builder names their keys."""
     forms = [form for key in REVIEW_MARKERS for form in language.TEXTS[key].values()]
     # Every marker's key, the tree's among them (REVIEW-TREE-2), taken from the list so a marker added there is
     # guarded here too.
     keys = re.compile("|".join(re.escape(key) for key in REVIEW_MARKERS))
-    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
+    for path in sorted((ROOT / "src" / "polyctl").rglob("*.py")):
         if path.name == "language.py":
             continue
         source = path.read_text(encoding="utf-8")
@@ -226,10 +226,10 @@ def test_a_turkish_projects_review_cut_off_before_the_change_resumes_from_its_se
     route, handed = _reviewer(tmp_path, monkeypatch)
     cfg = dict(cfg, reviewer=route)
     names = ["scenario:1", "scenario:2", "scenario:3"]
-    # The journal a review cut off after two sections left, where ao has always kept it: keyed by the diff, the
+    # The journal a review cut off after two sections left, where polyctl has always kept it: keyed by the diff, the
     # boundary, the sections and the reviewers, and by no word of the prompt.
     keyed = ["sha256:" + hashlib.sha256(_staged_diff(root)).hexdigest(), SCENARIOS, names, ["r1"]]
-    journal = Path(root, ".ao", "reviews", "sections",
+    journal = Path(root, ".polyctl", "reviews", "sections",
                    hashlib.sha256(json.dumps(keyed, sort_keys=True).encode("utf-8")).hexdigest()[:24] + ".jsonl")
     for name in names[:2]:
         storage.append_jsonl(str(journal), {"at": 1_789_000_000, "section": name, "position": 0, "route": "r1",
@@ -321,8 +321,8 @@ def test_the_hunter_is_asked_in_the_projects_language_and_its_leads_are_read_the
     root = cfg["root"]
     _hunted_repo(root)
     kept = tmp_path / "hunt-prompt.txt"
-    monkeypatch.setenv("AO_TEST_PROMPTS", str(kept))
-    shipped = A.package_adapters()          # a harness ao ships, for the stand-in hunter (BUG-HUNTER-2)
+    monkeypatch.setenv("POLYCTL_TEST_PROMPTS", str(kept))
+    shipped = A.package_adapters()          # a harness polyctl ships, for the stand-in hunter (BUG-HUNTER-2)
     stand_in = {"id": "stand-in", "detect": {"binaries": [os.path.basename(sys.executable)]},
                 "options": {"trust_none": ["-B"]}}
     monkeypatch.setattr(A, "package_adapters", lambda: dict(shipped, **{"stand-in": stand_in}))
@@ -373,7 +373,7 @@ def test_a_nudge_names_a_secondary_projects_ready_item_in_the_projects_language(
     world.cycle()
 
     assert handed == [_texts(lang)["prompt.nudge"]
-                      + _texts(lang)["prompt.nudge-secondary"].format(name="ao", root=str(other), item="S9")]
+                      + _texts(lang)["prompt.nudge-secondary"].format(name="polyctl", root=str(other), item="S9")]
 
 
 @pytest.mark.parametrize("chosen", LANGUAGES)

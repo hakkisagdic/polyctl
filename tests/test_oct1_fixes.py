@@ -1,7 +1,7 @@
 """What rehearsing the catch-up planned for 2026-10-01 found (OCT1-FIXES).
 
 A copy of the tool repository's ledgers was replayed with a stand-in reviewer. Repeated
-`ao catchup --limit N` runs met the ranges whose reviews had failed first every time, and a
+`polyctl catchup --limit N` runs met the ranges whose reviews had failed first every time, and a
 reviewer that did not answer was asked again for every range of the run; an INVALID review
 was reported as an unavailable reviewer; a reviewer named while a slice ran was reported as
 none configured, and a second assignment dropped it unchecked; and, with the jobs back
@@ -14,7 +14,7 @@ import sys
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A, storage, watchdog as W
+from polyctl import cli, lib as A, storage, watchdog as W
 from tests.test_catchup_ready import APPROVED, PERSON, _catchup, _land, _legacy_waiver
 from tests.test_review_chain import _fake
 
@@ -70,7 +70,7 @@ def test_a_range_whose_last_review_decided_nothing_waits_behind_the_ranges_no_re
 
 
 def test_a_run_starts_no_review_after_one_finds_the_reviewer_unavailable(project, monkeypatch, capsys):
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     root = project["root"]
     _waived_ranges(root, "B1", "B2", "B3")
     empty = A.waive(root, "review", "B9", "quota", by="A. Person", hours=0.0002)
@@ -115,26 +115,26 @@ def test_no_move_only_slice_is_reported_missing_when_the_waiver_ledger_cannot_be
 
 def _table(root):
     """A role table holding a reviewer nobody has assigned yet and two architects, and a slice running."""
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({"project": "proj", "roles": {"architect": "lead"}, "actors": {
             "r2": {"id": "r2", "family": "review-family", "argv": _fake(*APPROVED)},
             "lead": {"name": "lead", "family": "writer-family", "argv": ["architect-cli", "-p", "{prompt}"]},
             "lead2": {"name": "lead2", "family": "writer-family", "argv": ["architect-cli", "-p", "{prompt}"]}}}, fh)
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     text = open(board, encoding="utf-8").read()
     with open(board, "w", encoding="utf-8") as fh:
         fh.write(text.replace("## running\n", "## running\n" + RUNNING, 1))
 
 
 def _leaves_running(root):
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     text = open(board, encoding="utf-8").read()
     with open(board, "w", encoding="utf-8") as fh:
         fh.write(text.replace(RUNNING, ""))
 
 
 def _stored(root):
-    return json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))
+    return json.load(open(os.path.join(root, ".polyctl", "config.json"), encoding="utf-8"))
 
 
 def _role(root, capsys, action="show", role=None, actor=None):
@@ -157,7 +157,7 @@ def test_a_reviewer_assigned_while_a_slice_runs_is_named_wherever_no_reviewer_ho
     assert f"no reviewer is configured; {waiting}" in capsys.readouterr().out
     assert cli.cmd_review(A.load_config(root), SimpleNamespace(boundary="b", paths=None, commits=ranges[0])) == 1
     out = capsys.readouterr().out
-    assert waiting in out and "Add to .ao/config.json" not in out
+    assert waiting in out and "Add to .polyctl/config.json" not in out
     code, out = _role(root, capsys)
     assert "{'reviewer': 'r2'} once S1 leaves running" in out
 

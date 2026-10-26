@@ -29,13 +29,13 @@ available under an ID that no earlier message owned.
 
 ## Paths
 
-- src/ao/cli.py
-- src/ao/parts/cli_channels.py
-- src/ao/parts/cli_checks.py
-- src/ao/parts/cli_maintenance.py
-- src/ao/parts/lib_pr.py
-- src/ao/telegram.py
-- src/ao/skill/SKILL.md
+- src/polyctl/cli.py
+- src/polyctl/parts/cli_channels.py
+- src/polyctl/parts/cli_checks.py
+- src/polyctl/parts/cli_maintenance.py
+- src/polyctl/parts/lib_pr.py
+- src/polyctl/telegram.py
+- src/polyctl/skill/SKILL.md
 - docs/alarms.md
 - docs/commands.md
 - docs/commands.tr.md

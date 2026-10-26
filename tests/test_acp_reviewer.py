@@ -1,6 +1,6 @@
 """A reviewer answers through ACP where the project sets review.transport to acp (ACP-REVIEWER).
 
-A fake agent speaks the protocol and plays the turn AO_TEST_TURN names: it answers a review, asks leave to
+A fake agent speaks the protocol and plays the turn POLYCTL_TEST_TURN names: it answers a review, asks leave to
 read or to edit first, runs an edit without asking, stops at a token limit, says nothing, or does not end
 until it is cancelled. The session lets a reviewer read and nothing else, an answer is read as a spawned
 reviewer's output is, and a route that cannot answer through ACP is spawned as before, saying why.
@@ -8,14 +8,14 @@ reviewer's output is, and a route that cannot answer through ACP is spawned as b
 import json
 import sys
 
-from ao import cli, settings as S
+from polyctl import cli, settings as S
 
 ANSWER = "VERDICT: APPROVED\nBLOCKER: 0 HIGH: 0 MEDIUM: 0 LOW: 0\n"
 
 AGENT = """
 import json, os, sys
-turn = os.environ.get("AO_TEST_TURN", "answer")
-answer = os.environ.get("AO_TEST_ANSWER", "")
+turn = os.environ.get("POLYCTL_TEST_TURN", "answer")
+answer = os.environ.get("POLYCTL_TEST_ANSWER", "")
 
 def say(message):
     print(json.dumps(message), flush=True)
@@ -67,7 +67,7 @@ while True:
                 del ran["toolCallId"]                   # the run is reported with no id, where it was refused under ""
             update(session, ran)
             if turn == "ignored-empty-overwritten":
-                # A read ao lets run, under the same empty id, that fails: its report replaces the one of the run.
+                # A read polyctl lets run, under the same empty id, that fails: its report replaces the one of the run.
                 say({"jsonrpc": "2.0", "id": "perm-r", "method": "session/request_permission",
                      "params": {"sessionId": session, "toolCall": {"toolCallId": call, "title": "r", "kind": "read",
                                                                    "locations": [{"path": "a.py"}]},
@@ -92,8 +92,8 @@ while True:
 
 
 def _review(project, monkeypatch, turn, timeout=30, answer=ANSWER):
-    monkeypatch.setenv("AO_TEST_TURN", turn)
-    monkeypatch.setenv("AO_TEST_ANSWER", answer)
+    monkeypatch.setenv("POLYCTL_TEST_TURN", turn)
+    monkeypatch.setenv("POLYCTL_TEST_ANSWER", answer)
     return cli._run_acp_reviewer(project["root"], [sys.executable, "-c", AGENT], "qoder", "review this", timeout,
                                  "qoder-reviewer")
 
@@ -132,11 +132,11 @@ def test_a_turn_that_ran_an_edit_without_leave_is_no_review_whatever_it_answered
     attempt = _review(project, monkeypatch, "wrote")
 
     assert not attempt["ok"] and attempt["kind"] == "wrote"
-    assert "without ao's leave" in attempt["reason"] and attempt["out"] == ""
+    assert "without polyctl's leave" in attempt["reason"] and attempt["out"] == ""
 
 
-def test_a_turn_that_ran_a_call_ao_refused_is_no_review_whatever_its_kind(project, monkeypatch):
-    """ACP-REVIEWER-3: a call of kind `other` ao refused, which the agent ran all the same, left the answer a review."""
+def test_a_turn_that_ran_a_call_polyctl_refused_is_no_review_whatever_its_kind(project, monkeypatch):
+    """ACP-REVIEWER-3: a call of kind `other` polyctl refused, which the agent ran all the same, left the answer a review."""
     attempt = _review(project, monkeypatch, "ignored")
 
     assert not attempt["ok"] and attempt["kind"] == "wrote" and "(other)" in attempt["reason"]
@@ -176,7 +176,7 @@ def test_a_turn_that_did_not_end_its_answer_or_said_nothing_is_no_review(project
 def test_the_transport_decides_whether_a_route_answers_through_acp(project, monkeypatch, capsys):
     # The transport a review passes is the one it read with its configuration (REVIEW-PATH-HIGHS), and kiro's is the
     # ACP command measured to hold a reviewer to reads: qoder's is spawned now (tests/test_review_path_highs.py).
-    from ao import lib as A
+    from polyctl import lib as A
     root = project["root"]
     route = A.compose_reviewer("kiro")
     through, spawned = [], []
@@ -207,14 +207,14 @@ def test_a_route_that_cannot_answer_through_acp_says_why(project):
 
     named = {"adapter": "qoder", "argv": ["qodercli", "-p", "{prompt}"], "model": "some-model"}
     assert "it names a model (some-model)" in cli._acp_reviewer_command(root, named, False, "acp")[1]
-    # OPENCODE-REVIEWER-2: opencode reviews as an agent of ao's, and `opencode acp` takes no --agent.
+    # OPENCODE-REVIEWER-2: opencode reviews as an agent of polyctl's, and `opencode acp` takes no --agent.
     agent = {"adapter": "opencode", "argv": ["opencode", "run", "{prompt}", "--pure"]}
     assert "nobody measured that its ACP command runs as one" in cli._acp_reviewer_command(root, agent, False,
                                                                                          "acp")[1]
     tool = {"kind": "tool", "adapter": "pr-agent", "argv": ["pr-agent"]}
     assert "tool reviewer" in cli._acp_reviewer_command(root, tool, False, "acp")[1]
     stranger = {"adapter": "no-such-harness", "argv": ["x"]}
-    assert "no-such-harness is no adapter ao ships" in cli._acp_reviewer_command(root, stranger, False, "acp")[1]
+    assert "no-such-harness is no adapter polyctl ships" in cli._acp_reviewer_command(root, stranger, False, "acp")[1]
 
 
 def test_a_review_through_acp_records_its_transport(project):
@@ -233,11 +233,11 @@ def test_a_review_through_acp_records_its_transport(project):
 
 import pytest  # noqa: E402
 
-# A scripted agent: AO_TEST_STEPS lists its steps, each a permission it asks for and waits on ({"ask": toolCall}) or
+# A scripted agent: POLYCTL_TEST_STEPS lists its steps, each a permission it asks for and waits on ({"ask": toolCall}) or
 # a session update it sends ({"report": update}); then it answers APPROVED and ends its turn.
 STEPS_AGENT = r"""
 import json, os, sys
-steps = json.loads(os.environ["AO_TEST_STEPS"])
+steps = json.loads(os.environ["POLYCTL_TEST_STEPS"])
 
 def say(message):
     print(json.dumps(message), flush=True)
@@ -290,7 +290,7 @@ def _call(kind, call_id, status=None, variant="tool_call"):
 def _ask(kind, call_id):
     body = {"title": kind, "kind": kind}
     if kind == "read":
-        body["locations"] = [{"path": "a.py"}]      # a read ao lets run, in the folder it runs in (REVIEW-PATH-HIGHS)
+        body["locations"] = [{"path": "a.py"}]      # a read polyctl lets run, in the folder it runs in (REVIEW-PATH-HIGHS)
     if call_id is not ABSENT:
         body["toolCallId"] = call_id
     return {"ask": body}
@@ -325,7 +325,7 @@ RAN_ALL_THE_SAME = {
 def test_a_review_whose_agent_ran_what_it_should_not_is_not_accepted(project, monkeypatch, name):
     """A call's record kept only its last report: a later report under the same id - its own, or another call's that
     shares the id - took back the kind it was run as, or that it completed, and the review was accepted."""
-    monkeypatch.setenv("AO_TEST_STEPS", json.dumps(RAN_ALL_THE_SAME[name]))
+    monkeypatch.setenv("POLYCTL_TEST_STEPS", json.dumps(RAN_ALL_THE_SAME[name]))
 
     attempt = cli._run_acp_reviewer(project["root"], [sys.executable, "-c", STEPS_AGENT], "qoder", "review this", 30,
                                     "qoder-reviewer")
@@ -334,7 +334,7 @@ def test_a_review_whose_agent_ran_what_it_should_not_is_not_accepted(project, mo
 
 
 def test_an_adapter_that_may_not_review_is_not_reached_over_acp_either(project, monkeypatch):
-    from ao import lib as A
+    from polyctl import lib as A
     root = project["root"]
     writer = {"id": "writer", "acp": {"argv": ["writer", "acp"], "measured": "writer 1.0 answered initialize, 2026-10-07"},
               "send": {"argv": ["writer", "{prompt}"]}, "options": {"trust_none": None, "trust_none_why": "it writes"}}
@@ -345,8 +345,8 @@ def test_an_adapter_that_may_not_review_is_not_reached_over_acp_either(project, 
 
 
 def test_a_kiro_reviewer_is_reached_over_acp_as_its_agent_was_measured_to_hold_there(project):
-    """KIRO-READONLY-2 measured kiro-cli acp running as ao's agent; its adapter says so, and opencode's does not."""
-    from ao import lib as A
+    """KIRO-READONLY-2 measured kiro-cli acp running as polyctl's agent; its adapter says so, and opencode's does not."""
+    from polyctl import lib as A
     root = project["root"]
 
     assert cli._acp_reviewer_command(root, {"adapter": "kiro", "argv": ["kiro-cli", "chat", "{prompt}"]}, False,

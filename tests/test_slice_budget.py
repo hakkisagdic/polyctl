@@ -1,10 +1,10 @@
 """A slice that spends past its budget is parked, and only a person or the architect gives it more (SLICE-BUDGET).
 
-The watchdog measured a slice's time and spend only after the fact, in `ao gain`: a runaway slice
+The watchdog measured a slice's time and spend only after the fact, in `polyctl gain`: a runaway slice
 could spend a day's window before anything said so. These drive the guard on a temporary board and
 a canned spend reading. The budget is the current running run's - a slice blocked on quota and
 resumed starts a new run - and spend is the implementer's turns since it started. A park writes
-the reading on the board and tells the architect; ao never resumes an over-budget slice, and the
+the reading on the board and tells the architect; polyctl never resumes an over-budget slice, and the
 implementer may not lift the block.
 """
 from datetime import datetime, timezone
@@ -17,10 +17,10 @@ import time
 
 import pytest
 
-from ao import cli
-from ao import lib as A
-from ao import settings as S
-from ao import watchdog as W
+from polyctl import cli
+from polyctl import lib as A
+from polyctl import settings as S
+from polyctl import watchdog as W
 from tests.scenarios import World
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -212,10 +212,10 @@ def test_a_slice_with_no_recorded_start_is_parked_and_names_the_missing_reading(
 def _commit_config(world, **values):
     stored = dict(world.cfg, **values)
     stored.pop("root", None)
-    path = os.path.join(world.root, ".ao", "config.json")
+    path = os.path.join(world.root, ".polyctl", "config.json")
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(stored, fh)
-    subprocess.run([A.git_binary(), "add", ".ao/config.json"], cwd=world.root, check=True)
+    subprocess.run([A.git_binary(), "add", ".polyctl/config.json"], cwd=world.root, check=True)
     subprocess.run([A.git_binary(), "-c", "user.email=t@t", "-c", "user.name=t",
                     "commit", "-q", "-m", "cap"], cwd=world.root, check=True)
 
@@ -349,7 +349,7 @@ def test_a_budget_blocked_slice_hand_moved_back_to_running_stays_past_its_budget
     assert W.slice_budget(world.root, cfg, now=time.time() + 31 * 60) is True
     assert [item["id"] for item in A.board(world.root)["blocked"]] == ["B8"]
 
-    open(f"{world.root}/.ao/board.md", "w", encoding="utf-8").write(
+    open(f"{world.root}/.polyctl/board.md", "w", encoding="utf-8").write(
         f"# Board\n\n## running\n{SLICE}\n\n## queued\n\n## blocked\n\n## done\n")
     assert W.slice_budget(world.root, cfg, now=time.time() + 32 * 60) is True
     assert A.board(world.root)["running"] == []
@@ -378,7 +378,7 @@ def test_an_unreadable_slice_ledger_parks_the_running_slice_and_stands_down(worl
     world.cfg["slice_budget_minutes"] = 30
     stored = dict(world.cfg)
     stored.pop("root", None)
-    open(f"{world.root}/.ao/config.json", "w", encoding="utf-8").write(json.dumps(stored))
+    open(f"{world.root}/.polyctl/config.json", "w", encoding="utf-8").write(json.dumps(stored))
     world.process(500, ["/agents/kiro-cli", "chat", "--resume-id", "s1", "--no-interactive", "go"])
     world.transcript_age(0)
     trace = world.cycle(dry_run=False)
@@ -416,7 +416,7 @@ def test_a_busy_implementer_past_its_cap_is_parked_in_the_same_cycle(world, monk
     world.cfg["slice_budget_minutes"] = 30
     stored = dict(world.cfg)
     stored.pop("root", None)
-    open(f"{world.root}/.ao/config.json", "w", encoding="utf-8").write(json.dumps(stored))
+    open(f"{world.root}/.polyctl/config.json", "w", encoding="utf-8").write(json.dumps(stored))
     world.process(500, ["/agents/kiro-cli", "chat", "--resume-id", "s1", "--no-interactive", "go"])
     world.transcript_age(0)
 
@@ -440,8 +440,8 @@ def test_hold_overrides_slice_budget_without_writing_board_ledger_or_alarm(world
     world.cfg["slice_budget_minutes"] = 30
     stored = dict(world.cfg)
     stored.pop("root", None)
-    open(f"{world.root}/.ao/config.json", "w", encoding="utf-8").write(json.dumps(stored))
-    open(f"{world.root}/.ao/hold", "w", encoding="utf-8").write(
+    open(f"{world.root}/.polyctl/config.json", "w", encoding="utf-8").write(json.dumps(stored))
+    open(f"{world.root}/.polyctl/hold", "w", encoding="utf-8").write(
         json.dumps({"by": "alice", "reason": "editing board", "at": now - 60, "stopped": []})
     )
     moves_before = A.slice_moves(world.root)
@@ -459,17 +459,17 @@ def test_implementer_starting_a_budget_parked_slice_is_refused_with_budget_reaso
     assert W.slice_budget(world.root, _cfg(world, slice_budget_minutes=30), now=time.time() + 31 * 60) is True
     assert [item["id"] for item in A.board(world.root)["blocked"]] == ["B8"]
 
-    monkeypatch.setenv("AO_ROLE", "implementer")
+    monkeypatch.setenv("POLYCTL_ROLE", "implementer")
     rc = cli.cmd_slice(world.cfg, argparse.Namespace(action="start", text="B8", why=None, boundary_file=None))
     out = capsys.readouterr().out
     assert rc == 2
     assert "parked on its budget by the watchdog" in out
     assert "nothing gives it back on its own" in out
-    assert "ao slice start B8" in out
+    assert "polyctl slice start B8" in out
     assert "parked on quota" not in out
     assert [item["id"] for item in A.board(world.root)["blocked"]] == ["B8"]
 
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     assert cli.cmd_slice(world.cfg, argparse.Namespace(action="start", text="B8", why=None, boundary_file=None)) == 0
     assert [item["id"] for item in A.board(world.root)["running"]] == ["B8"]
 
@@ -481,7 +481,7 @@ def test_implementer_blocking_and_restarting_its_own_slice_does_not_reset_its_bu
     _running(world)
     S.write_machine({"slice_budget_minutes": 30, "slice_budget_spend": 5.0})
 
-    monkeypatch.setenv("AO_ROLE", "implementer")
+    monkeypatch.setenv("POLYCTL_ROLE", "implementer")
     monkeypatch.setattr(A.time, "time", lambda: t0 + 29 * 60)
     assert cli.cmd_slice(world.cfg, argparse.Namespace(action="block", text="x", why=None, slice="B8",
                                                        waiting=None)) == 0
@@ -495,7 +495,7 @@ def test_implementer_blocking_and_restarting_its_own_slice_does_not_reset_its_bu
     assert [item["id"] for item in board["blocked"]] == ["B8"]
     assert board["blocked"][0]["notes"]["needs"] == "budget (spent 6 credit of 5; 31m of 30m)"
 
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     monkeypatch.setattr(A.time, "time", lambda: now)
     assert cli.cmd_slice(world.cfg, argparse.Namespace(action="start", text="B8", why=None, boundary_file=None)) == 0
     assert W.budget_start("B8", A.slice_moves(world.root)) == now

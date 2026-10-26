@@ -1,10 +1,10 @@
 """A hunt goes through every line of every tracked file up to hunter.max_file_kb, a piece a hunt where a file is
 larger than one hunt, and names a file past that size it passes over (BUG-HUNTER-3).
 
-The hunter's first run on ao's own tree, on 2026-10-12, read eight files, and how it chose them had three faults.
+The hunter's first run on polyctl's own tree, on 2026-10-12, read eight files, and how it chose them had three faults.
 A file that did not fit what was left of a hunt's budget was passed over: the cursor had already gone on beyond it,
 so the same file could be missed on every round. A file larger than a whole hunt was read to its first
-`hunter.bytes_per_run` and never further - ao's largest files are three and four times that, so most of
+`hunter.bytes_per_run` and never further - polyctl's largest files are three and four times that, so most of
 cli_review.py and watchdog.py was never read. And a tree in which nothing could be read as text kept the hunt
 going round for ever. The cursor also named a place in `git ls-files`, so a file added above it moved another
 file into its place.
@@ -17,11 +17,11 @@ import sys
 import threading
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_bug_hunter import _stand_in
 
 # A hunter that keeps its prompt and finds nothing: an answer, so the hunt counts as run.
-SAVE_PROMPT = ("import os, sys\nopen(os.environ['AO_TEST_PROMPT'], 'w', encoding='utf-8').write(sys.argv[1])\n"
+SAVE_PROMPT = ("import os, sys\nopen(os.environ['POLYCTL_TEST_PROMPT'], 'w', encoding='utf-8').write(sys.argv[1])\n"
                "print('nothing here')\n")
 
 
@@ -83,7 +83,7 @@ def test_a_file_that_does_not_fit_what_is_left_of_a_hunt_starts_the_next_one(pro
 
     first, second = A.hunt_slice(root, cfg)[0], A.hunt_slice(root, cfg)[0]
 
-    assert [piece[0] for piece in first] == [".ao-project", "src/a.py"]    # b.py's 1800 bytes did not fit after
+    assert [piece[0] for piece in first] == [".polyctl-project", "src/a.py"]    # b.py's 1800 bytes did not fit after
     assert [piece[0] for piece in second][:2] == ["src/b.py", "src/c.py"]   # it was passed over until now
 
 
@@ -91,12 +91,12 @@ def test_the_cursor_keeps_the_file_it_stopped_before_by_its_name(project):
     root = project["root"]
     _track(root, {"src/m.py": "m = 1\n" * 200, "src/y.py": "y = 1\n" * 300, "src/z.py": "z = 1\n"})
     cfg = dict(project, hunter={"bytes_per_run": 2000, "files_per_run": 8})
-    assert [piece[0] for piece in A.hunt_slice(root, cfg)[0]] == [".ao-project", "src/m.py"]
+    assert [piece[0] for piece in A.hunt_slice(root, cfg)[0]] == [".polyctl-project", "src/m.py"]
 
     _track(root, {"src/a.py": "a = 1\n", "src/b.py": "b = 1\n"})            # two files above where it stopped
     assert A.hunt_slice(root, cfg)[0][0][0] == "src/y.py"
 
-    with open(os.path.join(root, ".ao", "hunter.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "hunter.json"), "w", encoding="utf-8") as fh:
         json.dump({"cursor": 0, "path": "src/x.py", "line": 7}, fh)          # a file gone: the one after it
     assert A.hunt_slice(root, cfg)[0][0][:3] == ("src/y.py", "y = 1\n" * 300, 1)
 
@@ -104,7 +104,7 @@ def test_the_cursor_keeps_the_file_it_stopped_before_by_its_name(project):
 def test_a_cursor_written_before_it_is_read_as_the_place_in_the_list_it_was(project):
     root = project["root"]
     _track(root, {"src/a.py": "a = 1\n", "src/b.py": "b = 1\n"})
-    with open(os.path.join(root, ".ao", "hunter.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "hunter.json"), "w", encoding="utf-8") as fh:
         json.dump({"cursor": 2}, fh)
 
     assert A.hunt_slice(root, dict(project, hunter={"files_per_run": 1}))[0][0][0] == "src/b.py"
@@ -113,7 +113,7 @@ def test_a_cursor_written_before_it_is_read_as_the_place_in_the_list_it_was(proj
 def test_a_tree_with_nothing_a_hunt_can_read_ends_the_hunt(project):
     root = project["root"]
     _track(root, {"assets/a.bin": b"\xff\xfe\x00\x81" * 64, "assets/b.bin": b"\x80\x81" * 64})
-    _untrack(root, ".ao-project")
+    _untrack(root, ".polyctl-project")
     found = []
     hunt = threading.Thread(target=lambda: found.append(A.hunt_slice(root, project)), daemon=True)
 
@@ -140,7 +140,7 @@ def test_a_file_past_max_file_kb_is_passed_over_and_said(project, monkeypatch, c
     root = project["root"]
     _track(root, {"src/a.py": "def f():\n    return 1\n", "vendor/bundle.js": "x = 1;\n" * 400})
     _stand_in(monkeypatch)
-    monkeypatch.setenv("AO_TEST_PROMPT", str(tmp_path / "prompt.txt"))
+    monkeypatch.setenv("POLYCTL_TEST_PROMPT", str(tmp_path / "prompt.txt"))
     cfg = dict(project, hunter={"max_file_kb": 2, "id": "h1",
                                 "argv": [sys.executable, "-B", "-c", SAVE_PROMPT, "{prompt}"]})
 
@@ -158,12 +158,12 @@ def test_a_piece_is_headed_with_the_lines_it_holds_in_the_project_s_language(pro
     _track(root, {"src/big.py": source})
     _stand_in(monkeypatch)
     kept = tmp_path / "prompt.txt"
-    monkeypatch.setenv("AO_TEST_PROMPT", str(kept))
+    monkeypatch.setenv("POLYCTL_TEST_PROMPT", str(kept))
     argv = [sys.executable, "-B", "-c", SAVE_PROMPT, "{prompt}"]
     heads = {}
     for lang in ("en", "tr"):
         cfg = dict(project, language=lang, hunter={"id": "h1", "argv": argv, "bytes_per_run": 2000})
-        with open(os.path.join(root, ".ao", "hunter.json"), "w", encoding="utf-8") as fh:
+        with open(os.path.join(root, ".polyctl", "hunter.json"), "w", encoding="utf-8") as fh:
             json.dump({"cursor": 1, "path": "src/big.py", "line": 1}, fh)
         assert cli.cmd_hunt(cfg, SimpleNamespace(action="run", fingerprint=None)) == 0
         heads[lang] = re.findall(r"^--- (.+) ---$", kept.read_text(encoding="utf-8"), re.M)

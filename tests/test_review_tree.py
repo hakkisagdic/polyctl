@@ -7,7 +7,7 @@ any other site of the same fault elsewhere is unchecked" - while a model holding
 turns hunting for a repository that was not there until its service gave up and the review was lost.
 The tree the review pinned is now unpacked into that directory: the same isolation, with the code.
 
-A tool reviewer is neither given it nor told of one (REVIEW-TREE-2): it reads the diff ao hands it in
+A tool reviewer is neither given it nor told of one (REVIEW-TREE-2): it reads the diff polyctl hands it in
 a file of its own there. An unpacking that fails partway removes candidate/ again; an existing
 empty candidate/ means everything was withheld, as the note explains (TRIAGE-4-REST).
 """
@@ -18,7 +18,7 @@ import sys
 import tarfile
 from pathlib import Path
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_review_chain import _args, _repo_with_change
 from tests.test_reviewer_tool import _only_review, _seen, _tool
 
@@ -54,7 +54,7 @@ def test_the_pinned_tree_is_written_whole_into_a_directory_of_its_own(tmp_path):
 
     assert written == str(tmp_path)
     tree = tmp_path / cli.REVIEW_TREE_DIR
-    assert (tree / "pyproject.toml").is_file() and (tree / "src" / "ao" / "lib.py").is_file()
+    assert (tree / "pyproject.toml").is_file() and (tree / "src" / "polyctl" / "lib.py").is_file()
     assert not (tree / ".git").exists()              # a copy of the tree, never the repository itself
     assert [path.name for path in tmp_path.iterdir()] == [cli.REVIEW_TREE_DIR]      # REVIEW-TREE-3
 
@@ -68,11 +68,11 @@ def test_a_tree_that_is_no_tree_leaves_the_directory_as_it_was(tmp_path):
 def test_the_reviewer_runs_where_that_tree_is(project):
     """The proof is the reviewer's own working directory: it reads a file only the tree has.
 
-    It runs in the test's own project, whose fixture gives ao a temporary home: a reviewer registers
-    itself under ~/.ao while it runs.
+    It runs in the test's own project, whose fixture gives polyctl a temporary home: a reviewer registers
+    itself under ~/.polyctl while it runs.
     """
     root = project["root"]
-    look = "import os, sys; sys.stdout.write(str(os.path.isfile(os.path.join('candidate', '.ao-project'))))"
+    look = "import os, sys; sys.stdout.write(str(os.path.isfile(os.path.join('candidate', '.polyctl-project'))))"
 
     with_tree = cli._run_reviewer(root, [sys.executable, "-c", look], 120, tree=_tree_of_head(root))
     without = cli._run_reviewer(root, [sys.executable, "-c", look], 120)
@@ -91,7 +91,7 @@ def test_a_range_is_reviewed_in_the_tree_it_ends_on(project, tmp_path):
                    check=True)
     seen = tmp_path / "seen.txt"
     look = (f"import os, sys; open({str(seen)!r}, 'w', encoding='utf-8').write(str(os.path.isfile("
-            "os.path.join('candidate', '.ao-project'))) "
+            "os.path.join('candidate', '.polyctl-project'))) "
             "+ chr(10) + sys.argv[1]); print('BLOCKER: 0'); print('HIGH: 0'); print('MEDIUM: 0'); print('LOW: 0'); "
             "print('VERDICT: APPROVED')")
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": [sys.executable, "-c", look, "{prompt}"]})
@@ -100,7 +100,7 @@ def test_a_range_is_reviewed_in_the_tree_it_ends_on(project, tmp_path):
 
     found, prompt = seen.read_text(encoding="utf-8").split("\n", 1)
     assert found == "True"
-    assert "--- TREE: ao unpacks the whole tree this range ends on into `candidate/` in your working directory" in prompt
+    assert "--- TREE: polyctl unpacks the whole tree this range ends on into `candidate/` in your working directory" in prompt
     assert A.range_end_tree(root, "HEAD~1..HEAD") == subprocess.run(
         ["git", "rev-parse", "HEAD^{tree}"], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
     assert A.range_end_tree(root, "HEAD") is None and A.range_end_tree(root, "HEAD~1..--all") is None
@@ -108,7 +108,7 @@ def test_a_range_is_reviewed_in_the_tree_it_ends_on(project, tmp_path):
 
 def test_the_reviewer_is_told_where_the_tree_is_in_both_languages_without_changing_the_prompt_above():
     """A note of its own, so the Turkish prompt a sectioned review resumes on stays byte for byte."""
-    from ao import language
+    from polyctl import language
 
     note = language.TEXTS["prompt.review-tree"]
     assert note["en"].startswith("--- TREE:") and note["tr"].startswith("--- AĞAÇ:")
@@ -124,7 +124,7 @@ def test_the_tree_is_never_written_inside_the_repository():
 def test_a_member_that_climbs_out_is_refused_by_where_it_lands_on_either_platform():
     """`..\\..\\x` is one odd word to POSIX and two parent directories to Windows; both are judged right.
 
-    The check lives in lib with the unpacking, which `ao ask --codebase` shares (CODEBASE-COPY).
+    The check lives in lib with the unpacking, which `polyctl ask --codebase` shares (CODEBASE-COPY).
     """
     import ntpath
     import posixpath
@@ -132,14 +132,14 @@ def test_a_member_that_climbs_out_is_refused_by_where_it_lands_on_either_platfor
     assert not A._lands_inside("C:\\tmp\\review", "..\\..\\pwned.txt", path=ntpath)
     assert not A._lands_inside("/tmp/review", "../escape.txt", path=posixpath)
     assert A._lands_inside("/tmp/review", "..\\..\\name-with-backslashes.txt", path=posixpath)
-    assert A._lands_inside("C:\\tmp\\review", "src\\ao\\lib.py", path=ntpath)
+    assert A._lands_inside("C:\\tmp\\review", "src\\polyctl\\lib.py", path=ntpath)
 
 
 def test_a_request_a_person_carries_holds_no_note_about_a_tree_it_does_not_have(project, tmp_path):
-    """The note is for ao's own reviewer, which runs where the tree is; a session a person carries the request to
+    """The note is for polyctl's own reviewer, which runs where the tree is; a session a person carries the request to
     has none. The request is written from the prompt as it stood before the note, never read back out of one that
     holds it (REVIEW-TREE-2)."""
-    from ao import language
+    from polyctl import language
 
     root = project["root"]
     _repo_with_change(root)
@@ -152,12 +152,12 @@ def test_a_request_a_person_carries_holds_no_note_about_a_tree_it_does_not_have(
     note = cli._tree_note(project, True)
     (request,) = Path(A.review_requests_dir(root)).glob("*.md")
     text = request.read_text(encoding="utf-8")
-    assert note in handed.read_text(encoding="utf-8")        # ao's own reviewer was told where its tree is
+    assert note in handed.read_text(encoding="utf-8")        # polyctl's own reviewer was told where its tree is
     assert language.text(project, "prompt.review-candidate") in text and note not in text
 
 
 def test_the_note_says_what_an_empty_directory_means_in_both_languages():
-    from ao import language
+    from polyctl import language
 
     assert "empty" in language.TEXTS["prompt.review-tree"]["en"]
     assert "boşsa" in language.TEXTS["prompt.review-tree"]["tr"]
@@ -167,14 +167,14 @@ def test_the_note_says_what_an_empty_directory_means_in_both_languages():
 
 def test_a_tool_reviewer_is_handed_its_own_files_and_neither_the_tree_nor_a_note_about_one(project, tmp_path,
                                                                                          monkeypatch):
-    """A tool (#86) reads the candidate from a file ao writes where it runs, and answers into another there.
+    """A tool (#86) reads the candidate from a file polyctl writes where it runs, and answers into another there.
 
     Unpacked there first, a tree holding a file of the candidate's name at its root stopped the handoff,
-    since ao writes that file only where none is; one holding the answer's name could be read as an
+    since polyctl writes that file only where none is; one holding the answer's name could be read as an
     answer the tool never wrote. A tool reads the diff it is handed, so it is given no tree, and it is
     not told of one.
     """
-    from ao import language
+    from polyctl import language
 
     root = project["root"]
     _repo_with_change(root)
@@ -218,7 +218,7 @@ def test_an_unpacking_that_fails_partway_takes_back_what_it_wrote(tmp_path, monk
 
     Here the third is refused, standing in for a name the platform cannot write on any system the
     test runs on; that the two before it were written is the extraction's own record, so the empty
-    directory after is ao's doing.
+    directory after is polyctl's doing.
     """
     repo, tree = _tree_of(tmp_path, {"a.txt": b"first\n", "b/c.txt": b"second\n", "y/refused.txt": b"third\n"})
     written, makefile = [], tarfile.TarFile.makefile
@@ -237,7 +237,7 @@ def test_an_unpacking_that_fails_partway_takes_back_what_it_wrote(tmp_path, monk
 
 
 def test_a_directory_that_holds_anything_is_not_unpacked_into(tmp_path):
-    """After a failure only a directory that was empty can be left as it was, so ao writes into no other."""
+    """After a failure only a directory that was empty can be left as it was, so polyctl writes into no other."""
     (tmp_path / "kept.txt").write_text("kept\n", encoding="utf-8")
 
     assert cli._unpack_candidate(A.REPO, _tree_of_head(), str(tmp_path)) is None

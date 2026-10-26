@@ -3,7 +3,7 @@
 A machine can run every shell command an agent issues through rtk: a hook the harness runs before
 each call rewrites `git diff` to `rtk git diff`, and the harness then checks its rules against the
 rewritten command. A grant naming `Bash(git diff:*)` did not admit `rtk git diff`, so an unattended
-turn was denied the commands its grant named (measured on qodercli). Every grant a turn ao starts
+turn was denied the commands its grant named (measured on qodercli). Every grant a turn polyctl starts
 holds now names, right after each rule for a command rtk rewrites, the same rule for rtk's form of
 it. These tests hold each shipped grant to exactly those rules, hold rtk's measured rewrites to the
 rules meant to admit them, and hold the forms to the package's own data.
@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from ao import allowlist as AL, cli, language, lib as A, storage, watchdog as W
+from polyctl import allowlist as AL, cli, language, lib as A, storage, watchdog as W
 from tests.scenarios import World
 
 BLOCKED = "# queue empty\n\n## KARAR GEREKLİ\n"
@@ -53,7 +53,7 @@ NAMED = {"claude-code implementer": IMPLEMENTER_NAMES, "qoder implementer": IMPL
 
 
 def _grant(name):
-    """(the argv as its adapter declares the grant, the argv a turn ao starts holds, the role) of one shipped grant."""
+    """(the argv as its adapter declares the grant, the argv a turn polyctl starts holds, the role) of one shipped grant."""
     if name == "claude-code architect":
         declared = cli._architect_argv("claude-code")
         return declared, A.admit_rewrites(declared)[0], "architect"      # what the watchdog wakes it with
@@ -69,7 +69,7 @@ def _rtk():
 
 
 def _store(root, cfg):
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in cfg.items() if key != "root"}, fh)
 
 
@@ -156,7 +156,7 @@ def test_a_grant_given_with_an_equals_sign_gains_each_form_once_and_a_second_adm
 
 def test_an_exact_rule_a_rule_naming_arguments_of_its_own_and_a_command_rtk_leaves_alone_gain_nothing():
     argv = ["x", "-p", "{prompt}", "--allowedTools",
-            "Read,Bash(git status),Bash(git diff --stat:*),Bash(ao status:*),Bash(lsof:*),Edit(/a),mcp__ao__ao_inbox"]
+            "Read,Bash(git status),Bash(git diff --stat:*),Bash(polyctl status:*),Bash(lsof:*),Edit(/a),mcp__polyctl__polyctl_inbox"]
 
     assert A.admit_rewrites(argv) == (argv, [])
     assert A.admit_rewrites(["x", "-p", "Bash(git diff:*)"]) == (["x", "-p", "Bash(git diff:*)"], [])
@@ -171,7 +171,7 @@ def test_a_form_is_only_ever_its_rewriters_own_command_and_plain_words_after_it(
     assert A.admit_rewrites(["x", "--allowedTools", grant], odd)[1] == ["Bash(rtk git status:*)"]
 
 
-def test_the_shipped_rewriter_declares_every_form_and_wrapper_in_the_shape_ao_reads():
+def test_the_shipped_rewriter_declares_every_form_and_wrapper_in_the_shape_polyctl_reads():
     rtk = _rtk()
 
     assert A.rewriter_forms(rtk) == rtk["forms"]                 # no form of the package's own is dropped
@@ -185,7 +185,7 @@ def test_the_forms_are_read_from_the_package_and_from_no_layer_an_agent_can_writ
     layer.mkdir(parents=True)
     (layer / "wide.json").write_text(json.dumps({"id": "wide", "command": "rtk", "forms": {"ls": "rtk proxy ls"}}),
                                      encoding="utf-8")
-    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", str(tmp_path / "user-adapters"))
 
     assert [rewriter["id"] for rewriter in A.command_rewriters()] == ["rtk"]
     assert A.admit_rewrites(["x", "--allowedTools", "Bash(ls:*)"])[1] == ["Bash(rtk ls:*)"]
@@ -208,7 +208,7 @@ def test_a_claude_implementer_is_nudged_with_rtks_form_of_the_grant_its_resume_c
     assert [rule for rule in rules if rule.startswith("Bash(rtk ")] == IMPLEMENTER_GAINS
     assert rules[rules.index("Bash(git diff:*)") + 1] == "Bash(rtk git diff:*)"
     # Nothing was appended: the grant is the resume's own, and so are the forms in it.
-    assert not os.path.exists(os.path.join(root, ".ao", "ledger", "actor-flags.jsonl"))
+    assert not os.path.exists(os.path.join(root, ".polyctl", "ledger", "actor-flags.jsonl"))
 
 
 def test_a_qoder_implementer_is_nudged_with_rtks_form_of_the_grant_it_is_appended_and_the_record_holds_it(
@@ -217,13 +217,13 @@ def test_a_qoder_implementer_is_nudged_with_rtks_form_of_the_grant_it_is_appende
     grant = argv[argv.index("--allowed-tools") + 1]
 
     assert [rule for rule in grant.split(",") if rule.startswith("Bash(rtk ")] == IMPLEMENTER_GAINS
-    (row,) = storage.read_jsonl(os.path.join(root, ".ao", "ledger", "actor-flags.jsonl"))
+    (row,) = storage.read_jsonl(os.path.join(root, ".polyctl", "ledger", "actor-flags.jsonl"))
     assert row["actor"] == "implementer" and row["flags"][-2:] == ["--allowed-tools", grant]
     assert "options.unattended" in row["reason"] and "command rewriter" in row["reason"]
 
 
 @pytest.mark.parametrize("prompt,mail", [("prompt.wake", BLOCKED), ("prompt.refill", None)], ids=["report", "refill"])
-def test_an_architect_woken_from_the_block_ao_init_wrote_holds_rtks_form_of_its_grant(
+def test_an_architect_woken_from_the_block_polyctl_init_wrote_holds_rtks_form_of_its_grant(
         project, monkeypatch, tmp_path, prompt, mail):
     declared = cli._architect_argv("claude-code")
     cfg = dict(project, architect={"adapter": "claude-code", "session": "a1", "name": "fable", "argv": declared})
@@ -238,15 +238,15 @@ def test_an_architect_woken_from_the_block_ao_init_wrote_holds_rtks_form_of_its_
     (argv,) = _spawned(world, "claude")
     assert language.text(cfg, prompt) in argv
     assert [rule for rule in AL.rules(argv) if rule not in AL.rules(declared)] == GAINED["claude-code architect"]
-    # The block in .ao/config.json keeps the grant as ao init wrote it; the turn gains the forms when it starts.
-    with open(os.path.join(world.root, ".ao", "config.json"), encoding="utf-8") as fh:
+    # The block in .polyctl/config.json keeps the grant as polyctl init wrote it; the turn gains the forms when it starts.
+    with open(os.path.join(world.root, ".polyctl", "config.json"), encoding="utf-8") as fh:
         assert json.load(fh)["architect"]["argv"] == declared
 
 
 def test_a_package_rewriter_that_does_not_parse_raises_rather_than_declaring_nothing(tmp_path, monkeypatch):
     """The allowlist check reads the same declarations: losing them quietly would pass a grant it must refuse."""
     import pytest
-    from ao import lib as A
+    from polyctl import lib as A
 
     rewriters = tmp_path / A.REWRITERS_DIR
     rewriters.mkdir(parents=True)
@@ -258,7 +258,7 @@ def test_a_package_rewriter_that_does_not_parse_raises_rather_than_declaring_not
 
 
 def test_a_package_without_a_rewriters_directory_declares_none(tmp_path, monkeypatch):
-    from ao import lib as A
+    from polyctl import lib as A
 
     monkeypatch.setattr(A, "adapters_dir", lambda: str(tmp_path))
     assert A.command_rewriters() == []

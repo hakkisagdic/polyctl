@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from ao import cli, procs
+from polyctl import cli, procs
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="a process group's CPU is not readable on Windows")
 

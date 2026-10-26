@@ -1,4 +1,4 @@
-"""`ao commit` writes the commit itself: the granted tree on the granted commit, and no hook runs
+"""`polyctl commit` writes the commit itself: the granted tree on the granted commit, and no hook runs
 (LEADS-GATE-COMMIT).
 
 `git commit` read the index again once its hooks returned, so a path another process staged after the check - or
@@ -8,14 +8,14 @@ under it, and a hook kept in the tree ran as the person committing.
 import os
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_commit_trailer import _git
 from tests.test_landed_tree import _granted_candidate
 
-# ---- 9d600dfe4147618d: ao commit lands the granted tree on the granted commit, and runs no hook ----
+# ---- 9d600dfe4147618d: polyctl commit lands the granted tree on the granted commit, and runs no hook ----
 
 def _after_the_check(monkeypatch, act):
-    """Run `act` once ao commit's check has passed: what a process beside the commit does in that instant."""
+    """Run `act` once polyctl commit's check has passed: what a process beside the commit does in that instant."""
     real = getattr(cli.cmd_commit_check, "unwrapped", cli.cmd_commit_check)
 
     def checked(cfg, args):
@@ -47,7 +47,7 @@ def test_a_path_staged_after_the_check_stays_staged_and_the_granted_tree_lands(p
     assert _git(root, "diff", "--cached", "--name-only").split() == ["src/unreviewed.py"]
 
 
-def test_ao_commit_runs_no_hook(project, monkeypatch):
+def test_polyctl_commit_runs_no_hook(project, monkeypatch):
     """A repository that keeps its hooks in its tree keeps files the implementer edits: `git commit` ran them as the
     person committing, and a hook staged into the commit it was checking (LEADS-GATE)."""
     root = project["root"]
@@ -65,7 +65,7 @@ def test_ao_commit_runs_no_hook(project, monkeypatch):
     assert A.landed_commit_problem(root) is None
 
 
-def test_a_branch_moved_or_switched_while_ao_commit_ran_takes_no_commit(project, monkeypatch):
+def test_a_branch_moved_or_switched_while_polyctl_commit_ran_takes_no_commit(project, monkeypatch):
     """The branch moves from the granted commit only: one that moved meanwhile is left where it is and nothing lands;
     switched to another branch at the granted commit, the granted tree lands there (LEADS-GATE)."""
     root = project["root"]
@@ -85,7 +85,7 @@ def test_a_branch_moved_or_switched_while_ao_commit_ran_takes_no_commit(project,
     assert _git(root, "rev-parse", "side^{tree}").strip() == granted
 
 
-def test_ao_commit_lands_no_merge_and_a_lane_lands_squashed(project, monkeypatch, capsys):
+def test_polyctl_commit_lands_no_merge_and_a_lane_lands_squashed(project, monkeypatch, capsys):
     """A grant binds one parent, the commit its candidate was built on: a merge in progress, or a cherry-pick, is sent
     back to git, and a lane squashed lands as any commit (LEADS-GATE)."""
     root = project["root"]
@@ -143,7 +143,7 @@ def test_a_grant_that_names_no_merge_lands_none(project, monkeypatch, capsys):
 
 
 def test_a_commit_gpgsign_git_cannot_read_refuses_the_commit(project, monkeypatch, capsys):
-    """git commit refuses a commit.gpgSign it cannot read as a boolean; ao commit read the failed query as unset and
+    """git commit refuses a commit.gpgSign it cannot read as a boolean; polyctl commit read the failed query as unset and
     wrote the commit unsigned (LEADS-GATE)."""
     root = project["root"]
     cfg = _granted_candidate(project, monkeypatch)

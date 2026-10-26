@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.scenarios import World
 
 REQUEST = "20260916-0900-kiro-to-fable-BLOCKED-store.md"
@@ -37,7 +37,7 @@ def test_an_unseen_decision_request_climbs_to_red_and_stops_once_its_reader_is_s
         assert told and told[-1][2] == audience and told[-1][3] == level, (minutes, told)
         assert f"{REQUEST} has waited {minutes}m" in told[-1][1]
 
-    monkeypatch.setenv("AO_ROLE", "architect")
+    monkeypatch.setenv("POLYCTL_ROLE", "architect")
     cli.cmd_mail(world.cfg, SimpleNamespace(action="list", type="INFO", topic=None, body=None))
     world.notices.clear()
     world.cycle()

@@ -1,23 +1,23 @@
-"""Findings of an independent re-review of ao's history that held, each measured here and fixed (TRIAGE-HIGHS).
+"""Findings of an independent re-review of polyctl's history that held, each measured here and fixed (TRIAGE-HIGHS).
 
 A re-review by another model family was triaged against the code with ten slices staged on main, and these held:
 
-1. `ao hooks install` refused a project set up before .ao-project existed, and went ahead in the same project when
-   its .ao/config.json could not be read: that project reads as broken, not legacy, and `ao doctor` and `ao prove`
+1. `polyctl hooks install` refused a project set up before .polyctl-project existed, and went ahead in the same project when
+   its .polyctl/config.json could not be read: that project reads as broken, not legacy, and `polyctl doctor` and `polyctl prove`
    advised exactly that install. The current hook it put over the old enforcing one stands aside while no marker is
    tracked, so every commit went through unchecked. Install now refuses wherever the current hook would stand aside,
    and doctor and prove name the repair and then the adoption.
 2. E-mail over implicit TLS (port 465) took smtplib's own context, which verifies no certificate and no host name,
    so the account's password went to whoever answered in between; STARTTLS was already given a verifying context.
-   Both verify now, and nothing else in ao builds or installs a TLS context: urllib's default verifies.
-3. `ao status` and the watchdog's quota gates read the implementer's quota by the command its adapter declares, as
-   every layer loads it - the project's .ao/adapters/, which the implementer writes, among them - and a planted
-   program ran. `ao init` composed the architect's command, which every wake starts, from a user's layer too. Both
+   Both verify now, and nothing else in polyctl builds or installs a TLS context: urllib's default verifies.
+3. `polyctl status` and the watchdog's quota gates read the implementer's quota by the command its adapter declares, as
+   every layer loads it - the project's .polyctl/adapters/, which the implementer writes, among them - and a planted
+   program ran. `polyctl init` composed the architect's command, which every wake starts, from a user's layer too. Both
    commands are the package's alone now, as a turn's, a route's, an MCP registration's and a probe's are.
-4. `ao verify` judged the candidate's isolation by .ao/gates.json read again after waiting for the machine lock, not
+4. `polyctl verify` judged the candidate's isolation by .polyctl/gates.json read again after waiting for the machine lock, not
    by the definitions it ran: inputs narrowed during the wait and put back after hid an untracked file a gate read,
    and the recorded digest still matched the file. Isolation is judged from the reading the run used, and recorded.
-5. A .ao/gates.json in a shape the coverage check could not read raised out of `ao doctor --check --notify` before it
+5. A .polyctl/gates.json in a shape the coverage check could not read raised out of `polyctl doctor --check --notify` before it
    sent any alarm; `echo pytest` counted as running pytest; and a toolchain whose manifest sat one directory down got
    no gates, so a .NET backend beside a JavaScript workspace went unverified. The shape is a finding of its own and
    the doctor sends the rest, a runner counts only where a command starts, and such a toolchain gets gates of its own.
@@ -34,8 +34,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, email, lib as A
-from ao import watchdog as W
+from polyctl import cli, email, lib as A
+from polyctl import watchdog as W
 from tests import standin
 from tests.scenarios import World
 from tests.test_hook_paths import _git
@@ -50,11 +50,11 @@ COMMIT = ("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q")
 # ---- 1. hooks install in a project from before the marker whose config cannot be read ---------------------------
 
 def _unreadable(tmp_path, monkeypatch):
-    """A project an older ao set up, its old enforcing hook in place and no marker ever, whose config reads as `{`."""
+    """A project an older polyctl set up, its old enforcing hook in place and no marker ever, whose config reads as `{`."""
     base = tmp_path / "pre-marker"
     base.mkdir()
     root, cfg, hook = _legacy(base, monkeypatch)
-    (root / ".ao" / "config.json").write_text("{", encoding="utf-8")
+    (root / ".polyctl" / "config.json").write_text("{", encoding="utf-8")
     return root, cfg, hook
 
 
@@ -70,18 +70,18 @@ def test_hooks_install_refuses_a_project_from_before_the_marker_whose_config_can
 
     assert hook.read_bytes() == before
     assert "hooks install refused" in out and "make it readable, then " + cli.PROJECT_ADOPT_COMMAND in out
-    # The old hook still runs ao, which this PATH does not hold, so the commit is refused; the current hook install
+    # The old hook still runs polyctl, which this PATH does not hold, so the commit is refused; the current hook install
     # wrote here stood aside, and the same commit went through.
     assert _git(root, *COMMIT, "--allow-empty", "-m", "unchecked", check=False).returncode != 0
 
-    # Where a marker is tracked the current hook goes on to ao, which refuses while the config cannot be read: that
+    # Where a marker is tracked the current hook goes on to polyctl, which refuses while the config cannot be read: that
     # project is still installed.
-    (Path(project["root"]) / ".ao" / "config.json").write_text("{", encoding="utf-8")
+    (Path(project["root"]) / ".polyctl" / "config.json").write_text("{", encoding="utf-8")
     assert cli._project_enrollment(project["root"])["state"] == "broken"
     assert cli.cmd_hooks(project, INSTALL) == 0
 
 
-@pytest.mark.parametrize("standing", ("the hook an early ao wrote", "the current hook"))
+@pytest.mark.parametrize("standing", ("the hook an early polyctl wrote", "the current hook"))
 def test_doctor_and_prove_send_such_a_project_to_its_repair_and_the_adoption_not_to_an_install(tmp_path, monkeypatch,
                                                                                                capsys, standing):
     root, cfg, hook = _unreadable(tmp_path, monkeypatch)
@@ -91,19 +91,19 @@ def test_doctor_and_prove_send_such_a_project_to_its_repair_and_the_adoption_not
     finding = dict(cli.doctor_problems(cfg))["commit-hook"]
 
     assert finding.count("make it readable, then " + cli.PROJECT_ADOPT_COMMAND) == 1
-    assert finding.count("this project has AO state but it is unreadable") == 1 and "ao hooks install" not in finding
+    assert finding.count("this project has polyctl state but it is unreadable") == 1 and "polyctl hooks install" not in finding
 
     capsys.readouterr()
     assert cli.cmd_prove(cfg, cli.build_parser().parse_args(["prove", "--no-review"])) == 1
     proved = _plain(capsys)
-    assert "make it readable, then " + cli.PROJECT_ADOPT_COMMAND in proved and "— ao hooks install" not in proved
+    assert "make it readable, then " + cli.PROJECT_ADOPT_COMMAND in proved and "— polyctl hooks install" not in proved
 
-    if standing == "the hook an early ao wrote":
-        # The doctor's own row: a doctor that finds ao asks agent binaries their version, and none is started here.
+    if standing == "the hook an early polyctl wrote":
+        # The doctor's own row: a doctor that finds polyctl asks agent binaries their version, and none is started here.
         monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)
         cli.cmd_doctor(cfg, cli.build_parser().parse_args(["doctor"]))
         (row,) = [line for line in _plain(capsys).splitlines() if line.startswith("commit hook")]
-        assert "make it readable, then " + cli.PROJECT_ADOPT_COMMAND in row and "ao hooks install" not in row
+        assert "make it readable, then " + cli.PROJECT_ADOPT_COMMAND in row and "polyctl hooks install" not in row
 
 
 HOOK_CALLERS = ("hooks", "doctor", "doctor-check", "prove")
@@ -142,7 +142,7 @@ def test_pre_marker_hook_advice_requires_adoption_on_every_branch(tmp_path, monk
     elif branch == "orphan":
         _git(root, "switch", "--orphan", "tmp")
     if broken:
-        (root / ".ao" / "config.json").write_text("{", encoding="utf-8")
+        (root / ".polyctl" / "config.json").write_text("{", encoding="utf-8")
     enrollment = cli._project_enrollment(str(root))
     assert enrollment["state"] == ("broken" if broken else "legacy")
     assert not enrollment.get("recordable") and not enrollment.get("unknown")
@@ -162,7 +162,7 @@ def test_pre_marker_hook_advice_requires_adoption_on_every_branch(tmp_path, monk
             _git(root, "switch", original_branch)
         assert _git(root, *COMMIT, "--allow-empty", "-m", "unchecked", check=False).returncode != 0
     else:
-        assert "ao hooks install" not in out
+        assert "polyctl hooks install" not in out
 
 
 @pytest.mark.parametrize("caller", HOOK_CALLERS)
@@ -189,13 +189,13 @@ def test_enrolled_hook_advice_keeps_enforcement_from_every_source(tmp_path, monk
 
     assert cli.PROJECT_ADOPT_COMMAND not in out and "make it readable, then" not in out
     if caller == "hooks":
-        assert result == 0 and b"ao-hook-v7" in hook.read_bytes()
+        assert result == 0 and b"polyctl-hook-v7" in hook.read_bytes()
         assert hook.read_bytes() != before
         installed = hook.read_bytes()
         assert cli.cmd_hooks(cfg, INSTALL) == 0
         assert hook.read_bytes() == installed
     else:
-        assert "ao hooks install" in out and hook.read_bytes() == before
+        assert "polyctl hooks install" in out and hook.read_bytes() == before
 
 
 @pytest.mark.parametrize("caller", HOOK_CALLERS)
@@ -227,7 +227,7 @@ def test_unknown_hook_advice_names_the_failed_question_without_install_or_adopt(
         result, out = _hook_caller(cfg, caller, patch, capsys)
 
     assert "enrollment is unknown" in out and f"{question} query failed" in out
-    assert cli.PROJECT_ADOPT_COMMAND not in out and "ao hooks install" not in out
+    assert cli.PROJECT_ADOPT_COMMAND not in out and "polyctl hooks install" not in out
     if caller == "hooks":
         assert result == 1 and "hooks install refused" in out
     assert hook.read_bytes() == before[0] and _git(root, "ls-files", "--stage").stdout == before[1]
@@ -279,15 +279,15 @@ def _names(node):
             if isinstance(sub, (ast.Attribute, ast.Name))}
 
 
-def test_nothing_in_ao_reaches_tls_with_a_context_that_does_not_verify():
-    """Every other TLS connection ao makes is urllib's - the alarms' HTTP, Telegram, formsubmit, the A2A bridge, the
+def test_nothing_in_polyctl_reaches_tls_with_a_context_that_does_not_verify():
+    """Every other TLS connection polyctl makes is urllib's - the alarms' HTTP, Telegram, formsubmit, the A2A bridge, the
     account lookup, the API reviewer - whose default context verifies. No module builds, installs or weakens one,
     and the two smtplib calls, whose own context does not verify, are each given one."""
     weakening = {"_create_unverified_context", "_create_stdlib_context", "CERT_NONE", "CERT_OPTIONAL", "check_hostname",
                  "_create_default_https_context", "install_opener", "HTTPSHandler", "HTTPSConnection", "wrap_socket",
                  "SSLContext"}
     found, bare = [], []
-    for path in sorted((REPO / "src" / "ao").rglob("*.py")):
+    for path in sorted((REPO / "src" / "polyctl").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         given = set()
         for node in ast.walk(tree):
@@ -307,20 +307,20 @@ def test_nothing_in_ao_reaches_tls_with_a_context_that_does_not_verify():
 # ---- 3. the quota command, and the architect's command init writes, are the package's alone -------------------------
 
 def _planted(root, tmp_path):
-    """The project's own .ao/adapters/kiro.json - the shipped adapter, with the quota command a writer of the tree
+    """The project's own .polyctl/adapters/kiro.json - the shipped adapter, with the quota command a writer of the tree
     chose: a program that leaves a file behind when it runs. (the planted program's path, that file)"""
     ran = tmp_path / "planted-ran"
     program = standin.program(tmp_path / "planted-bin", "planted", f"open({str(ran)!r}, 'w').write('ran')\n")
     adapter = json.loads(json.dumps(A.package_adapters()["kiro"]))
     adapter["telemetry"]["quota"] = {"from": "command", "argv": [program], "cache_seconds": 300}
-    layer = Path(root) / ".ao" / "adapters"
+    layer = Path(root) / ".polyctl" / "adapters"
     layer.mkdir(parents=True, exist_ok=True)
     (layer / "kiro.json").write_text(json.dumps(adapter), encoding="utf-8")
     return program, ran
 
 
 def _quota_runs(monkeypatch, planted):
-    """The quota commands ao asks to run. The planted one runs as ao runs it; the package's is only noted, so no
+    """The quota commands polyctl asks to run. The planted one runs as polyctl runs it; the package's is only noted, so no
     keyflip is started."""
     asked, run = [], A._quota_output
     monkeypatch.setattr(A, "_QUOTA", {})
@@ -343,7 +343,7 @@ def test_status_reads_the_quota_by_the_packages_command_not_one_the_projects_lay
     assert not ran.exists() and asked == [SHIPPED_QUOTA]
 
 
-# The quota reader and the watchdog's gate as ao has them, before a world stands them in for its own.
+# The quota reader and the watchdog's gate as polyctl has them, before a world stands them in for its own.
 QUOTA, QUOTA_OK = A.quota, W.quota_ok
 
 
@@ -369,7 +369,7 @@ def test_init_composes_the_architects_command_from_the_package_not_from_a_users_
     adapter = json.loads(json.dumps(A.package_adapters()["claude-code"]))
     adapter["resume"]["argv"] = adapter["resume"]["argv"] + ["--mcp-config", "elsewhere.json"]
     (layer / "claude-code.json").write_text(json.dumps(adapter), encoding="utf-8")
-    monkeypatch.setenv("AO_USER_ADAPTERS", str(layer))
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", str(layer))
     assert A.load_adapter("claude-code")["resume"]["argv"][-2:] == ["--mcp-config", "elsewhere.json"]
 
     assert cli._architect_argv("claude-code") == shipped and "--mcp-config" not in shipped
@@ -382,7 +382,7 @@ def _command(argv):
 
 
 def _write_gates(root, spec):
-    (Path(root) / ".ao" / "gates.json").write_text(json.dumps(spec), encoding="utf-8")
+    (Path(root) / ".polyctl" / "gates.json").write_text(json.dumps(spec), encoding="utf-8")
 
 
 def test_verify_judges_isolation_by_the_gates_it_ran_not_by_the_file_read_again_after_the_lock(project, tmp_path,
@@ -415,7 +415,7 @@ def test_verify_judges_isolation_by_the_gates_it_ran_not_by_the_file_read_again_
     assert A.gate_definitions_digest(root, "quick") == record["gates_digest"]      # the digest alone would match
 
 
-# ---- 5. gate coverage: a shape ao cannot read, a runner where a command starts, a toolchain one directory down -------
+# ---- 5. gate coverage: a shape polyctl cannot read, a runner where a command starts, a toolchain one directory down -------
 
 def _files(root, tree, ext, n=6):
     folder = Path(root) / tree
@@ -428,14 +428,14 @@ def _files(root, tree, ext, n=6):
     '"x"', "[1]", json.dumps({"gates": ["x"]}),
     json.dumps({"gates": {"stray": "x", "pytest": {"run": "python -m pytest -q"}}, "profiles": {"quick": ["pytest"]}}),
 ), ids=("a string", "a list", "gates as a list", "a string gate before one that runs"))
-def test_a_gates_file_ao_cannot_read_is_a_finding_and_the_doctor_sends_the_rest(project, monkeypatch, written):
+def test_a_gates_file_polyctl_cannot_read_is_a_finding_and_the_doctor_sends_the_rest(project, monkeypatch, written):
     root = project["root"]
     _files(root, "tools", ".py")
-    (Path(root) / ".ao" / "gates.json").write_text(written, encoding="utf-8")
+    (Path(root) / ".polyctl" / "gates.json").write_text(written, encoding="utf-8")
 
     problems = dict(cli.doctor_problems(project))
 
-    assert ".ao/gates.json cannot" in problems["gates-unusable"] and "docs/gates.md" in problems["gates-unusable"]
+    assert ".polyctl/gates.json cannot" in problems["gates-unusable"] and "docs/gates.md" in problems["gates-unusable"]
     sent = []
     monkeypatch.setattr(W, "notify", lambda title, msg, root=None, **kw: sent.append(kw.get("key")) or True)
     assert cli._doctor_check(project, page=True) == 1
@@ -478,10 +478,10 @@ def test_a_toolchain_one_directory_down_gets_gates_that_run_there_and_cover_its_
 @pytest.mark.parametrize("command", ["hooks", "commit-check"])
 @pytest.mark.parametrize("broken", [False, True])
 def test_refusing_pre_marker_enrollment_does_not_wedge_adoption(tmp_path, monkeypatch, command, broken):
-    from tests.test_hook_paths import _make_current_ao_available
+    from tests.test_hook_paths import _make_current_polyctl_available
     from tests.test_init_adoption import _init
     root, cfg, hook = _legacy(tmp_path, monkeypatch)
-    config = root / ".ao" / "config.json"
+    config = root / ".polyctl" / "config.json"
     original = config.read_bytes()
     before = hook.read_bytes()
     if broken:
@@ -495,7 +495,7 @@ def test_refusing_pre_marker_enrollment_does_not_wedge_adoption(tmp_path, monkey
     assert hook.read_bytes() == before
     config.write_bytes(original)
     assert cli._project_enrollment(str(root))["state"] == "legacy"
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
     assert cli.cmd_init(cfg, _init("--adopt")) == 0
     assert cli._project_enrollment(str(root))["state"] == "enrolled"
 
@@ -561,10 +561,10 @@ def test_verification_without_isolation_evidence_requires_reverification(project
 @pytest.mark.parametrize("unknown", ["empty-index", "unreadable-index", "index-query", "head-query", "history-query", "all-history-query", "record-query"])
 def test_unknown_enrollment_changes_nothing_and_preserves_adoption(tmp_path, monkeypatch, capsys,
                                                                   command, broken, unknown):
-    from tests.test_hook_paths import _make_current_ao_available
+    from tests.test_hook_paths import _make_current_polyctl_available
     from tests.test_init_adoption import _init
     root, cfg, hook = _legacy(tmp_path, monkeypatch)
-    config = root / ".ao" / "config.json"
+    config = root / ".polyctl" / "config.json"
     original = config.read_bytes()
     if broken:
         config.write_text("{", encoding="utf-8")
@@ -598,7 +598,7 @@ def test_unknown_enrollment_changes_nothing_and_preserves_adoption(tmp_path, mon
             "index-query": "active index", "head-query": "HEAD",
             "history-query": "history", "all-history-query": "history", "record-query": "record"}[unknown] in out
     config.write_bytes(original)
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
     assert cli.cmd_init(cfg, _init("--adopt")) == 0
 
 
@@ -654,7 +654,7 @@ def test_orphan_enrollment_survives_a_markerless_commit_and_deleted_refs(project
     for ref in _git(root, "for-each-ref", "--format=%(refname)").stdout.split():
         if ref != "refs/heads/elsewhere":
             _git(root, "update-ref", "-d", ref)
-    (root / ".ao" / "config.json").unlink()
+    (root / ".polyctl" / "config.json").unlink()
     assert not _git(root, "log", "--all", "--format=%H", "--", cli.PROJECT_MARKER).stdout.strip()
     capsys.readouterr()
 
@@ -673,10 +673,10 @@ def test_the_hook_checks_the_record_after_every_marker_ref_is_deleted(project, t
     for ref in _git(root, "for-each-ref", "--format=%(refname)").stdout.split():
         if ref != "refs/heads/elsewhere":
             _git(root, "update-ref", "-d", ref)
-    (root / ".ao" / "config.json").unlink()
-    standin.program(tmp_path / "bin", "ao", "import sys\n"
+    (root / ".polyctl" / "config.json").unlink()
+    standin.program(tmp_path / "bin", "polyctl", "import sys\n"
                     f"sys.path.insert(0, {str(REPO / 'src')!r})\n"
-                    "from ao import cli\nsys.exit(cli.main(sys.argv[1:]))\n")
+                    "from polyctl import cli\nsys.exit(cli.main(sys.argv[1:]))\n")
     monkeypatch.setenv("PATH", str(tmp_path / "bin") + os.pathsep + os.environ.get("PATH", ""))
     hook = root / ".git" / "hooks" / "pre-commit"
     hook.write_bytes(cli._render_local_hook("pre-commit", "."))

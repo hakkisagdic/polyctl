@@ -1,6 +1,6 @@
 import pytest
 
-from ao import lib as A
+from polyctl import lib as A
 
 
 def test_orphans_are_leaderless_tty_less(monkeypatch):
@@ -23,7 +23,7 @@ def test_writers_counts_turns_not_processes(monkeypatch):
 
 
 def test_a_process_that_mentions_the_agent_is_not_the_agent(monkeypatch):
-    vectors = {9: ["/bin/zsh", "-c", "cd /repo && ao mail ack x && pwd -P >| /tmp/claude-add3-cwd"],
+    vectors = {9: ["/bin/zsh", "-c", "cd /repo && polyctl mail ack x && pwd -P >| /tmp/claude-add3-cwd"],
                1: ["zsh (kiro-cli-term)"],
                2: ["/Users/x/.local/bin/kiro-cli", "chat", "--resume-id", "s"],
                3: ["/Users/x/.local/bin/kiro-cli-chat", "acp", "--agent-engine=kas"],
@@ -38,7 +38,7 @@ def test_a_process_that_mentions_the_agent_is_not_the_agent(monkeypatch):
 
 
 def test_agent_pids_matches_on_cwd_with_exact_argv(monkeypatch):
-    from ao import procs
+    from polyctl import procs
     vectors = {101: ["/usr/local/bin/claude", "-p", "x"], 102: ["/usr/local/bin/claude", "-p", "y"],
                103: ["/Users/x/Library/Application Support/kiro-cli/node", "--flag"], 104: ["/bin/zsh", "-c", "claude things"]}
     cwds = {101: "/repo", 102: "/elsewhere", 103: "/repo", 104: "/repo"}
@@ -52,7 +52,7 @@ def test_agent_pids_matches_on_cwd_with_exact_argv(monkeypatch):
 
 
 def _architect_process_table(monkeypatch, vectors, cwds, parents=None, helpers=()):
-    from ao import procs
+    from polyctl import procs
 
     parents = parents or {}
     monkeypatch.setattr(procs, "all_pids", lambda: list(vectors))
@@ -95,7 +95,7 @@ def test_architect_presence_classifies_headless_at_the_full_process_tree_root(mo
     assert not A.architect_present("/repo", {"argv": ["claude", "-p", "{prompt}"]})
 
 
-def test_architect_presence_excludes_deep_ao_helper_descendants(monkeypatch):
+def test_architect_presence_excludes_deep_polyctl_helper_descendants(monkeypatch):
     vectors = {220: ["/agents/claude"]}
     cwds = {220: "/repo"}
     parents = {}
@@ -229,7 +229,7 @@ def test_architect_presence_rejects_sibling_and_runtime_near_match(monkeypatch, 
 
 
 def test_helper_registration_refreshes_a_warm_process_snapshot(monkeypatch, tmp_path):
-    from ao import procs
+    from polyctl import procs
 
     fresh = {"value": False}
     monkeypatch.setattr(A, "HOME", str(tmp_path))

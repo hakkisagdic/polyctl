@@ -2,7 +2,7 @@ import os
 import sys
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_commit_authority import _allow_commit_prerequisites
 from tests.test_review_chain import _args, _fake, _repo_with_change
 

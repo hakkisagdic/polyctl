@@ -9,7 +9,7 @@ and a rule that admits a forbidden command only that way is named once, saying s
 """
 import pytest
 
-from ao import allowlist as AL
+from polyctl import allowlist as AL
 
 
 @pytest.mark.parametrize("words, runs", [
@@ -67,7 +67,7 @@ def test_a_rule_that_admits_a_forbidden_command_behind_its_words_is_named_once(r
 
 def test_everyday_rules_behind_the_same_words_are_not_named():
     assert _problems("Bash(git status:*)", "Bash(git diff:*)", "Bash(timeout 60 git status:*)",
-                     "Bash(git -C . status:*)", "Bash(xargs -n 1 git add:*)", "Bash(ao status:*)") == []
+                     "Bash(git -C . status:*)", "Bash(xargs -n 1 git add:*)", "Bash(polyctl status:*)") == []
 
 
 def test_a_rule_named_for_a_form_it_admits_as_it_stands_is_not_named_again():

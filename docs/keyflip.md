@@ -1,6 +1,6 @@
 # Composing with keyflip
 
-[keyflip](https://github.com/hakkisagdic/keyflip) and agent-orchestrator solve adjacent
+[keyflip](https://github.com/hakkisagdic/keyflip) and polyctl solve adjacent
 problems and are designed to compose. Holding the boundary below keeps both tools small.
 
 ## The boundary
@@ -11,23 +11,23 @@ problems and are designed to compose. Holding the boundary below keeps both tool
 | *Is there quota left? Should I rotate accounts?* | keyflip |
 | *Which machines do I own, and how do commands reach them securely?* | keyflip |
 | *How does project memory move when a project changes tool?* | keyflip (`handoff`, `ctxsync`) |
-| *What is the agent doing right now?* | agent-orchestrator |
-| *Is the work finished, and is it actually good?* | agent-orchestrator |
-| *May it commit? May it push?* | agent-orchestrator |
-| *How do two agents coordinate on one task over time?* | agent-orchestrator |
-| *When should the agent be nudged, and is it safe to inject now?* | agent-orchestrator |
+| *What is the agent doing right now?* | polyctl |
+| *Is the work finished, and is it actually good?* | polyctl |
+| *May it commit? May it push?* | polyctl |
+| *How do two agents coordinate on one task over time?* | polyctl |
+| *When should the agent be nudged, and is it safe to inject now?* | polyctl |
 
-Put simply: **keyflip owns identity, quota and transport. agent-orchestrator owns work,
-quality and authority.** keyflip moves the agent; agent-orchestrator decides what the
+Put simply: **keyflip owns identity, quota and transport. polyctl owns work,
+quality and authority.** keyflip moves the agent; polyctl decides what the
 agent should do and whether the result may land.
 
 Two pairs look similar but are not:
 
 - `keyflip handoff` is a **one-shot migration** — "this project is moving from Kiro to
-  Cursor, here is a continue-prompt". agent-orchestrator runs a **continuous loop**
+  Cursor, here is a continue-prompt". polyctl runs a **continuous loop**
   between an architect and an implementer that both stay in place.
 - `keyflip swarm run` is **transport** — deliver an argv array to my enrolled machines,
-  origin-authenticated and replay-guarded. agent-orchestrator decides **what** that argv
+  origin-authenticated and replay-guarded. polyctl decides **what** that argv
   should be and **verifies** what came back.
 
 ## Integration point 1 — remote implementers (fleet transport)
@@ -35,14 +35,14 @@ Two pairs look similar but are not:
 Run the implementer on another machine while the architect stays local. Not built yet: this
 integration is the design.
 
-<!-- not built: fleet transport is a design; ao has no resume command -->
+<!-- not built: fleet transport is a design; polyctl has no resume command -->
 - The mailbox directory is placed inside keyflip's encrypted fleet rendezvous, so
   messages ride the existing origin-authenticated, replay-guarded bus.
-- `ao resume --machine <name>` delegates to `keyflip swarm run` with the adapter's argv
+- `polyctl resume --machine <name>` delegates to `keyflip swarm run` with the adapter's argv
   array (no shell string — nothing to inject into).
 - Consent gating stays keyflip's: exec requires explicit `--allow-exec` trust per machine.
 
-agent-orchestrator adds **no** new crypto, no new transport and no new trust store.
+polyctl adds **no** new crypto, no new transport and no new trust store.
 
 ## Integration point 2 — quota-aware driving
 
@@ -59,14 +59,14 @@ keyflip next --strategy best     # rotate to the account with the most headroom
 Policy: if the implementer's account is exhausted → rotate → then nudge. If no account
 has headroom → do not nudge; surface it to the human instead of burning turns.
 
-What ao does, with `keyflip.rotation` set to `on` on the machine: before it starts any actor on a
+What polyctl does, with `keyflip.rotation` set to `on` on the machine: before it starts any actor on a
 provider keyflip manages - a reviewer route, an architect wake or refill, an implementer nudge -
 it reads that provider's window, and when it is at `quota.block_percent` it runs `keyflip next
 --strategy best` and reads again. A rotation is machine-wide and in place, so rotations run
 one at a time under a machine lock, and a window another actor already rotated is not rotated
 twice. If no account has headroom afterwards, the actor is not started: a reviewer route
 records a quota failure and the next route is tried, a wake tells a person. With rotation
-`off`, the default, ao never switches an account; `reviewer.fallbacks` stays the manual escape
+`off`, the default, polyctl never switches an account; `reviewer.fallbacks` stays the manual escape
 hatch for a machine without keyflip. Kiro's credits are not a keyflip account and are not
 rotated.
 
@@ -84,7 +84,7 @@ opencode        partial     installed + account
 ```
 
 "Account, no CLI" is the useful cell: the credential is already there, so the tool
-is one install away from being usable. Without keyflip, `ao` could only report
+is one install away from being usable. Without keyflip, `polyctl` could only report
 whether a binary exists.
 
 ## Integration point 4 — budgets instead of invented thresholds
@@ -97,11 +97,11 @@ per-account 5h/7d budgets the user actually set:
 keyflip budget set <account> --5h 80 --7d 90
 ```
 
-When a budget exists, `ao` defers to it and stops inventing thresholds. When none
+When a budget exists, `polyctl` defers to it and stops inventing thresholds. When none
 exists, it falls back to reading the raw window. A policy someone chose beats a
 constant a script made up.
 
-`ao` reads `keyflip budget status --json`, without a shell, and keeps the answer for the
+`polyctl` reads `keyflip budget status --json`, without a shell, and keeps the answer for the
 quota reading's window. A breached budget stops the turn: keyflip marks the alert of a window
 at or over its limit `breached`, and since the document does not say which account is active,
 a breach on any account counts. A budget with no breach is headroom, whatever the raw window
@@ -111,7 +111,7 @@ says. When keyflip is absent, fails or writes no document, the window decides.
 
 keyflip already emits `quota`, `switch` and `fleet-reply` events to desktop or a
 webhook. Turning them on means quota trouble reaches the human from the component
-that actually knows about it, rather than through a second detector in `ao`:
+that actually knows about it, rather than through a second detector in `polyctl`:
 
 ```bash
 keyflip notify set --desktop --events quota,switch
@@ -123,7 +123,7 @@ keyflip notify set --desktop --events quota,switch
 (Cursor, Gemini, Codex …). That inventory seeds the adapter registry instead of
 hard-coding paths per machine.
 
-## What agent-orchestrator must never reimplement
+## What polyctl must never reimplement
 
 Account capture or switching, credential storage, encrypted sync, provider routing,
 cross-machine key exchange, cost/budget accounting. If you need one of those, call
@@ -131,10 +131,10 @@ keyflip — or do without.
 
 ## Using them separately
 
-Neither tool requires the other. agent-orchestrator works fine on a single machine with
+Neither tool requires the other. polyctl works fine on a single machine with
 one account; keyflip works fine without any orchestration. The integration is opt-in: with
-keyflip installed ao reads its usage windows, budgets and surfaces, and it switches an account
-only after `ao config set keyflip.rotation on --machine`.
+keyflip installed polyctl reads its usage windows, budgets and surfaces, and it switches an account
+only after `polyctl config set keyflip.rotation on --machine`.
 
 ## Integration point 7 — MCP server definitions
 
@@ -151,8 +151,8 @@ keyflip mcpreg enable linear --surface claude-code       # turn on per surface
 keyflip mcpreg list
 ```
 
-`ao` therefore names a server and nothing else — `"server": "linear"` in
-`.ao/sources.json`. It stores no endpoint, no token, no command line. If the
+`polyctl` therefore names a server and nothing else — `"server": "linear"` in
+`.polyctl/sources.json`. It stores no endpoint, no token, no command line. If the
 server is not enabled on the surface the architect runs on, the pull simply finds
 no tool, which is the correct failure: visible, and fixed in one place.
 

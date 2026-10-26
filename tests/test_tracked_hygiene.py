@@ -1,6 +1,6 @@
 """No tracked file holds a credential, or a home directory of the machine it was written on (TRUST-HYGIENE).
 
-ao is public, and it is written beside agents that print tokens, read key files and quote terminals
+polyctl is public, and it is written beside agents that print tokens, read key files and quote terminals
 whole. A token pasted into a document, a key file added with everything else, a fixture holding a
 real credential or a path copied from a terminal is public the moment it is pushed, and stays in the
 history after it is deleted.
@@ -8,7 +8,7 @@ history after it is deleted.
 This reads every tracked file - the list tests/test_public_names.py reads: git's own in a checkout,
 the tree less its .gitignore in a copy without git - for three things:
 
-- the credential shapes ao keeps out of what it writes, every one of them (lib.EVIDENCE_RULES,
+- the credential shapes polyctl keeps out of what it writes, every one of them (lib.EVIDENCE_RULES,
   docs/safety.md §7b): private keys, Anthropic, OpenAI, GitHub, Slack and AWS keys, JWTs, bearer
   tokens, and a long value assigned to a password, a secret, an API key or an access token, a
   passphrase of words among them (`assigned-secret`);
@@ -37,7 +37,7 @@ import math
 import re
 from pathlib import Path
 
-from ao import lib as A
+from polyctl import lib as A
 from tests.test_public_names import ROOT, _tracked
 
 ALLOWLIST = ROOT / "tests" / "hygiene-allowlist.txt"
@@ -170,7 +170,7 @@ def _samples():
         "ci/env.sh": "export AWS_ACCESS_KEY_ID=" + "AK" + "IA" + "7QK2LXG4RZ5WN3YD\n"
                      + "export GH_TOKEN=" + "gh" + "p_" + "Zx9" * 12 + "\n",
         "config/service.json": '{"name": "svc", "api' + '_key": "' + generated + '"}\n',
-        "config/db.yml": "pass" + "word: correct-horse-battery-staple\n",               # words: ao's own rule
+        "config/db.yml": "pass" + "word: correct-horse-battery-staple\n",               # words: polyctl's own rule
         "app/settings.py": "DEPLOY_SEC" + f'RET = "{generated[::-1]}"\n' + "ENCRYPTION" + f'_KEY = "{keyed}"\n',
         "docs/notes.md": "Ran it in /Us" + "ers/alice/work and C:" + "\\Us" + "ers\\Bob\\repo; a log in /ho" + "me/carol.\n",
         "harmless.md": "\n".join([
@@ -181,7 +181,7 @@ def _samples():
             "max_tok" + "ens = 12345678901234567890",                                # digits: no letter
             "tok" + 'en: "<your token>"', "sec" + "ret: [redacted:github-token]",    # placeholders
             "sha256 = " + '"' + hashlib.sha256(b"a digest").hexdigest() + '"',       # a digest, not a secret
-            "Homes are ~/.ao, /Us" + "ers/<name>/, /ho" + "me/$USER and C:" + "\\Us" + "ers\\...",
+            "Homes are ~/.polyctl, /Us" + "ers/<name>/, /ho" + "me/$USER and C:" + "\\Us" + "ers\\...",
             "GitHub lists them at https://api.github.com/users/octocat/repos",      # a URL, not a home
         ]) + "\n",
     }

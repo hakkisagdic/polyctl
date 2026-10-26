@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, language, lib as A, storage, watchdog as W
+from polyctl import cli, language, lib as A, storage, watchdog as W
 from tests.test_prompt_channel import _declare, _git, _linux, _route
 
 # What the tree note adds to a prompt held to one argument (REVIEW-TREE): the bound leaves room for it.

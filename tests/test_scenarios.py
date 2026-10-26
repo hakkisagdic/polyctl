@@ -20,7 +20,7 @@ def test_idle_implementer_with_a_running_slice_is_nudged(world):
 
 def test_f12_a_shell_that_mentions_the_agent_is_not_a_turn(world):
     world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(700)
-    world.process(500, ["/bin/zsh", "-c", "cd repo && ao mail ack kiro-to-fable-x.md >| /tmp/claude-add3-cwd"], headless=False)
+    world.process(500, ["/bin/zsh", "-c", "cd repo && polyctl mail ack kiro-to-fable-x.md >| /tmp/claude-add3-cwd"], headless=False)
     world.cycle()
     assert "already in this tree" not in world.verdict
     assert "nudging" in world.verdict or "DRY RUN" in world.verdict
@@ -161,8 +161,8 @@ def test_headless_tree_through_nonmatching_process_is_not_report_presence(world)
 
 
 def test_reused_remembered_architect_pid_does_not_delay_report_wake(world):
-    from ao import lib as A
-    from ao import watchdog as W
+    from polyctl import lib as A
+    from polyctl import watchdog as W
 
     architect_tree = world.tmp / "architect-worktree"
     world.architect_cwd(architect_tree).architect(pid=740)
@@ -202,7 +202,7 @@ def test_dead_architect_releases_refill_on_the_next_cycle(world):
 
 
 def test_f16_architect_at_quota_is_not_woken(world):
-    from ao import watchdog as W
+    from polyctl import watchdog as W
     world.transcript_age(900)
     world.mail("20260905-0631-kiro-to-fable-BLOCKED-queue.md", "# queue empty\n\n## KARAR GEREKLİ\n")
     st = W.load_state(world.root)
@@ -213,7 +213,7 @@ def test_f16_architect_at_quota_is_not_woken(world):
 
 
 def test_implementer_quota_defers_the_nudge(world):
-    from ao import lib as A
+    from polyctl import lib as A
     world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(700)
     world.quota = False
     world.cycle()
@@ -223,7 +223,7 @@ def test_implementer_quota_defers_the_nudge(world):
 
 
 def test_reviewer_window_reopened_is_open_work(world):
-    from ao import lib as A
+    from polyctl import lib as A
     world.transcript_age(700)
     A.set_reviewer_state(world.root, pending_review=True, until=__import__("time").time() - 5)
     world.board("queued", "- [B9] later · acceptance: #9")

@@ -3,7 +3,7 @@ import os
 import subprocess
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_commit_authority import _allow_commit_prerequisites, _write_approved_review
 
 
@@ -17,7 +17,7 @@ def _gates(root, **inputs):
     gates = {name: dict({"run": f"echo {name}"}, **({"inputs": globs} if globs is not None else {}))
              for name, globs in inputs.items()}
     json.dump({"gates": gates, "profiles": {"quick": list(gates)}},
-              open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8"))
+              open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8"))
 
 
 def test_a_path_no_gate_reads_is_noise_and_the_grant_is_issued(project, monkeypatch, capsys):

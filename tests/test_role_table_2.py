@@ -1,6 +1,6 @@
 """What the retrospective review of ROLE-TABLE found that still held (ROLE-TABLE-2).
 
-`ao role swap` with its second role left out, or an actor's name in its place, wrote a role of no name
+`polyctl role swap` with its second role left out, or an actor's name in its place, wrote a role of no name
 into the table and left the one named empty. The handoff note, the note a hold's release leaves and a
 person's message from Telegram were written past write_mail: no envelope with the roles, no credential
 scan, nothing in the mail ledger.
@@ -10,11 +10,11 @@ import os
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A, telegram
+from polyctl import cli, lib as A, telegram
 
 
 def _config(root):
-    with open(os.path.join(root, ".ao", "config.json"), encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), encoding="utf-8") as fh:
         return fh.read()
 
 
@@ -24,14 +24,14 @@ def test_a_swap_names_two_different_roles(project, capsys):
         assert cli.cmd_role(project, SimpleNamespace(action="swap", role="implementer", actor=other)) == 2
 
     assert _config(project["root"]) == before
-    assert "ao role swap names two different roles" in capsys.readouterr().out
+    assert "polyctl role swap names two different roles" in capsys.readouterr().out
 
 
 def _written(root, name):
     return [row for row in A.mail_log(root, 200) if row.get("event") == "written" and row.get("id") == name]
 
 
-def test_the_note_a_hold_release_leaves_is_mail_ao_wrote(project):
+def test_the_note_a_hold_release_leaves_is_mail_polyctl_wrote(project):
     root = project["root"]
     with open(os.path.join(root, A.HOLD_FILE), "w", encoding="utf-8") as fh:
         json.dump({"by": "a person", "reason": "editing", "at": int(time.time()), "stopped": []}, fh)
@@ -45,7 +45,7 @@ def test_the_note_a_hold_release_leaves_is_mail_ao_wrote(project):
     assert _written(root, name)
 
 
-def test_a_handoff_note_is_mail_ao_wrote(project, monkeypatch):
+def test_a_handoff_note_is_mail_polyctl_wrote(project, monkeypatch):
     monkeypatch.setattr(A, "busy", lambda *args, **kwargs: ("idle", None, ""))
     monkeypatch.setattr(A, "account_usage", lambda *args, **kwargs: None)
 
@@ -56,7 +56,7 @@ def test_a_handoff_note_is_mail_ao_wrote(project, monkeypatch):
     assert _written(project["root"], name)
 
 
-def test_a_persons_message_from_telegram_is_mail_ao_wrote(project, monkeypatch, tmp_path):
+def test_a_persons_message_from_telegram_is_mail_polyctl_wrote(project, monkeypatch, tmp_path):
     updates = [{"update_id": 7, "message": {"text": "stop the deploy", "chat": {"id": 42}, "from": {"username": "a"}}}]
     monkeypatch.setattr(telegram, "config", lambda: {"token": "t", "chats": ["42"]})
     monkeypatch.setattr(telegram, "api", lambda conf, method, **params:

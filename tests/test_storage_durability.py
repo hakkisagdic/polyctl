@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from ao import storage
+from polyctl import storage
 
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
@@ -114,7 +114,7 @@ def test_process_killed_during_partial_write_leaves_recoverable_tail(tmp_path):
     storage.append_jsonl(str(path), {"id": "before"})
     script = r'''
 import os, sys, time
-from ao.storage import append_jsonl
+from polyctl.storage import append_jsonl
 path, marker = sys.argv[1:]
 def partial(fd, data):
     count = os.write(fd, bytes(data[:max(1, len(data)//2)]))
@@ -138,7 +138,7 @@ def test_process_killed_after_fsync_leaves_complete_record(tmp_path):
     storage.append_jsonl(str(path), {"id": "before"})
     script = r'''
 import sys, time
-from ao.storage import append_jsonl
+from polyctl.storage import append_jsonl
 path, marker = sys.argv[1:]
 def checkpoint(step):
     if step == "fsynced":
@@ -160,7 +160,7 @@ def test_reader_waits_until_writer_fsyncs_and_releases_lock(tmp_path):
     release = tmp_path / "release.marker"
     writer_script = r'''
 import os, sys, time
-from ao.storage import append_jsonl
+from polyctl.storage import append_jsonl
 path, marker, release = sys.argv[1:]
 def checkpoint(step):
     if step == "written":
@@ -170,7 +170,7 @@ append_jsonl(path, {"id":"committed"}, _checkpoint=checkpoint)
 '''
     reader_script = r'''
 import json, sys
-from ao.storage import read_jsonl
+from polyctl.storage import read_jsonl
 print(json.dumps(read_jsonl(sys.argv[1])), flush=True)
 '''
     writer = _child(writer_script, path, marker, release)
@@ -198,7 +198,7 @@ def test_visible_grant_always_has_a_restart_readable_record(tmp_path):
     path = tmp_path / "authority.jsonl"
     script = r'''
 import sys, time
-from ao.storage import append_jsonl
+from polyctl.storage import append_jsonl
 append_jsonl(sys.argv[1], {"token":"C-visible","granted":True})
 print("GRANTED C-visible", flush=True)
 while True: time.sleep(1)
@@ -214,7 +214,7 @@ def test_concurrent_processes_do_not_interleave_json_records(tmp_path):
     path = tmp_path / "events.jsonl"
     script = r'''
 import sys
-from ao.storage import append_jsonl
+from polyctl.storage import append_jsonl
 path, worker = sys.argv[1], int(sys.argv[2])
 for i in range(20): append_jsonl(path, {"worker":worker,"i":i})
 '''
@@ -314,7 +314,7 @@ def test_concurrent_chained_appends_form_one_linear_history(tmp_path):
     path = tmp_path / "authority.jsonl"
     script = r'''
 import sys
-from ao.storage import append_chained_jsonl
+from polyctl.storage import append_chained_jsonl
 path, worker, chain = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 for i in range(12): append_chained_jsonl(path, {"worker":worker,"i":i}, chain)
 '''

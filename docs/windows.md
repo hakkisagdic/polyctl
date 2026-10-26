@@ -2,7 +2,7 @@
 
 What works, what does not, and how hosted runners exercise it.
 
-*In ao since slice WINDOWS-TESTS-7: a link at a new mail's name stays untouched, including a link
+*In polyctl since slice WINDOWS-TESTS-7: a link at a new mail's name stays untouched, including a link
 to a file that does not exist. Python's exclusive open on Windows followed that link and created
 its target. Mail now uses native `CREATE_NEW` with `FILE_FLAG_OPEN_REPARSE_POINT`, so a link put
 there before or during creation takes the name and the mail receives the next numbered name.
@@ -12,29 +12,29 @@ refuses the write and says why. `tests/test_secrets_2.py` checks occupied names 
 
 | layer | status |
 |---|---|
-| files: `.ao/`, mailbox, board, backlog, ledgers | works — plain files and Python |
-| what ao prints and reads on its standard streams | UTF-8, as Python's UTF-8 mode sets them, whatever the code page (below) |
-| gates, `ao lock`, `ao verify`, `ao commit-ok`, reviews | work — subprocesses of the project's own tools |
-| MCP server, playbook, `ao init` registration | work (`.mcp.json`, `.kiro/settings/mcp.json`); a request is read as UTF-8 and every reply is seven-bit JSON, whatever the code page |
-| process introspection (`ao writers`, orphans, hung turns) | first cut: `Win32_Process` through PowerShell as JSON, tree kill via `taskkill /T`, every process of the tree named to it and asked afterwards; the working directory is read from the process environment block (a 64-bit process, by a 64-bit Python), proven on the Windows lane, and where it cannot be read a turn is matched by the repository path on its command line; a table PowerShell cannot read never reads as no process: what decides from it refuses or holds, and says why; what an ended turn left is not told apart from a turn, as Windows has no process groups, and `ao writers` and `ao doctor` say so (below) |
-| `ao hold` | proven on the Windows lane: a turn placed by its working directory is stopped; what a stop leaves running is named, and the hold exits 1 (below) |
-| scheduler (`ao watchdog install`) | first cut: Task Scheduler (`schtasks`, every 2 min; doctor every 15 min). Each task names a program that exists — the console script on PATH, a clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao — or install refuses; install exits 1 when `schtasks` cannot create a task, saying why in the OEM code page schtasks writes in, and `ao remove --yes` deletes both tasks in its own process and checks they are gone, as `ao watchdog uninstall` does; a task schtasks cannot say it lacks - access denied, a Task Scheduler that lists no task, a schtasks that cannot run - is named and keeps the project's state; a silent watchdog is to be looked into with Task Scheduler (below) |
+| files: `.polyctl/`, mailbox, board, backlog, ledgers | works — plain files and Python |
+| what polyctl prints and reads on its standard streams | UTF-8, as Python's UTF-8 mode sets them, whatever the code page (below) |
+| gates, `polyctl lock`, `polyctl verify`, `polyctl commit-ok`, reviews | work — subprocesses of the project's own tools |
+| MCP server, playbook, `polyctl init` registration | work (`.mcp.json`, `.kiro/settings/mcp.json`); a request is read as UTF-8 and every reply is seven-bit JSON, whatever the code page |
+| process introspection (`polyctl writers`, orphans, hung turns) | first cut: `Win32_Process` through PowerShell as JSON, tree kill via `taskkill /T`, every process of the tree named to it and asked afterwards; the working directory is read from the process environment block (a 64-bit process, by a 64-bit Python), proven on the Windows lane, and where it cannot be read a turn is matched by the repository path on its command line; a table PowerShell cannot read never reads as no process: what decides from it refuses or holds, and says why; what an ended turn left is not told apart from a turn, as Windows has no process groups, and `polyctl writers` and `polyctl doctor` say so (below) |
+| `polyctl hold` | proven on the Windows lane: a turn placed by its working directory is stopped; what a stop leaves running is named, and the hold exits 1 (below) |
+| scheduler (`polyctl watchdog install`) | first cut: Task Scheduler (`schtasks`, every 2 min; doctor every 15 min). Each task names a program that exists — the console script on PATH, a clone's script, or `python -m polyctl.watchdog` from an interpreter that imports an installed polyctl — or install refuses; install exits 1 when `schtasks` cannot create a task, saying why in the OEM code page schtasks writes in, and `polyctl remove --yes` deletes both tasks in its own process and checks they are gone, as `polyctl watchdog uninstall` does; a task schtasks cannot say it lacks - access denied, a Task Scheduler that lists no task, a schtasks that cannot run - is named and keeps the project's state; a silent watchdog is to be looked into with Task Scheduler (below) |
 | desktop notifications | a toast through PowerShell behind the `toast` feature switch, off by default; Telegram and e-mail carry the orange and red levels |
-| `bin/ao.ps1`, the subset for a machine without Python | `status`, `board` and `doctor`; reads files as UTF-8, takes paths literally and reads git's UTF-8 output as itself; the board was read through it on the lane, `status` and `doctor` have not been run on Windows (below) |
-| commit hook (`ao hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); since HOOK-V4 the hook reads a drive-letter index as absolute, and its execution proof passes on the lane (below) |
+| `bin/polyctl.ps1`, the subset for a machine without Python | `status`, `board` and `doctor`; reads files as UTF-8, takes paths literally and reads git's UTF-8 output as itself; the board was read through it on the lane, `status` and `doctor` have not been run on Windows (below) |
+| commit hook (`polyctl hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); since HOOK-V4 the hook reads a drive-letter index as absolute, and its execution proof passes on the lane (below) |
 | pre-push hook | works under Git's own shell |
-| the programs ao starts | Windows' own tools from its system directory, every other program from PATH's absolute entries, never the current directory (below) |
-| files ao keeps private (`~/.ao/email.json`, `telegram.json`, `pings.json`) | as private as `~/.ao`, which takes its permissions from the user profile: Windows keeps no file mode, and ao says so where it saves one and in `ao doctor` (below) |
+| the programs polyctl starts | Windows' own tools from its system directory, every other program from PATH's absolute entries, never the current directory (below) |
+| files polyctl keeps private (`~/.polyctl/email.json`, `telegram.json`, `pings.json`) | as private as `~/.polyctl`, which takes its permissions from the user profile: Windows keeps no file mode, and polyctl says so where it saves one and in `polyctl doctor` (below) |
 | the reviewer stall check (`review.stall_minutes`) | does not apply: Windows has no process group to read a reviewer's CPU from, so the review's timeout ends a reviewer that hangs, and the review says so (below) |
-| the machine read before a gate run, `ao lock` and a lane start | not measured: ao reads memory, paging and disk on macOS and Linux, so the run says once that it read none and goes on, never refused on its account; the gate lock still keeps two suites apart, and `ao doctor`'s `machine` line says so ([gates.md](gates.md#serialisation-and-machine-pressure)) |
+| the machine read before a gate run, `polyctl lock` and a lane start | not measured: polyctl reads memory, paging and disk on macOS and Linux, so the run says once that it read none and goes on, never refused on its account; the gate lock still keeps two suites apart, and `polyctl doctor`'s `machine` line says so ([gates.md](gates.md#serialisation-and-machine-pressure)) |
 | a transcript read without following a link | holds: where there is no O_NOFOLLOW the path is looked at before it is opened, and the file opened must be the one looked at (below) |
-| the files `ao init` and `ao skill install` write in a project | held through native Windows handles: each folder is opened as itself without delete sharing until the operation ends, so links and junctions are refused and no folder can be swapped out meanwhile (below) |
-| the grant audit (`ao doctor`, an actor's grant) | asks `py -c`, `powershell -Command` and `cmd /c`, with their kin, as it asks `python -c` (below) |
+| the files `polyctl init` and `polyctl skill install` write in a project | held through native Windows handles: each folder is opened as itself without delete sharing until the operation ends, so links and junctions are refused and no folder can be swapped out meanwhile (below) |
+| the grant audit (`polyctl doctor`, an actor's grant) | asks `py -c`, `powershell -Command` and `cmd /c`, with their kin, as it asks `python -c` (below) |
 
-*In ao since slice WINDOWS-LANE-PARITY: the Windows lane runs the reviewer and authority tests the
+*In polyctl since slice WINDOWS-LANE-PARITY: the Windows lane runs the reviewer and authority tests the
 other lanes run. Each of them started a stand-in harness - a reviewer, a kiro-cli, an agy, an opencode,
 a conformance harness - as a Python script whose first line named the interpreter; Windows runs no
-such line, and ao knows a harness by the name of the program it starts, so `[sys.executable, script]`
+such line, and polyctl knows a harness by the name of the program it starts, so `[sys.executable, script]`
 would be no harness of any adapter's, and every one of them was skipped on Windows. A stand-in is now
 written by `tests/standin.py`: an executable script on POSIX, and on Windows `<name>.exe`, as pip makes
 a console script there - distlib's console launcher, a line naming the interpreter, and the script as
@@ -46,17 +46,17 @@ UTF-8 mode, as a default install runs it, and a dispatch can drop UTF-8 mode on 
 and fails when a test is skipped on Windows for its shebang again, or the workflow loses that leg or
 a lane's list of what it skipped.*
 
-*In ao since slice WINDOWS-SAY-WHY: what ao cannot hold on Windows it holds another way, or says
-so, where it bears and in `ao doctor` (`on Windows`). Several guarantees were made with what Windows
+*In polyctl since slice WINDOWS-SAY-WHY: what polyctl cannot hold on Windows it holds another way, or says
+so, where it bears and in `polyctl doctor` (`on Windows`). Several guarantees were made with what Windows
 does not have, and there they quietly did not hold. Opening a subagent's transcript without following a
 link asked for O_NOFOLLOW, which Windows lacks, and a link was followed; where a platform has none the
 path is now looked at first - a link is refused - and the file opened must be the one looked at, by its
-file id, or it is refused too. A file ao keeps private was given mode 0600, which Windows ignores, and
-ao said "(0600)": `~/.ao/email.json`, `telegram.json` and `pings.json` are as private as `~/.ao`, which
-takes its permissions from the user profile unless someone changed them, and `ao email setup`, `ao
-pings setup` and `ao telegram setup` say that on Windows; a prompt handed over in a file is kept by the
+file id, or it is refused too. A file polyctl keeps private was given mode 0600, which Windows ignores, and
+polyctl said "(0600)": `~/.polyctl/email.json`, `telegram.json` and `pings.json` are as private as `~/.polyctl`, which
+takes its permissions from the user profile unless someone changed them, and `polyctl email setup`, `polyctl
+pings setup` and `polyctl telegram setup` say that on Windows; a prompt handed over in a file is kept by the
 permissions of its temporary directory the same way. What an ended turn left behind is found by its
-dead process group, which Windows has none of: none was ever found, and none was said to be. `ao
+dead process group, which Windows has none of: none was ever found, and none was said to be. `polyctl
 writers` says on Windows that such leftovers are not told apart - each counts as a writer, and the
 watchdog starts no turn beside it until it is stopped - and its `--json` gives `"orphans": null` with
 `orphans_unknown`. The reviewer stall check (`review.stall_minutes`) reads a process group's CPU, and on
@@ -67,11 +67,11 @@ the OEM code page otherwise. The grant audit asks `py -c`, `py -3 -c`, `python.e
 -Command`, `-c` and `-EncodedCommand`, `pwsh -Command` and `-c`, `cmd /c`, `cmd //c` (Git Bash's form)
 and `cmd.exe /c` as it asks `python -c`: each runs a line of code. A silent watchdog was to be looked
 into with launchctl on every platform; the hint names Task Scheduler on Windows and `systemctl --user`
-on Linux, and `ao telegram setup` gives PowerShell's way to read a chat id and says how to write the
+on Linux, and `polyctl telegram setup` gives PowerShell's way to read a chat id and says how to write the
 file, where it gave curl, python3, mkdir, echo and chmod. `tests/test_windows_say_why.py` makes Windows
 on every platform.*
 
-*In ao since slice WINDOWS-STOP-PROVEN: a stop says what it left running. `ao hold` stopped each
+*In polyctl since slice WINDOWS-STOP-PROVEN: a stop says what it left running. `polyctl hold` stopped each
 turn with `taskkill /T /F` and said every tree was stopped, whatever taskkill did: taskkill is refused a
 process another user or an elevated prompt started, and finds a process's children by the parent each
 names, so a child whose parent had already exited - a turn's wrapper ending as it was stopped - was
@@ -79,48 +79,48 @@ left running. Every process of the tree, as the process table read it just befor
 taskkill, not the first alone, and each is asked afterwards, for up to five seconds, whether it runs; a
 process neither Windows nor the table answers for is taken as running. A process that started more
 than a second before the parent it names is no part of the tree: Windows keeps a parent's pid after
-it exits and hands it to a process started later. `ao hold` then reads the table again for unattended
+it exits and hands it to a process started later. `polyctl hold` then reads the table again for unattended
 turns and what ended turns left, names what still runs and how to stop it by hand, and exits 1; the
 hold stands. The watchdog's reaper starts no turn beside an unattended turn it could not stop and tells
-a person (`reap-survived`, [alarms.md](alarms.md)). `ao review cancel` records nothing while the
+a person (`reap-survived`, [alarms.md](alarms.md)). `polyctl review cancel` records nothing while the
 review's runner still runs, records a reviewer it could not stop as still running, keeping its place
-among the helpers, and exits 1. A reviewer stopped on its timeout, an ACP reviewer's session, `ao
-harness probe`, `ao writers --clean`, a codebase provider, a lane's post-create command and a filter
-hook ao probes each say what of them still runs - a probe whose harness never answered too, which
+among the helpers, and exits 1. A reviewer stopped on its timeout, an ACP reviewer's session, `polyctl
+harness probe`, `polyctl writers --clean`, a codebase provider, a lane's post-create command and a filter
+hook polyctl probes each say what of them still runs - a probe whose harness never answered too, which
 said only that it had not (ACP-PROBE-LEFT). What taskkill and the table both miss - a process
 whose parent had exited under a parent that had exited too - the hold's second reading still names
 when it is an agent's. On macOS and Linux a turn is stopped by its process group as before, and a
 forced stop is asked about the same way. `tests/test_windows_stop_proven.py` makes taskkill and
 Windows' answers its own, on every platform.*
 
-*In ao since slice WINDOWS-NO-CWD-EXEC: ao starts no program the current directory holds. Windows
+*In polyctl since slice WINDOWS-NO-CWD-EXEC: polyctl starts no program the current directory holds. Windows
 looks for a program named without a directory in the current directory before PATH - `subprocess`
 given a bare `taskkill`, `schtasks`, `git` or `cmd.exe`, and `shutil.which`, which before Python 3.12
-looked there first whatever path it was given - and ao runs inside a tree an agent writes: a
+looked there first whatever path it was given - and polyctl runs inside a tree an agent writes: a
 `taskkill.exe`, `schtasks.exe`, `git.exe` or `powershell.exe`, or a `.bat`, `.cmd` or `.com` that
-PATHEXT admits, left in the repository root would have run as the person when ao stopped a turn,
-scheduled its jobs, read the process table or committed. One resolver now finds every program ao
+PATHEXT admits, left in the repository root would have run as the person when polyctl stopped a turn,
+scheduled its jobs, read the process table or committed. One resolver now finds every program polyctl
 starts: Windows' own `taskkill`, `schtasks`, `tasklist`, `cmd`, `where` and `powershell` from its
 system directory - `%SystemRoot%\System32` as the environment names it, else as Windows answers,
 else `C:\Windows\System32` - and from nowhere else; every other program from PATH's absolute
 entries in order, honouring PATHEXT, never the current directory, an empty entry or a relative one.
-A command line ao runs through a shell starts in the system's `cmd.exe`, and ao's own commands there
+A command line polyctl runs through a shell starts in the system's `cmd.exe`, and polyctl's own commands there
 are looked for in PATH alone (`NoDefaultCurrentDirectoryInExePath`); a gate's command is the
 project's, and cmd.exe looks for it as it always has, in the project's directory first. Where no git
-is found ao no longer falls back to the bare name: it names the git Git for Windows installs, which
-fails to start rather than start one the tree holds. `ao doctor` names an empty or relative PATH
-entry (`path-relative`): ao looks for no program there, so one PATH reaches only through it is not
+is found polyctl no longer falls back to the bare name: it names the git Git for Windows installs, which
+fails to start rather than start one the tree holds. `polyctl doctor` names an empty or relative PATH
+entry (`path-relative`): polyctl looks for no program there, so one PATH reaches only through it is not
 started. POSIX keeps its own lookup, except that an empty or relative entry is not searched there
 either: to POSIX an empty entry is the current directory too, and a console script a relative entry
-led to was made absolute and scheduled (SAFE-REMOVE-2). `tests/test_windows_no_cwd_exec.py` gives ao
+led to was made absolute and scheduled (SAFE-REMOVE-2). `tests/test_windows_no_cwd_exec.py` gives polyctl
 a system directory of its own and plants a program under each name in a repository, on every
 platform.*
 
-*In ao since slice WINDOWS-TABLE-CLOSED: a process table that cannot be read is an error everything
+*In polyctl since slice WINDOWS-TABLE-CLOSED: a process table that cannot be read is an error everything
 that reads it sees, never an empty table. On Windows the table is one PowerShell query, and a
 PowerShell that was missing, failed, did not answer within thirty seconds or printed something that
-is not the table gave an empty one, which every caller took for fact: `ao hold` said no agent turn
-was running and stopped nothing, `ao writers` counted none, `ao review cancel` recorded a review
+is not the table gave an empty one, which every caller took for fact: `polyctl hold` said no agent turn
+was running and stopped nothing, `polyctl writers` counted none, `polyctl review cancel` recorded a review
 failed while its reviewer worked on, and a watchdog cycle could start a turn or wake an architect
 beside one it never saw. The reader now says the table could not be read, on which platform and
 why: PowerShell not found, not answering in time, its exit status with the first line it wrote to
@@ -129,34 +129,34 @@ since a command line can hold a secret. The macOS and Linux readers and the `ps`
 say the same of their own failures. What decides from the table refuses or holds: the watchdog
 starts no turn, wakes nobody and reaps nothing, and tells a person under `process-table-unreadable`
 ([alarms.md](alarms.md)), and a notice that would wait for the architect goes to a person instead
-(the hold code `process-table`, [watchdog.md](watchdog.md)); `ao hold` stands, stops nothing it
-cannot see, says so and exits 1; `ao writers` says the writers are unknown and exits 1, its
-`--json` with `"writers": null`; `ao review cancel` stops and records nothing; any other command
-stops with the reason and exits 1. What only shows it says it could not look: `ao hold status`;
-the implementer's state in `ao status`, `ao digest`, `ao fleet` and `ao handoff`, `unknown` with
-the reason; `ao reviews`; and the MCP tool `ao_status`, whose `agent_processes` is null and
+(the hold code `process-table`, [watchdog.md](watchdog.md)); `polyctl hold` stands, stops nothing it
+cannot see, says so and exits 1; `polyctl writers` says the writers are unknown and exits 1, its
+`--json` with `"writers": null`; `polyctl review cancel` stops and records nothing; any other command
+stops with the reason and exits 1. What only shows it says it could not look: `polyctl hold status`;
+the implementer's state in `polyctl status`, `polyctl digest`, `polyctl fleet` and `polyctl handoff`, `unknown` with
+the reason; `polyctl reviews`; and the MCP tool `polyctl_status`, whose `agent_processes` is null and
 `agent_processes_unread` says why. Where neither the process itself nor the table answers whether
 a process runs, it is taken as running: a gate lock or the architect's lock it holds is not
 cleared. `tests/test_windows_table_closed.py` makes each failure as its platform makes it, on
 every platform, and holds each caller to it.*
 
-*In ao since slice ANCESTOR-WINDOWS: the process that started a process is read from Toolhelp, the
+*In polyctl since slice ANCESTOR-WINDOWS: the process that started a process is read from Toolhelp, the
 process list Windows keeps, in-process, and no longer from the PowerShell snapshot alone. It is how
-`ao lock -- ao verify` finds that the lock it meets is its own parent's and runs inside it; when
+`polyctl lock -- polyctl verify` finds that the lock it meets is its own parent's and runs inside it; when
 PowerShell answered nothing, the verify waited out that lock and gave up. Where neither says which
-process started one on the way, `ao verify` and `ao merge-check` say they cannot tell whether the
+process started one on the way, `polyctl verify` and `polyctl merge-check` say they cannot tell whether the
 holder started them, then wait for it as for any other. A parent pid on Windows can outlive its
 process and be given to another; a walk through one still ends. `tests/test_gate_lock.py` holds the
 Toolhelp read on the Windows lane, which has not run it yet.*
 
-*In ao since slice WINDOWS-PID-ALIVE: whether a process runs is asked of the process itself, opened
+*In polyctl since slice WINDOWS-PID-ALIVE: whether a process runs is asked of the process itself, opened
 and waited on for no time, and no longer read from the PowerShell snapshot, which is kept for two
 seconds. A process started inside them was missing from it, so a gate lock its holder had just taken
-read as a dead run's, was cleared, and `ao verify` and `ao merge-check` ran their gates beside the
+read as a dead run's, was cleared, and `polyctl verify` and `polyctl merge-check` ran their gates beside the
 holder's; the Windows lane's weekly run found it. Where Windows does not answer, a fresh snapshot
 does. `tests/test_windows_pid_alive.py` holds it.*
 
-*In ao since slice WINDOWS-LANE-4: the Windows lane's run dispatched after WINDOWS-PID-ALIVE failed
+*In polyctl since slice WINDOWS-LANE-4: the Windows lane's run dispatched after WINDOWS-PID-ALIVE failed
 twelve tests. Nine read processes through `ps` and `lsof`, which Windows does not have: the backend is
 chosen once, by a PowerShell reading of this process, and the suite's first reading came in a test
 that stood in for subprocess, so it failed and the fallback was kept. Windows now keeps its own
@@ -165,24 +165,24 @@ seconds. A file in the home is named `~/…` with slashes there too, and a lane 
 started is known for one, where its path, compared case-folded, hid the case its branch keeps.
 `tests/test_windows_lane_4.py` holds them.*
 
-*In ao since slice WINDOWS-LANE-5: a tree ao stops is gone from the next reading of the process
+*In polyctl since slice WINDOWS-LANE-5: a tree polyctl stops is gone from the next reading of the process
 list. The snapshot taken before the stop listed it for two seconds more, and a stopped process's
-directory can no longer be read, so `ao hold` named the turn it had just stopped as one it could
+directory can no longer be read, so `polyctl hold` named the turn it had just stopped as one it could
 not place and exited 1. Until WINDOWS-PID-ALIVE the hold waited for the stopped turn by that same
 snapshot, which was read again by the time the wait ended. `tests/test_windows_lane_5.py` holds it.*
 
-*In ao since slice HOOK-V4: the commit hook reads an index path that starts with a drive letter, a
+*In polyctl since slice HOOK-V4: the commit hook reads an index path that starts with a drive letter, a
 colon and a slash or a backslash, `C:/…` or `C:\…`, as absolute, as it reads one that starts with a
 slash. It told an absolute path by its leading slash alone, so under Git's shell the temporary index
 the execution proof hands Git, and a linked worktree's index, were taken for relative ones and put
-after the working directory: ao read another index than the one Git commits and refused, and no proof
-passed on Windows. Both hooks are version 4 now: `ao doctor` reads a version 3 hook as legacy, and each
-enrolled repository reinstalls with `ao hooks install`. The proof's tests are no longer skipped on
+after the working directory: polyctl read another index than the one Git commits and refused, and no proof
+passed on Windows. Both hooks are version 4 now: `polyctl doctor` reads a version 3 hook as legacy, and each
+enrolled repository reinstalls with `polyctl hooks install`. The proof's tests are no longer skipped on
 Windows, and `tests/test_hook_v4.py` runs the lines of the hook that read the path under `sh` on macOS
 and Linux. The lane ran the proof's tests green on 2026-10-01, on Python 3.9 and 3.12, once HOOK-V4-2
-wrote the adoption tests' old hook with its root quoted, as an early ao wrote it.*
+wrote the adoption tests' old hook with its root quoted, as an early polyctl wrote it.*
 
-*In ao since slice WINDOWS-CMD-CHANNEL: a batch program the watchdog starts, for the implementer's
+*In polyctl since slice WINDOWS-CMD-CHANNEL: a batch program the watchdog starts, for the implementer's
 nudge and the architect's wake alike, is handed its prompt on standard input whatever its size,
 where its adapter declares standard input, and is not started where it declares none; the reason
 names Windows and cmd.exe. cmd.exe reads each argument as its own syntax and ends the command at a
@@ -192,34 +192,34 @@ case. A prompt file is no channel for it, since its path is an argument too.
 `tests/test_windows_cmd_channel.py` holds it on every platform by deciding as Windows does; the
 lane has not yet started an agent CLI through a `.cmd`.*
 
-*In ao since slices LEADS-ADAPTERS and LEADS-INSTALL: files init and skill install write, MCP
+*In polyctl since slices LEADS-ADAPTERS and LEADS-INSTALL: files init and skill install write, MCP
 entries remove and uninstall take out, and project state remove deletes stay in held folders on Windows.*
 Each folder, from the volume root through the project's destination folder, is opened with
 `CreateFileW`, `FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT`, and sharing that omits
-`FILE_SHARE_DELETE`. ao refuses a reparse point or anything but a directory, and keeps every handle
+`FILE_SHARE_DELETE`. polyctl refuses a reparse point or anything but a directory, and keeps every handle
 open until the leaf operation ends: another process cannot rename, delete or replace a folder meanwhile.
 The project root and its ancestors are opened as existing directories; only relative folders below the
-root are created, so a shared ancestor needs no create-directory permission. With `ao init --rules`,
+root are created, so a shared ancestor needs no create-directory permission. With `polyctl init --rules`,
 a rule link to another drive or UNC share is named as unwritten and the command exits 1.
 Leaves are opened with `FILE_FLAG_OPEN_REPARSE_POINT` and checked before reading or writing; new files
 and replacement temporaries use `CREATE_NEW`. A replacement is renamed in the held folder.
 Removal holds each child folder while listing and emptying it, releases that child before removing its
 name in the still-held parent, and deletes links and junctions as links, without entering them.
-The opt-in ledger and its lock are held this way too. Known JSON MCP files are written by ao's own
-primitive; a vendor command whose writes ao cannot keep in the project is named for a person, never run.
+The opt-in ledger and its lock are held this way too. Known JSON MCP files are written by polyctl's own
+primitive; a vendor command whose writes polyctl cannot keep in the project is named for a person, never run.
 The choice depends on available APIs, not `os.name` alone, and a platform with neither these handles nor
 POSIX relative opens refuses the operation. `tests/test_leads_adapters_3.py` checks the choice and API
 contract on every platform, with native Windows tests for links, junctions and attempts to rename held
 folders. Windows still has no POSIX file modes or directory fsync guarantee.
 
-*In ao since slice LEADS-INSTALL: `ao adapters conform` runs on Windows; its fixture harness was a
+*In polyctl since slice LEADS-INSTALL: `polyctl adapters conform` runs on Windows; its fixture harness was a
 script started by its first line, which Windows does not run, so every capability failed. A schtasks
 query that failed read as no task whatever it failed for: access denied read as absent, and
-`ao remove` took a project's state while its task ran on. A task is absent now only when Task
+`polyctl remove` took a project's state while its task ran on. A task is absent now only when Task
 Scheduler lists its tasks (`schtasks /Query`) and schtasks fails for it as it fails for a name no
 task has, said in the machine's own language: a failure every query shares - access to Task
 Scheduler denied, its service not running - reads the same for both names, and is no absence. Where
-the listing itself fails, whatever for, ao cannot tell a task is gone, and `ao remove` keeps the
+the listing itself fails, whatever for, polyctl cannot tell a task is gone, and `polyctl remove` keeps the
 project's state, naming what schtasks said, until it runs where Task Scheduler answers.*
 
 The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, Windows twice -
@@ -232,21 +232,21 @@ the shell fallback. Each lane's log ends with every test it skipped and the reas
 (`pytest -rs`).
 
 A lane's result becomes evidence when a person or the lane's own script records its CI run id
-after the run: `ao` reads the run through `gh` and records what the run says. Nothing records a
-hosted run automatically yet. `ao evidence show` and `ao gain` read the rows back, and `ao
+after the run: `polyctl` reads the run through `gh` and records what the run says. Nothing records a
+hosted run automatically yet. `polyctl evidence show` and `polyctl gain` read the rows back, and `polyctl
 doctor` names a platform whose newest run is red or no longer covers HEAD (EVIDENCE,
 [telemetry.md](telemetry.md)):
 
 ```bash
-ao evidence record --platform windows --run 39026620122
-ao evidence show
+polyctl evidence record --platform windows --run 39026620122
+polyctl evidence show
 ```
 
 The Windows lane has run. Its first run, on demand on 2026-09-17, failed on what *Found by
 the lane's first run* lists; the run on demand after those fixes that day, and the weekly
 run of 2026-09-21, were green on the hosted runner with Python 3.12: 1232 and then 1280
 tests passed, 59 skipped. Both ran `tests/test_windows_processes.py`, which only Windows
-runs: a live process's working directory read from its environment block, and `ao hold`
+runs: a live process's working directory read from its environment block, and `polyctl hold`
 stopping a turn placed by it (#9).
 
 Hosted runners cover platform API behavior and deterministic process crashes: the
@@ -265,19 +265,19 @@ Turkish letters are outside the Western one - ended the write, and with it the c
 or the MCP server (#71, from the 2026-09-08 audit); a body piped in as UTF-8 was read as
 the code page's letters; and a reader expecting UTF-8 got the code page's bytes.
 
-*In ao since slice WINDOWS-CLOSE:* each of ao's entry points - `ao`, the watchdog, both
+*In polyctl since slice WINDOWS-CLOSE:* each of polyctl's entry points - `polyctl`, the watchdog, both
 MCP servers, the A2A server and the Telegram poller - first sets its standard streams to
 UTF-8 with the error handlers UTF-8 mode gives them, so a default install reads and
-writes what the lanes do, and ao no longer needs `PYTHONUTF8=1`. Every MCP reply is
+writes what the lanes do, and polyctl no longer needs `PYTHONUTF8=1`. Every MCP reply is
 seven-bit JSON, which no code page between the server and its client can change, and a
 reply that echoed a lone surrogate from a request no longer takes the server down. Every
-text file ao opens and every program's output it reads as text names its encoding, and
+text file polyctl opens and every program's output it reads as text names its encoding, and
 a guard keeps it so. `tests/test_windows_close.py` holds this on every platform by
-starting ao with `PYTHONIOENCODING=cp1252`, the streams of a Western Windows install.
+starting polyctl with `PYTHONIOENCODING=cp1252`, the streams of a Western Windows install.
 
-*In ao since slice REVIEWER-UTF8:* a reviewer ao starts - a route of `ao review`, the bug
+*In polyctl since slice REVIEWER-UTF8:* a reviewer polyctl starts - a route of `polyctl review`, the bug
 hunter, a stand-in - is asked for UTF-8 standard streams too (`PYTHONIOENCODING=utf-8`, keeping
-an error handler the person named), since ao hands it the prompt and reads its answer in UTF-8. A
+an error handler the person named), since polyctl hands it the prompt and reads its answer in UTF-8. A
 reviewer that is a Python program wrote in the code page: on the leg without UTF-8 mode its em
 dash came back as a byte no UTF-8 reads, so a hunter's leads and a reviewer's findings lost the
 separator they are read by, and a Turkish letter ended the reviewer before it answered. A program
@@ -288,17 +288,17 @@ command line holding a letter outside it - a repository under a user directory w
 Turkish name, a prompt in Turkish - came back as other letters, and a turn named by its
 repository's path was not placed. The table now leaves PowerShell as UTF-8 bytes on the
 standard output handle itself. Windows PowerShell also reads a file without a byte-order
-mark, which is how ao writes every file, in the ANSI code page: `bin/ao.ps1` read a Turkish
+mark, which is how polyctl writes every file, in the ANSI code page: `bin/polyctl.ps1` read a Turkish
 board title and the notes separator as other letters, and took `[` and `]` in a project's
 path for wildcards. It now reads UTF-8, takes every path literally and is itself ASCII.
 Only a PowerShell can prove these. On Windows, `tests/test_windows_processes.py` reads a
 command line outside the code page back from the table and places its turn, and
-`tests/test_windows_powershell.py` reads a board through `bin/ao.ps1` under a path holding
+`tests/test_windows_powershell.py` reads a board through `bin/polyctl.ps1` under a path holding
 `[` and `]`; wherever a PowerShell is installed, the same file has its parser read every
-script ao hands it - the table's query, the toast, `bin/ao.ps1`. The lane ran them green on
+script polyctl hands it - the table's query, the toast, `bin/polyctl.ps1`. The lane ran them green on
 2026-10-01, on Python 3.9 and 3.12.
 
-*In ao since slice WINDOWS-GIT-UTF8:* `bin/ao.ps1` sets the console's output encoding to UTF-8
+*In polyctl since slice WINDOWS-GIT-UTF8:* `bin/polyctl.ps1` sets the console's output encoding to UTF-8
 before it runs `git`. PowerShell decodes a native program's output in the console's code page,
 and git writes UTF-8, so a commit subject holding a letter outside that page - a Turkish name,
 an arrow - came back as other letters in `status`. `tests/test_windows_powershell.py` holds it
@@ -311,7 +311,7 @@ read back through the script's repository block.
   An agent CLI installed with npm on Windows is a `.cmd` file, which runs through
   cmd.exe, and cmd.exe reads its arguments as its own syntax: it ends the command at a
   line break, replaces `%NAME%`, and a double quote in the text changes what `&` and `|`
-  mean. ao refuses a `.cmd` or `.bat` reviewer for this (#71). The watchdog no longer hands
+  mean. polyctl refuses a `.cmd` or `.bat` reviewer for this (#71). The watchdog no longer hands
   such a program its prompt as an argument: where the adapter declares standard input
   (Claude Code, Codex and Gemini do, among others) the implementer's nudge and the
   architect's wake reach a batch program there, whatever the prompt's size; a batch
@@ -323,13 +323,13 @@ read back through the script's repository block.
   npm-installed agent CLI started through its own `.cmd` there.
 - **The toast has never been shown.** A test has PowerShell parse its script, and the
   lane ran it green on 2026-10-01 (above); no test shows a toast on a person's desktop.
-- **What a reviewer leaves running when it ends.** On macOS and Linux ao stops whatever of
+- **What a reviewer leaves running when it ends.** On macOS and Linux polyctl stops whatever of
   a reviewer's process group still runs once the reviewer has ended (LEADS-REVIEW). Windows
   has no process groups: a reviewer stopped on its timeout has its tree stopped with
   `taskkill /T`, but what a reviewer that answered and exited started, and left running apart
   from it, is not looked for, as what an ended turn left is not told apart from a turn
   (above). A Job Object holds the tree whole now: with `windows_job` on (the default, turned
-  off only on a person's record with `ao features off windows_job --by <name>`;
+  off only on a person's record with `polyctl features off windows_job --by <name>`;
   [features.md](features.md)), a spawned or ACP reviewer and the version probe are placed in
   a job with `KILL_ON_JOB_CLOSE` at `CreateProcessW` via `PROC_THREAD_ATTRIBUTE_JOB_LIST`
   with `CREATE_SUSPENDED`, a case-insensitively sorted Unicode environment block, and an
@@ -344,12 +344,12 @@ read back through the script's repository block.
 Read from the code, not seen on a Windows machine; `tests/test_windows_followups.py`
 holds each on every platform by doing what Windows does (#9, #71):
 
-- **A CRLF checkout of `.ao-project`.** Git for Windows checks text out with CRLF, so a
-  clone of an enrolled repository holds the marker with CRLF and `ao init` refused it.
+- **A CRLF checkout of `.polyctl-project`.** Git for Windows checks text out with CRLF, so a
+  clone of an enrolled repository holds the marker with CRLF and `polyctl init` refused it.
   Enrollment is measured from the blobs in HEAD and the active index, which that Git
   stores with the exact bytes, and stays exact. Only init's read of the working tree
   accepts the marker with CRLF, whole, and only on Windows; where Git does not convert
-  it back, the staged marker is refused as before. ao does not pin `.ao-project -text`
+  it back, the staged marker is refused as before. polyctl does not pin `.polyctl-project -text`
   in `.gitattributes` instead: an attribute changes a checkout only once it is
   committed, so a repository enrolled without it would still be refused on its first
   Windows clone, and `.gitattributes` is the owner's file.
@@ -379,14 +379,14 @@ holds each on every platform by doing what Windows does (#71):
 
 - **Two clocks in one stat.** CPython 3.12 and later on Windows put a file's creation time
   in a path's `st_ctime` and its last metadata change in a handle's, so the two agree only
-  while nothing changed after the file was created. `ao init` compares the marker it listed
+  while nothing changed after the file was created. `polyctl init` compares the marker it listed
   with the marker it opened, and refused the one it had just written, and the one a clone
   checked out, as changed before it could be read. On Windows that comparison leaves
   `st_ctime` out: the volume, file id, type, size and write time still tie the handle to the
   path, and the handle's own readings, like the fingerprint init compares across the
   reviewer probe, keep every field.
 - **A written path with backslashes.** A harness on Windows names the files it writes with
-  backslashes, and `ao cost` counted a turn that wrote product or coordination files as
+  backslashes, and `polyctl cost` counted a turn that wrote product or coordination files as
   analysis. A written path is now classified with either separator.
 
 The run's other failures were the tests' own assumptions, and those tests no longer make
@@ -400,13 +400,13 @@ tree kill starts `taskkill`, which a test's stand-in for the reviewer process an
 A test that cannot pass on Windows is skipped there with its reason, never left out (#71),
 and the lane's log lists each one with it:
 
-- a hook write that needs `--allow-shared-hooks`, which ao refuses on Windows;
+- a hook write that needs `--allow-shared-hooks`, which polyctl refuses on Windows;
 - POSIX file modes: an executable hook, an owner-only credentials file;
 - fixtures that are POSIX shell scripts: a filter named `git`, a fake `keyflip`, `xcrun`
   or quota command, the stub programs an update or uninstall runs, a failing lane hook.
   A Python stand-in runs on Windows as a program since WINDOWS-LANE-PARITY
   (`tests/standin.py`), and each of these could be rewritten as one; the fake `gh` of
-  `ao pr watch` is a Python script still started through its shebang;
+  `polyctl pr watch` is a Python script still started through its shebang;
 - a reviewer that prints a sign-in prompt and waits: Windows hands over what a child
   printed only once its streams close, so no heartbeat sees the prompt while it waits;
 - what Windows does not have: process groups and the CPU they spend, zombie
@@ -414,9 +414,9 @@ and the lane's log lists each one with it:
   back to.
 
 The other way round, `tests/test_windows_processes.py`, the board read through
-`bin/ao.ps1` and the real `.cmd` WINDOWS-CMD-PROOF starts need Windows itself and run only
-there. PowerShell's parser reads ao's scripts
+`bin/polyctl.ps1` and the real `.cmd` WINDOWS-CMD-PROOF starts need Windows itself and run only
+there. PowerShell's parser reads polyctl's scripts
 wherever a PowerShell is installed, and `pwsh` runs on Linux and macOS too. Where none is,
-each test says so as it is skipped. No test runs `bin/ao.ps1 status` or `doctor`: a `.ps1` runs
+each test says so as it is skipped. No test runs `bin/polyctl.ps1 status` or `doctor`: a `.ps1` runs
 only in a PowerShell, and both read what only Windows has - the user profile's Kiro sessions,
 the process table through `Get-CimInstance` - so each would be a test of the Windows lane's alone.

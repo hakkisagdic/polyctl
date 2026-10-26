@@ -2,7 +2,7 @@
 
 A Python a person installs on Windows runs without UTF-8 mode, and it reads and writes a pipe in the
 ANSI code page. Every lane of the hosted suite runs with PYTHONUTF8=1, so none of them met it: an arrow,
-a box line or a Turkish letter ao printed to a pipe ended the command, and the MCP server with it, and a
+a box line or a Turkish letter polyctl printed to a pipe ended the command, and the MCP server with it, and a
 body piped in as UTF-8 was read as the code page's characters. PYTHONIOENCODING=cp1252 gives an
 interpreter on any platform the streams of a Western Windows install, so each test here holds everywhere.
 """
@@ -14,25 +14,25 @@ import pathlib
 import subprocess
 import sys
 
-from ao import lib as A
+from polyctl import lib as A
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TITLE = "İşçi → ılık çay"          # İ, ş and ı are outside cp1252, and → is outside the Turkish cp1254 as well
 
 
 def _code_page_env(home):
-    """The environment of an interpreter a default Western Windows install starts, with this ao importable."""
+    """The environment of an interpreter a default Western Windows install starts, with this polyctl importable."""
     return A.self_child_env(dict(os.environ, HOME=home, USERPROFILE=home, PYTHONIOENCODING="cp1252",
                                  PYTHONUTF8="0"))
 
 
-def _ao(root, *args, stdin=b""):
-    return subprocess.run([sys.executable, "-m", "ao", "-C", root, *args], input=stdin, capture_output=True,
+def _polyctl(root, *args, stdin=b""):
+    return subprocess.run([sys.executable, "-m", "polyctl", "-C", root, *args], input=stdin, capture_output=True,
                           env=_code_page_env(A.HOME), timeout=120)
 
 
 def _board(root, line):
-    with open(os.path.join(root, ".ao", "board.md"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "board.md"), "w", encoding="utf-8") as fh:
         fh.write(f"# Board\n\n## running\n\n## blocked\n\n## queued\n\n{line}\n\n## verified\n\n## done\n")
 
 
@@ -40,7 +40,7 @@ def test_a_command_prints_what_the_code_page_lacks_to_a_pipe_as_utf8(project):
     root = project["root"]
     _board(root, f"- [S1] {TITLE}")
 
-    done = _ao(root, "board")
+    done = _polyctl(root, "board")
 
     assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
     assert TITLE in done.stdout.decode("utf-8")
@@ -50,7 +50,7 @@ def test_a_body_piped_in_as_utf8_is_read_as_utf8_whatever_the_code_page(project)
     root = project["root"]
     body = "gövde: ılık → sıcak\n"
 
-    done = _ao(root, "note", "a note from a pipe", "--stdin", stdin=body.encode("utf-8"))
+    done = _polyctl(root, "note", "a note from a pipe", "--stdin", stdin=body.encode("utf-8"))
 
     assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
     [written] = [name for name in os.listdir(os.path.join(root, "agent-mail")) if name.endswith(".md")]
@@ -82,16 +82,16 @@ def test_the_mcp_server_reads_utf8_and_answers_in_ascii_json_whatever_the_code_p
     _board(root, f"- [S1] {TITLE}")
     # A lone surrogate reaches a server only as a JSON escape; UTF-8 mode's surrogateescape carries
     # U+DC80 to U+DCFF and no other, so a high one is what a UTF-8 stream alone cannot write.
-    unknown, lone = "ao_ılık→", "\ud800"
+    unknown, lone = "polyctl_ılık→", "\ud800"
 
-    # Started for a role, as `ao init` registers one, so its standard error holds no notice (MCP-ROLES); the
+    # Started for a role, as `polyctl init` registers one, so its standard error holds no notice (MCP-ROLES); the
     # architect's is every tool.
-    replies = _replies(_ao(root, "mcp", "serve", "--role", "architect",
+    replies = _replies(_polyctl(root, "mcp", "serve", "--role", "architect",
                            stdin=b'{"jsonrpc": "2.0", "id": 1, "method": "initialize"}\n'
-                           + _request(2, "ao_board") + _request(3, unknown)
+                           + _request(2, "polyctl_board") + _request(3, unknown)
                            + _request(4, lone, ascii_only=True)))
 
-    assert replies[1]["serverInfo"]["name"] == "agent-orchestrator"
+    assert replies[1]["serverInfo"]["name"] == "polyctl"
     assert [item["title"] for item in replies[2]["states"]["queued"]] == [TITLE]
     assert replies[3] == {"error": f"unknown tool {unknown}"} and replies[4] == {"error": f"unknown tool {lone}"}
 
@@ -99,7 +99,7 @@ def test_the_mcp_server_reads_utf8_and_answers_in_ascii_json_whatever_the_code_p
 def test_the_a2a_bridge_reads_utf8_and_answers_in_ascii_json_as_well(project):
     agent = "ılık→"
 
-    replies = _replies(_ao(project["root"], "a2a-mcp", "serve", stdin=_request(1, "a2a_task", {"agent": agent})))
+    replies = _replies(_polyctl(project["root"], "a2a-mcp", "serve", stdin=_request(1, "a2a_task", {"agent": agent})))
 
     assert replies[1] == {"error": f"unknown agent {agent!r}", "configured": []}
 
@@ -154,9 +154,9 @@ def test_no_stream_or_one_that_raises_for_its_encoding_stops_nothing(monkeypatch
 
 
 def _first_statements_of_main():
-    """{module: its main()'s first statement} for each module under src/ao that has a main()."""
+    """{module: its main()'s first statement} for each module under src/polyctl that has a main()."""
     found = {}
-    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
+    for path in sorted((ROOT / "src" / "polyctl").rglob("*.py")):
         for node in ast.parse(path.read_text(encoding="utf-8")).body:
             if isinstance(node, ast.FunctionDef) and node.name == "main":
                 body = [statement for statement in node.body if not isinstance(statement, ast.Global)
@@ -168,8 +168,8 @@ def _first_statements_of_main():
 def test_every_entry_point_sets_its_streams_before_it_reads_or_prints_anything():
     firsts = _first_statements_of_main()
 
-    assert sorted(firsts) == ["src/ao/a2a.py", "src/ao/a2a_mcp.py", "src/ao/api_review.py", "src/ao/cli.py",
-                              "src/ao/mcp.py", "src/ao/telegram.py", "src/ao/watchdog.py"]
+    assert sorted(firsts) == ["src/polyctl/a2a.py", "src/polyctl/a2a_mcp.py", "src/polyctl/api_review.py", "src/polyctl/cli.py",
+                              "src/polyctl/mcp.py", "src/polyctl/telegram.py", "src/polyctl/watchdog.py"]
     assert set(firsts.values()) == {"A.utf8_streams()"}
 
 
@@ -213,8 +213,8 @@ def _unnamed_encodings(path, rel):
     return sorted((rel, call.lineno, what) for call in calls for what in [_text_without_an_encoding(call)] if what)
 
 
-def test_every_text_stream_ao_opens_or_reads_from_a_program_names_its_encoding():
-    found = [hit for path in sorted((ROOT / "src" / "ao").rglob("*.py"))
+def test_every_text_stream_polyctl_opens_or_reads_from_a_program_names_its_encoding():
+    found = [hit for path in sorted((ROOT / "src" / "polyctl").rglob("*.py"))
              for hit in _unnamed_encodings(path, path.relative_to(ROOT).as_posix())]
 
     assert found == []

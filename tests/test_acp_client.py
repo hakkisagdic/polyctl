@@ -1,7 +1,7 @@
 """One ACP session: a prompt turn, what the agent streams, and the permissions it asks for (ACP-CLIENT).
 
 A fake agent speaks the protocol on its standard streams, records every message the client sends it, and plays
-the turn AO_TEST_TURN names: it streams its answer in chunks, reports a tool call and asks leave to run it, asks
+the turn POLYCTL_TEST_TURN names: it streams its answer in chunks, reports a tool call and asks leave to run it, asks
 the client for a file, or does not end until it is cancelled - or at all.
 """
 import json
@@ -10,13 +10,13 @@ import time
 
 import pytest
 
-from ao import acp, lib as A
+from polyctl import acp, lib as A
 
 AGENT = """
 import json, os, sys, time
-turn = os.environ.get("AO_TEST_TURN", "answer")
-asked = open(os.environ["AO_TEST_ASKED"], "a", encoding="utf-8")
-open(os.environ["AO_TEST_PID"], "w").write(str(os.getpid()))
+turn = os.environ.get("POLYCTL_TEST_TURN", "answer")
+asked = open(os.environ["POLYCTL_TEST_ASKED"], "a", encoding="utf-8")
+open(os.environ["POLYCTL_TEST_PID"], "w").write(str(os.getpid()))
 
 def say(message):
     print(json.dumps(message), flush=True)
@@ -78,8 +78,8 @@ while True:
 @pytest.fixture
 def agent(tmp_path, monkeypatch):
     asked = tmp_path / "asked.jsonl"
-    monkeypatch.setenv("AO_TEST_ASKED", str(asked))
-    monkeypatch.setenv("AO_TEST_PID", str(tmp_path / "agent.pid"))
+    monkeypatch.setenv("POLYCTL_TEST_ASKED", str(asked))
+    monkeypatch.setenv("POLYCTL_TEST_PID", str(tmp_path / "agent.pid"))
 
     def sent():
         return [json.loads(line) for line in asked.read_text(encoding="utf-8").splitlines()] if asked.exists() else []
@@ -88,7 +88,7 @@ def agent(tmp_path, monkeypatch):
 
 
 def _turn(argv, tmp_path, monkeypatch, turn, timeout=30, permission=None):
-    monkeypatch.setenv("AO_TEST_TURN", turn)
+    monkeypatch.setenv("POLYCTL_TEST_TURN", turn)
     with acp.Session(argv, str(tmp_path), permission=permission) as session:
         session.initialize()
         session.new_session()
@@ -146,14 +146,14 @@ def test_a_policy_that_fails_or_names_no_offered_option_allows_nothing(agent, tm
     assert _turn(argv, tmp_path, monkeypatch, "tool", permission=lambda c, o: "maybe")[1][0]["decision"] == "reject_once"
 
 
-def test_a_request_for_a_method_ao_does_not_provide_is_answered_so(agent, tmp_path, monkeypatch):
+def test_a_request_for_a_method_polyctl_does_not_provide_is_answered_so(agent, tmp_path, monkeypatch):
     argv, sent, _ = agent
 
     result, _ = _turn(argv, tmp_path, monkeypatch, "files")
 
     assert result["text"] == "VERDICT: APPROVED"
     assert {"jsonrpc": "2.0", "id": "fs-1",
-            "error": {"code": acp.METHOD_NOT_FOUND, "message": "ao provides no fs/read_text_file"}} in sent()
+            "error": {"code": acp.METHOD_NOT_FOUND, "message": "polyctl provides no fs/read_text_file"}} in sent()
 
 
 def test_a_turn_past_its_time_is_cancelled_and_its_pending_permission_answered_cancelled(agent, tmp_path, monkeypatch):

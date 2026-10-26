@@ -1,13 +1,13 @@
-"""The MCP file `ao init` writes into the tree is this machine's, and ignored (README-QUICKSTART-7).
+"""The MCP file `polyctl init` writes into the tree is this machine's, and ignored (README-QUICKSTART-7).
 
-Following the quickstart, the first `ao verify` failed: `ao init` wrote `.mcp.json` for Claude Code with an entry
-naming this machine's ao, and the untracked file was a product file outside the index. It is ignored where init
+Following the quickstart, the first `polyctl verify` failed: `polyctl init` wrote `.mcp.json` for Claude Code with an entry
+naming this machine's polyctl, and the untracked file was a product file outside the index. It is ignored where init
 writes it now, as the sessions and lanes it settles for this machine are; one the repository already tracks is the
 repository's, and stays so.
 """
 import subprocess
 
-from ao import cli
+from polyctl import cli
 from tests import conftest
 from tests.test_profiles import _init_args
 

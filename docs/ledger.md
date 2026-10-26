@@ -13,7 +13,7 @@ document. **The reasoning did not**, and it had to be re-derived more than once.
 The ledger is the fix: an append-only record that outlives the messages.
 
 ```
-.ao/ledger/
+.polyctl/ledger/
 ├── decisions.jsonl      # hash-chained: why we chose things
 ├── verifications.jsonl  # what was actually measured, and by whom (hash-chained)
 ├── authority.jsonl      # hash-chained commit grants and refusals
@@ -24,10 +24,10 @@ The ledger is the fix: an append-only record that outlives the messages.
 └── slices.jsonl         # hash-chained: each move of a slice between the board's sections
 ```
 
-In every ledger whose rows decide the gate (`.ao/ledger/authority.jsonl`,
-`.ao/ledger/verifications.jsonl`, `.ao/ledger/waivers.jsonl`, `.ao/ledger/reviews.jsonl`,
-`.ao/ledger/decisions.jsonl`, `.ao/ledger/plans.jsonl`, `.ao/ledger/opt-ins.jsonl`), a row
-counts only when this machine's checkpoint store records `ao` appending it.
+In every ledger whose rows decide the gate (`.polyctl/ledger/authority.jsonl`,
+`.polyctl/ledger/verifications.jsonl`, `.polyctl/ledger/waivers.jsonl`, `.polyctl/ledger/reviews.jsonl`,
+`.polyctl/ledger/decisions.jsonl`, `.polyctl/ledger/plans.jsonl`, `.polyctl/ledger/opt-ins.jsonl`), a row
+counts only when this machine's checkpoint store records `polyctl` appending it.
 
 ## Decisions
 
@@ -71,38 +71,38 @@ The rule that makes this worth writing: **commit authority is granted against a
 verification id, not against a report.** Afterwards, "why was this allowed to land" has a
 row, with the numbers, and the name of whoever measured them.
 
-*In ao since slice LEADS-GATE: an id `ao verify` writes is `V-` and the millisecond it was minted,
+*In polyctl since slice LEADS-GATE: an id `polyctl verify` writes is `V-` and the millisecond it was minted,
 above the newest id in the ledger. It was the second, and two runs in one second, or a run after the
 clock stepped back, recorded two verifications under one id, which a grant, a commit's
-`Ao-Verification` trailer and a report each name.*
+`Polyctl-Verification` trailer and a report each name.*
 
 ## Authority chain
 
-`.ao/ledger/authority.jsonl` is stricter than the other ledgers because its newest grant
+`.polyctl/ledger/authority.jsonl` is stricter than the other ledgers because its newest grant
 is executable authority. Every committed JSON object carries `previous`: `null` on the
 genesis row and, after that, the `sha256:` digest of the complete preceding object. The
 digest is computed from canonical JSON (sorted keys, fixed separators, ASCII escapes)
-under the `ao-authority-row-v1` domain. Grants and refusals share the same chain.
+under the `polyctl-authority-row-v1` domain. Grants and refusals share the same chain.
 
 The append operation repairs only an uncommitted partial tail, validates the complete
 existing chain, selects the predecessor and writes the successor while holding one
-cross-platform ledger lock, then fsyncs before returning. `ao commit-check` validates the
+cross-platform ledger lock, then fsyncs before returning. `polyctl commit-check` validates the
 whole chain before looking for a grant. Missing links, semantic edits, middle deletion,
 reordering and wrong-predecessor appends therefore fail closed. A non-empty legacy ledger
-without `previous` fields also fails closed; AO never rewrites historical authority in
+without `previous` fields also fails closed; polyctl never rewrites historical authority in
 place. Preserve/archive such a ledger explicitly and obtain fresh verification, review
 and authority in a new ledger rather than silently treating old rows as chained.
 
-*In ao since slice WINDOWS-LOCK-WRITE: a lock file is made with one byte, written by whichever
+*In polyctl since slice WINDOWS-LOCK-WRITE: a lock file is made with one byte, written by whichever
 process finds it empty. Windows locks are mandatory for writes, and four processes appending to
 a new ledger at once failed there: one wrote the byte after another had locked it. The refused
 write is let go, since the file is no longer empty, and nothing is left to write when the lock's
 handle closes.*
 
 Every prefix of a valid chain is itself valid, so the chain alone cannot see a removed
-tail, nor who wrote a self-consistent row past the last one `ao` committed. Each row
+tail, nor who wrote a self-consistent row past the last one `polyctl` committed. Each row
 therefore also carries its `ordinal`, and every append records a write-ahead intent (the
-new row's digest) in `~/.ao/ledger-checkpoints.json` before writing, then records the
+new row's digest) in `~/.polyctl/ledger-checkpoints.json` before writing, then records the
 ledger's committed length and the digest of its last row after the write and clears the
 intent with it. Across every gate ledger (`authority`, `verifications`, `waivers`,
 `reviews`, `decisions`, `plans`, `opt-ins`), a row counts only within that attested prefix
@@ -110,29 +110,29 @@ intent with it. Across every gate ledger (`authority`, `verifications`, `waivers
 ledger with rows and no checkpoint entry on this machine returns none of them. Before
 writing, `append_chained_jsonl` takes back a single trailing row whose digest matches the
 recorded write-ahead intent of an interrupted append, and refuses any other row past the
-prefix so a later append never vouches for a foreign row (`ao doctor` names each such
+prefix so a later append never vouches for a foreign row (`polyctl doctor` names each such
 ledger `<ledger>-unattested`, and `<ledger>-unreadable` when it cannot be read,
 LEDGER-ATTESTED). A ledger shorter than its recorded count — newest rows cut, or the whole
 file gone — is a broken commitment, not a shorter chain: reading refuses it, nothing is
-appended onto it, and `ao commit-check` refuses. Retiring a ledger on purpose means
+appended onto it, and `polyctl commit-check` refuses. Retiring a ledger on purpose means
 archiving the file and removing its entry from that record by hand; sealing old rows
 instead is #50.
 
-*In ao since slice LEDGER-HISTORY: the record is replaced whole as ao's other whole files are - under a
+*In polyctl since slice LEDGER-HISTORY: the record is replaced whole as polyctl's other whole files are - under a
 name no file had, synced, renamed, and its folder synced after the rename. It was renamed into place
 with no sync of its folder, so a power cut could take back the record of an append that had returned,
 and a row then cut from the ledger matched the length recorded before it.*
 
 This is tamper-evidence against an agent confined to the repository tree, not
 authentication against same-user access outside it. A process that can also write
-`~/.ao/ledger-checkpoints.json` can recompute a suffix, append a linked row, or cut a
-valid tail and rewrite the checkpoint record to match, because AO has no external trusted
+`~/.polyctl/ledger-checkpoints.json` can recompute a suffix, append a linked row, or cut a
+valid tail and rewrite the checkpoint record to match, because polyctl has no external trusted
 head or signing key. See the exact security boundary in [`safety.md`](safety.md).
 
 ## Plan baselines
 
-`.ao/ledger/plans.jsonl` records each item's admitted plan digest. New rows are chained
-under `ao-plan-row-v1`, with the committed length recorded outside the tree as for authority.
+`.polyctl/ledger/plans.jsonl` records each item's admitted plan digest. New rows are chained
+under `polyctl-plan-row-v1`, with the committed length recorded outside the tree as for authority.
 A complete row without a nonempty string `item` and `digest` is corruption: verification
 and commit authority refuse with "plan baselines cannot be read". Edited chained digests
 and deleted committed rows are refused too.
@@ -145,9 +145,9 @@ the previous baseline under the ledger lock, so concurrent admissions remain ord
 
 ## Slices
 
-A slice's state is the section of `.ao/board.md` its row sits in, and that is what a
-restarted session reads to know what it was doing without asking anybody. *In ao since slice
-SLICE-LIFECYCLE: `.ao/ledger/slices.jsonl` says how it got there, one line per move ao makes
+A slice's state is the section of `.polyctl/board.md` its row sits in, and that is what a
+restarted session reads to know what it was doing without asking anybody. *In polyctl since slice
+SLICE-LIFECYCLE: `.polyctl/ledger/slices.jsonl` says how it got there, one line per move polyctl makes
 between the board's sections - see [`slices.md`](slices.md#states) for which moves those are:*
 
 ```jsonc
@@ -158,19 +158,19 @@ between the board's sections - see [`slices.md`](slices.md#states) for which mov
 
 `from` is null for an item that enters the board, and its line carries the notes it entered
 with; every line carries the slice's title, which says what it was once its row is gone. `by`
-is the role of a turn ao started, `person` for a caller it did not start, or `watchdog`.
+is the role of a turn polyctl started, `person` for a caller it did not start, or `watchdog`.
 `notes` are the notes the move set (null: removed) and `replaced` what they held before it, so
 a boundary or a reason a move overwrote stays on the record. The line is chained under the
-`ao-slice-row-v1` domain and its secrets are masked as in every ledger. A move within a
-section changes notes and is no transition; a move by hand has no line, and where ao recorded
-an earlier move of the slice, `ao slice status` and `ao slices` name the disagreement.
+`polyctl-slice-row-v1` domain and its secrets are masked as in every ledger. A move within a
+section changes notes and is no transition; a move by hand has no line, and where polyctl recorded
+an earlier move of the slice, `polyctl slice status` and `polyctl slices` name the disagreement.
 
 A move is decided on one reading of the board and made on that reading, under the board's lock
 and compared with the board as it stands before the board is replaced
-([slices.md](slices.md#states)): a board that changed while ao decided moves nothing and
+([slices.md](slices.md#states)): a board that changed while polyctl decided moves nothing and
 records nothing. The line is written before the board, and a chained ledger is never cut back,
 so a board that cannot be written after it - a full disk, a permission, a rename refused, a
-hand edit that landed while ao wrote - gets a line that voids it:
+hand edit that landed while polyctl wrote - gets a line that voids it:
 
 ```jsonc
 {"previous":"sha256:…","ordinal":8,"slice":"claim-admission","from":"running","to":"blocked",
@@ -180,44 +180,44 @@ hand edit that landed while ao wrote - gets a line that voids it:
 
 `voids` is the ordinal of the line it voids, and `why` says what stopped the write, with no
 path in it. Whatever reads the ledger - since when a slice is where it is, who blocked it,
-`ao slices` - leaves the voided move and the line voiding it out of the moves the slice made, and
-`ao slice status` shows it in the slice's history, marked as a move that did not happen. A
+`polyctl slices` - leaves the voided move and the line voiding it out of the moves the slice made, and
+`polyctl slice status` shows it in the slice's history, marked as a move that did not happen. A
 retry is recorded once, as a move of its own. A process stopped between the line and the board
-leaves no line voiding it: `ao slice status` then says the board never took ao's last recorded
+leaves no line voiding it: `polyctl slice status` then says the board never took polyctl's last recorded
 move of the slice, or a hand moved it back.
 
 ## Commands
 
 ```bash
-ao decide "…" --why "…" --scope claim-admission   # append a decision, mailed to the implementer
-ao decide --list                                   # the decisions recorded, newest last
-ao recall authority                                # decided, answered or found, in every project
+polyctl decide "…" --why "…" --scope claim-admission   # append a decision, mailed to the implementer
+polyctl decide --list                                   # the decisions recorded, newest last
+polyctl recall authority                                # decided, answered or found, in every project
 ```
 
 Not built yet: one entry shown with its links, and `INDEX.md` rendered from the ledger;
 nothing writes `INDEX.md` today.
 
-<!-- not built: ao has no ledger command, and nothing renders INDEX.md -->
+<!-- not built: polyctl has no ledger command, and nothing renders INDEX.md -->
 ```bash
-ao ledger show D-014                               # one entry with its links
-ao ledger render                                   # regenerate INDEX.md
+polyctl ledger show D-014                               # one entry with its links
+polyctl ledger render                                   # regenerate INDEX.md
 ```
 
-`ao verify` writes its own record; you never hand-author a verification.
+`polyctl verify` writes its own record; you never hand-author a verification.
 
 ## The stores are checked against each other
 
 The board, the ledgers, the review artefacts and git refs are four stores that must agree.
-`ao doctor --consistency` cross-checks them and names every disagreement with both sides: a
+`polyctl doctor --consistency` cross-checks them and names every disagreement with both sides: a
 grant resting on a review that is neither on disk nor present at its archive pointer, a grant naming a
 verification or a waiver its ledger does not hold, a review file that is not the bytes its row
 recorded, a review row with no file anywhere, a board item citing a commit that is not in the
 repository, a committed-length checkpoint for a checkout that is gone, an architect lock whose
-holder is dead, and a review ao archived with nothing recording where.
+holder is dead, and a review polyctl archived with nothing recording where.
 
 Archived copies are opened and checked against the review row's digest: a pointer alone
 vouches for no bytes. `--repair` fixes only the last three kinds - mechanical state - after
-reading the chained `.ao/ledger/repairs.jsonl` and appending an `event: intent` row before each
+reading the chained `.polyctl/ledger/repairs.jsonl` and appending an `event: intent` row before each
 action. An intent records an attempted repair, not proof that an interrupted action finished.
 Unreadable repair history prevents all repairs. Lock repair compares the scanned holder
 again under the same sidecar lock that acquisition and release use; a retaken or live lock
@@ -233,25 +233,25 @@ records, and the nudge, watchdog, refill and wake logs (the wake's is `escalate-
 `retention.observation_kb` and drops the oldest records at a line boundary; the notices ledger
 does this on each write and the watchdog holds the rest every cycle. A log a turn or a wake the
 watchdog started is still writing is left whole until that process ends, and is bounded in a later
-cycle. `ao doctor` names a store that is over its bound anyway. What a trim takes from the notices still counts in an alarm's
-window: each notice is folded first into `.ao/ledger/notice-times.json`, when each key was last
+cycle. `polyctl doctor` names a store that is over its bound anyway. What a trim takes from the notices still counts in an alarm's
+window: each notice is folded first into `.polyctl/ledger/notice-times.json`, when each key was last
 recorded and sent, which keeps a week and at most 500 keys ([alarms](alarms.md)).
 
-Evidence is never trimmed. `ao doctor` names authority and verification ledgers whose live rows
+Evidence is never trimmed. `polyctl doctor` names authority and verification ledgers whose live rows
 exceed `retention.evidence_keep`, with their row count and the command to seal them. Archived rows
 do not count against that bound. Plans are kept whole and never sealed.
-The authority and verification ledgers past their bound are **sealed**: `ao prune --evidence
---yes` moves all but their newest `retention.evidence_keep` rows whole into `.ao/ledger/sealed/`,
+The authority and verification ledgers past their bound are **sealed**: `polyctl prune --evidence
+--yes` moves all but their newest `retention.evidence_keep` rows whole into `.polyctl/ledger/sealed/`,
 and a seal records how many rows it retired and the digest of the last of them. That digest is
 the genesis the first kept row links to, and the same seal is recorded outside the repository
 with the committed length, so a seal written by hand, or a sealed prefix removed, is refused
-like any broken chain. `ao commit-check` reads the same newest rows from a sealed ledger as from
+like any broken chain. `polyctl commit-check` reads the same newest rows from a sealed ledger as from
 an unsealed one. A verification a grant names stays readable by its id from the sealed archive,
 and review artefacts are kept by reference ([telemetry](telemetry.md)).
 
-*In ao since slice LEDGER-HISTORY: a seal records its intent - the rows it retires, the digest of the
+*In polyctl since slice LEDGER-HISTORY: a seal records its intent - the rows it retires, the digest of the
 last of them, its archives, and the length and newest digest the ledger had - in
-`~/.ao/ledger-checkpoints.json`, under that record's lock, before it rewrites the ledger, and a seal cut
+`~/.polyctl/ledger-checkpoints.json`, under that record's lock, before it rewrites the ledger, and a seal cut
 short is finished or undone from that record alone. The intent was a `.pending` file beside the ledger,
 which the implementer can write: a ledger cut to its newest rows, beside one naming the cut rows as
 sealed, was accepted and the record outside the repository rewritten to match, and so was a chain of
@@ -259,9 +259,9 @@ the writer's own with any genesis, whose newest grant then read as the newest de
 there now names a seal this machine did not begin: the ledger is not read while it stands, and it stays
 where it is for a person to read and move away. The archives are held to their seal - one chain ending
 at its digest, with exactly the rows it retired - and every reader of what was ever granted or verified
-reads them and the live rows as one chain: the candidates a waiver authorised, the waivers `ao catchup`
+reads them and the live rows as one chain: the candidates a waiver authorised, the waivers `polyctl catchup`
 reviews, the trees and the first grant the landed-tree check measures from ([safety](safety.md#3-commit-authority-is-separated)),
-the reviews grants rest on, `ao backup`, `ao restore` and `ao doctor --consistency`. Read from the live
+the reviews grants rest on, `polyctl backup`, `polyctl restore` and `polyctl doctor --consistency`. Read from the live
 rows alone, a waiver whose grant a seal retired stood in for a review of other bytes, and catch-up closed
 it unreviewed as unused. The newest decision is still read from the live rows. Measured here with 10,000
 authority rows sealed to the 500 kept live, the whole history reads in about 50 ms, and in 114 ms on a

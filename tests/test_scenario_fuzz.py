@@ -8,8 +8,8 @@ decision, a hold, quota, the nudge switch, the round budget, an architect at the
 keyboard - one dry cycle runs in it, and its decision is checked against the invariants
 below: those of F1/F2, F9, F10, F11, F14, F19 and #20, and the quota, switch and idle
 rules. The other faults are held by their own scenario tests, one world at a time. A
-failure prints its seed and its world: AO_FUZZ_SEED=<n> runs that world alone,
-AO_FUZZ_SEEDS=<count> runs more of them.
+failure prints its seed and its world: POLYCTL_FUZZ_SEED=<n> runs that world alone,
+POLYCTL_FUZZ_SEEDS=<count> runs more of them.
 
 An invariant reads the cycle's trace, so each line it looks for is shown to be one a cycle
 writes: a check whose line the watchdog no longer writes would hold in every world and
@@ -20,15 +20,15 @@ import random
 
 import pytest
 
-from ao import features as F, lib as A
+from polyctl import features as F, lib as A
 from tests.scenarios import World
 
 IDLE = 6 * 60
 KIRO = ["/agents/kiro-cli", "chat", "--resume-id", "s1", "--no-interactive", "devam"]
 PERSON = ["/agents/kiro-cli", "chat"]
 ENGINE = ["/agents/Application Support/kiro-cli/node", "--experimental-wasm-modules", "x"]
-SEEDS = [int(os.environ["AO_FUZZ_SEED"])] if os.environ.get("AO_FUZZ_SEED") \
-    else range(int(os.environ.get("AO_FUZZ_SEEDS", "40")))
+SEEDS = [int(os.environ["POLYCTL_FUZZ_SEED"])] if os.environ.get("POLYCTL_FUZZ_SEED") \
+    else range(int(os.environ.get("POLYCTL_FUZZ_SEEDS", "40")))
 
 
 def _build(world, rng, monkeypatch):
@@ -112,7 +112,7 @@ def test_no_random_world_contradicts_an_invariant(seed, project, monkeypatch, tm
     started = [argv for argv in world.spawned if isinstance(argv, list) and argv and str(argv[0]).startswith("/agents/")]
     if started:
         broken.append(f"a dry cycle started {started}")
-    assert not broken, (f"seed {seed} (AO_FUZZ_SEED={seed}): {broken}\nworld: {facts}\ntrace:\n  "
+    assert not broken, (f"seed {seed} (POLYCTL_FUZZ_SEED={seed}): {broken}\nworld: {facts}\ntrace:\n  "
                         + "\n  ".join(trace))
 
 

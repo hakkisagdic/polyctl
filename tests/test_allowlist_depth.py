@@ -1,7 +1,7 @@
 """The grant audit fails closed where its reading of a rule runs out (ALLOWLIST-DEPTH).
 
-ao's bug hunter found two ways a rule passed the audit on 2026-10-12. The reading took off eight programs that run
-the command after them and stopped, so `Bash(nice nice nice nice nice nice nice nice nice ao features off review
+polyctl's bug hunter found two ways a rule passed the audit on 2026-10-12. The reading took off eight programs that run
+the command after them and stopped, so `Bash(nice nice nice nice nice nice nice nice nice polyctl features off review
 --by p:*)` was read as a `nice` command nothing forbids; and it took `rtk` off only before git and before rtk's own
 wrappers, though rtk runs a program it has no filter for as it is, so `Bash(rtk ruby:*)` was no interpreter rule.
 Looking for the same two shapes found more, each a rule read as the plain command it is not, or not read at all: a
@@ -12,9 +12,9 @@ word (`Bash(timeout * pytest:*)`, `Bash(ls*)`). A run of wildcards kept the matc
 The review of that found three more, each where the reading assumed: an option of a wrapper it did not list was taken
 to take no value, and macOS's `env -P /usr/bin git` takes `/usr/bin` as the folder to find git in; a wildcard in a
 program's folder was dropped with the folder, so `Bash(/usr/*/git status:*)` read as `Bash(git status:*)` and admits
-`/usr/bin/python3 -c x /tmp/git status`; and an exact rule was compared with ao's sample commands as strings, so
+`/usr/bin/python3 -c x /tmp/git status`; and an exact rule was compared with polyctl's sample commands as strings, so
 `Bash(git commit --no-verify -m y)`, with no wrapper at all, skipped the hook beside the sample's `-m x`. Attacking
-the result the same way found the rest of the class: a person's act with an option among its words or ao's `-C` before
+the result the same way found the rest of the class: a person's act with an option among its words or polyctl's `-C` before
 them, `git commit -nm`, `--no-veri`, `-c core.hooksPath` and `-c alias.x`, a variable that hands git its
 configuration, xargs, a rule split into words at spaces rather than as the shell splits it (`g"i"t`, `gi\\t`,
 `-{n,m}`), a comma inside a rule's parentheses, and a dotless `ı`.
@@ -25,7 +25,7 @@ command; and every rule is asked what its own command does, as the operation eac
 """
 import pytest
 
-from ao import allowlist as AL, cli, lib as A
+from polyctl import allowlist as AL, cli, lib as A
 
 NINE = "nice " * 9
 HOOK = "skips the commit hook, as the command it runs"
@@ -45,9 +45,9 @@ def _named(rule, role=None):
 # ---- the first round -------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("rule, reason", [
-    (f"Bash({NINE}ao features off review --by p:*)", "switches review off, as the command it runs"),
+    (f"Bash({NINE}polyctl features off review --by p:*)", "switches review off, as the command it runs"),
     ("Bash(" + "timeout 1 " * 9 + "git commit:*)", HOOK),
-    (f"Bash({NINE}ao features off review --by Alice)", "switches review off"),
+    (f"Bash({NINE}polyctl features off review --by Alice)", "switches review off"),
     (f"Bash({NINE}python3 x.py)", "runs arbitrary code"),
 ])
 def test_a_rule_nested_past_eight_wrappers_is_read_to_the_command_it_runs(rule, reason):
@@ -85,7 +85,7 @@ def test_the_forms_of_the_lead_that_were_already_read_are_read_as_before():
 
 
 @pytest.mark.parametrize("rule, reason", [
-    ("Bash(rtk ao features off review --by Alice)", "switches review off"),
+    ("Bash(rtk polyctl features off review --by Alice)", "switches review off"),
     ("Bash(rtk timeout 60 pytest:*)", "runs arbitrary code, as the command it runs"),
     ("Bash(rtk env FOO=1 git commit:*)", HOOK),
     # Nothing declares which of a rewriter's own options takes the next word: the program could be either.
@@ -103,7 +103,7 @@ def test_a_rewriter_is_taken_off_before_any_program(rule, reason):
     ("Bash(sudo /usr/bin/git -C . commit:*)", FILE_CODE),
     ("Bash(rtk.exe git -C . commit:*)", HOOK),
     ("Bash(/usr/local/bin/rtk proxy git commit:*)", FILE_CODE),
-    ("Bash(/usr/local/bin/ao features off review --by Alice)", FILE_CODE),
+    ("Bash(/usr/local/bin/polyctl features off review --by Alice)", FILE_CODE),
     ("Bash(rtk /usr/bin/python3 -c:*)", FILE_CODE),
 ])
 def test_only_bare_program_names_are_folded_and_program_paths_are_code(rule, reason):
@@ -133,26 +133,26 @@ def test_an_exact_rule_is_read_as_the_exact_command_it_runs():
 
     assert AL.normalized_rule(rule) == "Bash(git commit --no-verify -m x)"
     assert _named(rule) == [(HOOK, rule)]
-    assert _problems("Bash(timeout 60 git status)", "Bash(nice -n 5 ao status)") == []
+    assert _problems("Bash(timeout 60 git status)", "Bash(nice -n 5 polyctl status)") == []
 
 
-@pytest.mark.parametrize("rule", ["Bash(timeout 60 ao config set round_budget:*)",
-                                  "Bash(rtk ao config set round_budget:*)"])
+@pytest.mark.parametrize("rule", ["Bash(timeout 60 polyctl config set round_budget:*)",
+                                  "Bash(rtk polyctl config set round_budget:*)"])
 def test_a_setting_an_implementer_may_not_change_is_asked_of_the_command_a_rule_runs(rule):
     assert _problems(rule, role="implementer") == [
-        ("changes a setting that governs its own work", "ao config set round_budget 1", rule)]
+        ("changes a setting that governs its own work", "polyctl config set round_budget 1", rule)]
 
 
 @pytest.mark.parametrize("rule", [
     "Bash(nice*)", "Bash(ti*)", "Bash(ls*)", "Bash(ruby*)", "Bash(* --version)",
-    "Bash(timeout * pytest:*)", "Bash(timeout * ao features off review --by p)", "Bash(timeout 6* pytest:*)",
+    "Bash(timeout * pytest:*)", "Bash(timeout * polyctl features off review --by p)", "Bash(timeout 6* pytest:*)",
     "Bash(nice -n * git status)", "Bash(env FOO=* git status)", "Bash(timeout 60 py*)", "Bash(nice x*)",
     "Bash(git -C * commit:*)", "Bash(git -* status)",
     "Bash(FOO=* git status)", "Bash(FOO=a* git status)", "Bash(A=1 B=* nice git status)", "Bash(FOO='*' git status)",
-    # Where git's or ao's own options may still stand: `git -c alias.x=!sh x` (ALLOWLIST-DEPTH).
-    "Bash(nice git *)", "Bash(timeout 5 git -C . *)", "Bash(nice rtk git -c *)", "Bash(nice ao *)",
-    "Bash(nice ao -C *)",
-    "Bash(timeout 60 ao lock *)", "Bash(nice git \\*)",
+    # Where git's or polyctl's own options may still stand: `git -c alias.x=!sh x` (ALLOWLIST-DEPTH).
+    "Bash(nice git *)", "Bash(timeout 5 git -C . *)", "Bash(nice rtk git -c *)", "Bash(nice polyctl *)",
+    "Bash(nice polyctl -C *)",
+    "Bash(timeout 60 polyctl lock *)", "Bash(nice git \\*)",
 ])
 def test_a_wildcard_where_the_reading_needs_a_word_admits_any_command(rule):
     assert AL.normalized_rule(rule) == "Bash(*)"
@@ -161,7 +161,7 @@ def test_a_wildcard_where_the_reading_needs_a_word_admits_any_command(rule):
 
 @pytest.mark.parametrize("rule, plain, reason", [
     ("Bash(timeout 60 git commit:*)", "Bash(git commit:*)", HOOK),
-    ("Bash(nice ao features off review *)", "Bash(ao features off review:*)", "switches review off, as the command it runs"),
+    ("Bash(nice polyctl features off review *)", "Bash(polyctl features off review:*)", "switches review off, as the command it runs"),
 ])
 def test_a_wildcard_after_complete_words_stays_where_it_stands(rule, plain, reason):
     assert AL.normalized_rule(rule) == plain
@@ -171,7 +171,7 @@ def test_a_wildcard_after_complete_words_stays_where_it_stands(rule, plain, reas
 def test_everyday_rules_with_a_wildcard_after_their_program_are_not_named():
     assert _problems("Bash(git status:*)", "Bash(git log --oneline *)", "Bash(cat src/ *)", "Bash(ls -la *)",
                      "Bash(timeout 60 git status:*)", "Bash(LC_ALL=C ls:*)", "Bash(rtk read:*)", "Bash(rtk ls:*)",
-                     "Bash(rtk git diff:*)", "Bash(rtk --version)", "Bash(ao status:*)", role="implementer") == []
+                     "Bash(rtk git diff:*)", "Bash(rtk --version)", "Bash(polyctl status:*)", role="implementer") == []
 
 
 def test_a_run_of_wildcards_is_asked_as_one():
@@ -179,7 +179,7 @@ def test_a_run_of_wildcards_is_asked_as_one():
     of, and the audit asks each rule a hundred commands."""
     rule = "Bash(" + "*" * 40 + "z)"
 
-    assert not AL.admits(rule, "ao collect-review n --response r --model m --by b")
+    assert not AL.admits(rule, "polyctl collect-review n --response r --model m --by b")
     assert AL.admits(rule, "sh -c x z")
     assert _named(rule) == [(HOOK, rule)]
 
@@ -297,9 +297,9 @@ PLACES = {"x": "y", "p": "Alice", "b": "Bob", "w": "late", "s": "S1", "r": "answ
 
 
 def _written_otherwise(command, own_options):
-    """A forbidden command with each word that only fills a place written otherwise, and git's or ao's own `-C .`."""
+    """A forbidden command with each word that only fills a place written otherwise, and git's or polyctl's own `-C .`."""
     words = [PLACES.get(word, word) for word in command.split()]
-    return " ".join(words[:1] + ["-C", "."] + words[1:] if own_options and words[0] in ("git", "ao") else words)
+    return " ".join(words[:1] + ["-C", "."] + words[1:] if own_options and words[0] in ("git", "polyctl") else words)
 
 
 SAMPLES = [(None, reason, command) for reason, command in AL.FORBIDDEN] \
@@ -313,7 +313,7 @@ SAMPLES = [(None, reason, command) for reason, command in AL.FORBIDDEN] \
 def test_each_forbidden_command_is_the_operation_it_performs_however_its_places_are_filled(role, reason, command,
                                                                                            own_options):
     """Each sample is one spelling: written with other values in its places, as an exact rule, it is named for the
-    operation it performs. `ao lock` runs the command after it, which is what is named; a setting with a reason of
+    operation it performs. `polyctl lock` runs the command after it, which is what is named; a setting with a reason of
     its own is named for that."""
     rule = f"Bash({_written_otherwise(command, own_options)})"
 
@@ -325,43 +325,43 @@ def test_each_forbidden_command_is_the_operation_it_performs_however_its_places_
 
 
 @pytest.mark.parametrize("rule, reason", [
-    ("Bash(ao features --by Alice off review)", "switches review off"),
-    ("Bash(ao features off --by Alice review)", "switches review off"),
-    ("Bash(ao -C . features off review --by Alice)", "switches review off"),
-    ("Bash(ao --root=. features off review --by Alice)", HOOK),
-    ("Bash(ao --ro . -- features off review --by Alice)", HOOK),
-    ("Bash(ao features off review --b Alice)", "switches review off"),
-    ("Bash(ao features off review --by=Alice)", "switches review off"),
-    ("Bash(ao push --minutes 5 allow)", "opens a push window"),
-    ("Bash(ao push --min=5 allow)", "opens a push window"),
-    ("Bash(ao hooks --allow-shared-hooks uninstall)", "removes the hooks"),
-    ("Bash(ao config --machine set review.same_family labeled --by p)", "opts into same-family review"),
-    ("Bash(ao init --review-t same-family --by p)", "opts into same-family review"),
-    ("Bash(ao init --review-tier=same-family --by p)", "opts into same-family review"),
-    ("Bash(ao catchup --author-fam f --by b)", "names the family that wrote a waived range"),
-    ("Bash(ao catchup --move=S1 --by b)", "states which waived slices only moved code"),
-    ("Bash(ao harness --by p seen --dig d)", "records harness configuration as seen"),
-    ("Bash(ao harness seen --a --by p)", "records harness configuration as seen"),
-    ("Bash(ao -C . waive --by b review --slice s --why w)", "waives a gate"),
+    ("Bash(polyctl features --by Alice off review)", "switches review off"),
+    ("Bash(polyctl features off --by Alice review)", "switches review off"),
+    ("Bash(polyctl -C . features off review --by Alice)", "switches review off"),
+    ("Bash(polyctl --root=. features off review --by Alice)", HOOK),
+    ("Bash(polyctl --ro . -- features off review --by Alice)", HOOK),
+    ("Bash(polyctl features off review --b Alice)", "switches review off"),
+    ("Bash(polyctl features off review --by=Alice)", "switches review off"),
+    ("Bash(polyctl push --minutes 5 allow)", "opens a push window"),
+    ("Bash(polyctl push --min=5 allow)", "opens a push window"),
+    ("Bash(polyctl hooks --allow-shared-hooks uninstall)", "removes the hooks"),
+    ("Bash(polyctl config --machine set review.same_family labeled --by p)", "opts into same-family review"),
+    ("Bash(polyctl init --review-t same-family --by p)", "opts into same-family review"),
+    ("Bash(polyctl init --review-tier=same-family --by p)", "opts into same-family review"),
+    ("Bash(polyctl catchup --author-fam f --by b)", "names the family that wrote a waived range"),
+    ("Bash(polyctl catchup --move=S1 --by b)", "states which waived slices only moved code"),
+    ("Bash(polyctl harness --by p seen --dig d)", "records harness configuration as seen"),
+    ("Bash(polyctl harness seen --a --by p)", "records harness configuration as seen"),
+    ("Bash(polyctl -C . waive --by b review --slice s --why w)", "waives a gate"),
 ])
 def test_a_person_s_act_is_read_as_argparse_reads_its_command_line(rule, reason):
-    """argparse lets an option stand among the positionals and be named by any start of its name, and ao takes `-C`
+    """argparse lets an option stand among the positionals and be named by any start of its name, and polyctl takes `-C`
     before its subcommand: the act's words were asked to come first, as written, so each of these passed."""
     assert _named(rule) == [(reason, rule)]
 
 
-@pytest.mark.parametrize("rule", ["Bash(ao features on review --by Alice)", "Bash(ao features --by Alice list)",
-                                  "Bash(ao push status)", "Bash(ao harness seen --by Alice)", "Bash(ao hooks status)",
-                                  "Bash(ao init --profile claude-kiro)"])
+@pytest.mark.parametrize("rule", ["Bash(polyctl features on review --by Alice)", "Bash(polyctl features --by Alice list)",
+                                  "Bash(polyctl push status)", "Bash(polyctl harness seen --by Alice)", "Bash(polyctl hooks status)",
+                                  "Bash(polyctl init --profile claude-kiro)"])
 def test_a_command_line_that_performs_no_act_is_not_named(rule):
     assert _problems(rule) == []
 
 
 @pytest.mark.parametrize("rule, reason", [
-    ("Bash(ao config set round_budget 9)", "changes a setting that governs its own work"),
-    ("Bash(ao config --machine set round_budget 9)", "changes a setting that governs its own work"),
-    ("Bash(ao config set review_timeout 9)", "changes the settings that govern its own review"),
-    ("Bash(ao decide redo-it --sc S1)", "re-specifies a slice, restarting its round budget"),
+    ("Bash(polyctl config set round_budget 9)", "changes a setting that governs its own work"),
+    ("Bash(polyctl config --machine set round_budget 9)", "changes a setting that governs its own work"),
+    ("Bash(polyctl config set review_timeout 9)", "changes the settings that govern its own review"),
+    ("Bash(polyctl decide redo-it --sc S1)", "re-specifies a slice, restarting its round budget"),
 ])
 def test_an_exact_rule_that_changes_what_governs_an_implementer_is_named(rule, reason):
     assert _named(rule, role="implementer") == [(reason, rule)]
@@ -430,7 +430,7 @@ def test_a_line_continuation_with_a_windows_reading_is_unknown():
 
 
 @pytest.mark.parametrize("rule", [r"Bash(C:\Git\bin\git.exe commit -n -m x)",
-                                  r"Bash(.\ao.exe features off review --by A)", "Bash(gi^t commit -n -m x)",
+                                  r"Bash(.\polyctl.exe features off review --by A)", "Bash(gi^t commit -n -m x)",
                                   "Bash(%GIT% commit -n -m x)"])
 def test_a_program_windows_reads_otherwise_admits_any_command(rule):
     """A POSIX shell, Git Bash's too, takes the backslash as an escape, Windows as a folder; cmd.exe takes the caret
@@ -473,7 +473,7 @@ def test_a_comma_inside_a_rule_makes_the_whole_tool_list_unknown():
                                   "Bash(\ufb01nd . -exec sh -c x \\;)"])
 def test_a_program_s_name_is_folded_as_any_platform_folds_it(rule):
     """Windows matches a name by its upper case, where a dotless ı is I and a long ſ is S, and drops the dots at a
-    name's end: folded only to lower case, `gıt` read as no program ao knows."""
+    name's end: folded only to lower case, `gıt` read as no program polyctl knows."""
     assert _problems(rule)
 
 
@@ -493,7 +493,7 @@ def test_an_interpreter_is_read_by_its_versioned_name_too(rule, program):
     assert _named(rule) == [(CODE, rule)]
 
 
-def test_a_look_alike_no_platform_folds_is_no_program_ao_knows():
+def test_a_look_alike_no_platform_folds_is_no_program_polyctl_knows():
     assert _problems("Bash(\uff47\uff49\uff54 commit -n -m x)")  # unknown program, not a harmless look-alike
     rule = "Bash(git commit \u2014no-verify -m x)"
     assert _named(rule) == [(CODE, rule)]  # runs hooks; the look-alike is not --no-verify
@@ -501,7 +501,7 @@ def test_a_look_alike_no_platform_folds_is_no_program_ao_knows():
 
 @pytest.mark.parametrize("rule", ['Bash(git -C "" commit -n -m x)', 'Bash("" git commit -n -m x)',
                                   'Bash(git "" commit -n -m x)', 'Bash(env "" git commit -n)',
-                                  'Bash(ao "" features off review --by A)'])
+                                  'Bash(polyctl "" features off review --by A)'])
 def test_quoted_empty_words_are_outside_the_grammar(rule):
     assert AL.normalized_rule(rule) == "Bash(*)"
     assert _problems(rule)
@@ -519,9 +519,9 @@ def test_what_xargs_reads_is_part_of_the_command_it_runs(rule):
 
 @pytest.mark.parametrize("command", [
     "xargs -I status git status*", "xargs -I status_x git status*",
-    "xargs -I status ao push status*", "xargs -I on ao features on*",
+    "xargs -I status polyctl push status*", "xargs -I on polyctl features on*",
     "xargs --replace=status_x git status*", "gxargs -I status git status*",
-    "xargs -I off -I on ao features on*", "nice xargs -I on ao features on*",
+    "xargs -I off -I on polyctl features on*", "nice xargs -I on polyctl features on*",
 ])
 def test_xargs_replacement_in_a_wildcarded_word_cannot_hide_an_operation(command):
     """The replacement may be in the final prefix, or completed by its wildcard."""
@@ -554,12 +554,12 @@ def test_xargs_replacement_never_preserves_a_partial_word(command):
     assert _problems(rule)
 
 
-@pytest.mark.parametrize("rule, reason", [("Bash(ao lock -- git commit -n -m x)", HOOK),
-                                          ("Bash(ao lock --wait 5 -- python3 x.py)", CODE),
-                                          ("Bash(ao -C . lock git commit --no-verify -m y)", "skips the commit hook")])
-def test_ao_lock_is_read_as_the_wrapper_it_is(rule, reason):
+@pytest.mark.parametrize("rule, reason", [("Bash(polyctl lock -- git commit -n -m x)", HOOK),
+                                          ("Bash(polyctl lock --wait 5 -- python3 x.py)", CODE),
+                                          ("Bash(polyctl -C . lock git commit --no-verify -m y)", "skips the commit hook")])
+def test_polyctl_lock_is_read_as_the_wrapper_it_is(rule, reason):
     assert _named(rule) == [(reason, rule)]
-    assert _problems("Bash(ao lock -- pytest -q)")
+    assert _problems("Bash(polyctl lock -- pytest -q)")
 
 
 @pytest.mark.parametrize("rule", ["Bash(make test)", "Bash(make)", "Bash(gmake -j4 all)",
@@ -583,12 +583,12 @@ def test_an_exact_rule_that_runs_code_it_names_is_named(rule):
                                           ("Bash(tee -a src/app.py)", "writes a product file"),
                                           ("Bash(git log -p --output=src/x.patch)", "writes a product file"),
                                           ("Bash(git format-patch -o src HEAD~1)", "writes a product file")])
-def test_an_architect_s_exact_rule_that_writes_outside_ao_s_files_is_named(rule, reason):
+def test_an_architect_s_exact_rule_that_writes_outside_polyctl_s_files_is_named(rule, reason):
     assert _named(rule, role="architect") == [(reason, rule)]
 
 
-def test_an_architect_s_rule_that_keeps_to_ao_s_files_is_not_named():
-    assert _problems("Bash(rm agent-mail/old.md)", "Bash(rm -r .ao/inbox/done)", "Bash(git diff --stat)",
+def test_an_architect_s_rule_that_keeps_to_polyctl_s_files_is_not_named():
+    assert _problems("Bash(rm agent-mail/old.md)", "Bash(rm -r .polyctl/inbox/done)", "Bash(git diff --stat)",
                      "Bash(mv agent-mail/a agent-mail/b)", "Bash(cp --target-directory agent-mail agent-mail/x)",
                      role="architect") == []
 
@@ -597,10 +597,10 @@ def test_an_architect_s_rule_that_keeps_to_ao_s_files_is_not_named():
     ("Bash(git commit -m fix *)", "skips the commit hook"),
     ("Bash(git commit -m:*)", "skips the commit hook"),
     ("Bash(nice git commit -am:*)", "skips the commit hook"),
-    ("Bash(ao features --by Alice *)", "switches review off"),
-    ("Bash(ao features off --by Alice review *)", "switches review off"),
-    ("Bash(ao push --minutes 5 *)", "opens a push window"),
-    ("Bash(ao config --machine set *)", "opts into same-family review"),
+    ("Bash(polyctl features --by Alice *)", "switches review off"),
+    ("Bash(polyctl features off --by Alice review *)", "switches review off"),
+    ("Bash(polyctl push --minutes 5 *)", "opens a push window"),
+    ("Bash(polyctl config --machine set *)", "opts into same-family review"),
 ])
 def test_a_rule_whose_wildcard_can_add_what_an_operation_needs_is_named(rule, reason):
     """The samples are asked of a rule with a wildcard as the harness matches it, and `Bash(git commit -m fix *)` admits
@@ -609,19 +609,19 @@ def test_a_rule_whose_wildcard_can_add_what_an_operation_needs_is_named(rule, re
 
 
 def test_a_rule_whose_fixed_words_rule_an_operation_out_is_not_named():
-    assert _problems("Bash(ao features on *)", "Bash(ao push status:*)", "Bash(xargs -n 1 git add)",
+    assert _problems("Bash(polyctl features on *)", "Bash(polyctl push status:*)", "Bash(xargs -n 1 git add)",
                      "Bash(git -c color.ui=never log *)",
                      role="implementer") == []
 
 
-def test_ao_s_options_the_reading_declares_are_the_parser_s():
+def test_polyctl_s_options_the_reading_declares_are_the_parser_s():
     parser = cli.build_parser()
     commands = next(action.choices for action in parser._actions if isinstance(action.choices, dict))
 
     def options(of):
         return {flag: action.nargs != 0 for action in of._actions for flag in action.option_strings}
 
-    assert AL._ao_tables() == {name: options(command) for name, command in {None: parser, **commands}.items()}
+    assert AL._polyctl_tables() == {name: options(command) for name, command in {None: parser, **commands}.items()}
 
 
 # The independent review: unknown syntax anywhere invalidates the entire reading.
@@ -678,7 +678,7 @@ def test_review_closed_redirections_do_not_hide_command_words(redirect, command)
 
 @pytest.mark.parametrize("command", ["cp --not-an-option agent-mail/a agent-mail/b", "mv -Z agent-mail/a agent-mail/b",
                                      "git commit --not-an-option -m x", "git config --unknown --get user.name",
-                                     "git log --unknown", "npm --unknown test", "ao status --unknown"])
+                                     "git log --unknown", "npm --unknown test", "polyctl status --unknown"])
 def test_review_closed_unknown_tool_options_admit_any_command(command):
     rule = f"Bash({command})"
     assert AL.normalized_rule(rule) == "Bash(*)"
@@ -713,7 +713,7 @@ def test_no_redirection_is_read_as_a_harmless_command(command):
 
 @pytest.mark.parametrize("command", ["git status >&file", "git status <&file", "git status >*", "git status >one>two>",
                                      "git status * --unknown", "git status * -Z", "doas python3 script.py",
-                                     "unknown-tool", "git unknown-subcommand", "ao unknown-subcommand", "rtk --unknown",
+                                     "unknown-tool", "git unknown-subcommand", "polyctl unknown-subcommand", "rtk --unknown",
                                      "npm unknown-subcommand", "uv unknown-subcommand", "git status ~user",
                                      "git status --short*--unknown", "ls -l*Z"])
 def test_review_closed_unproved_readings_are_any_command(command):
@@ -736,13 +736,13 @@ def test_review_closed_option_values_and_positionals_are_not_options(command):
 # Independent review: fewer shell forms, one terminal prefix suffix, complete option tables.
 @pytest.mark.parametrize("command", [
     "git commit -m 2&>/dev/null -n",
-    "ao features --by 2&>/dev/null off review",
+    "polyctl features --by 2&>/dev/null off review",
     "timeout -s 9&>/dev/null 1 sh",
     "git status --* --unknown -Z", "git status -*", "grep -*",
     "git log -n* --unknown", "git log --max-count* --unknown",
-    "git status src/*--unknown", "git status*--unknown", "ao status*--unknown",
-    "npm test*--unknown", "uv sync*--unknown", "ao status -m*--unknown",
-    "ao status --window=*--unknown", "ao status -h*--unknown", "ao status -h--unknown",
+    "git status src/*--unknown", "git status*--unknown", "polyctl status*--unknown",
+    "npm test*--unknown", "uv sync*--unknown", "polyctl status -m*--unknown",
+    "polyctl status --window=*--unknown", "polyctl status -h*--unknown", "polyctl status -h--unknown",
 ])
 def test_closed_grammar_review_bypasses_are_named(command):
     rule = f"Bash({command})"
@@ -769,7 +769,7 @@ def test_closed_grammar_review_tool_lists_split_only_outside_rules(separator):
 @pytest.mark.parametrize("command", [
     "nohup --help=x git status", "nice --version=x git status", "git --no-pager=x status",
     "git status --short=x", "git status --sh=x", "ls --all=x", "ls --version=x",
-    "ao status -hvalue", "ao status --help=x", "ao -hvalue status", "ao --help=x status",
+    "polyctl status -hvalue", "polyctl status --help=x", "polyctl -hvalue status", "polyctl --help=x status",
 ])
 def test_closed_grammar_review_flag_only_options_reject_attached_values(command):
     rule = f"Bash({command})"
@@ -778,12 +778,12 @@ def test_closed_grammar_review_flag_only_options_reject_attached_values(command)
 
 
 @pytest.mark.parametrize("command", [
-    '"C:\\Program Files\\ao\\ao.exe" features off review --by Alice',
+    '"C:\\Program Files\\polyctl\\polyctl.exe" features off review --by Alice',
     'timeout 60 "C:\\Program Files\\Ruby\\bin\\ruby.exe":*',
     'nice "C:\\Program Files\\Python312\\python.exe" x.py',
     'LC_ALL="C b" git commit:*', "TERM='a b' timeout 5 git commit:*",
-    "git commit -n -m 'fix the parser'", "ao decide 'redo it' --sc S1",
-    'ao features off review --by "Al*"', "git commit --no-verify=x -m y",
+    "git commit -n -m 'fix the parser'", "polyctl decide 'redo it' --sc S1",
+    'polyctl features off review --by "Al*"', "git commit --no-verify=x -m y",
     "! git commit:*", "ls -la*", "git status --short*", "git status --*",
     "git status src/**", "git status src/?", "git status src/[ab]", "git status src/]",
     "git status 'plain'", 'git status "plain"', "git\tstatus", "git status\n",
@@ -829,8 +829,8 @@ def lifecycle_parser(monkeypatch):
         return parser
 
     monkeypatch.setattr(cli, "build_parser", parser_with_slice)
-    monkeypatch.delattr(AL._ao_options, "tables", raising=False)
-    tables = getattr(AL, "_ao_tables", None)
+    monkeypatch.delattr(AL._polyctl_options, "tables", raising=False)
+    tables = getattr(AL, "_polyctl_tables", None)
     if tables is not None:
         tables.cache_clear()
     yield
@@ -839,9 +839,9 @@ def lifecycle_parser(monkeypatch):
 
 
 @pytest.mark.parametrize("command", [
-    "ao slice abandon --why late", "ao -C . slice abandon --why late",
-    "ao slice abandon --why duplicate", "ao slice --slice S1 abandon --why w",
-    "ao slice --slice S1:*", "ao slice abandon *",
+    "polyctl slice abandon --why late", "polyctl -C . slice abandon --why late",
+    "polyctl slice abandon --why duplicate", "polyctl slice --slice S1 abandon --why w",
+    "polyctl slice --slice S1:*", "polyctl slice abandon *",
 ])
 def test_review_four_slice_abandon_is_an_architect_decision(lifecycle_parser, command):
     rule = f"Bash({command})"
@@ -852,7 +852,7 @@ def test_review_four_slice_abandon_is_an_architect_decision(lifecycle_parser, co
 
 @pytest.mark.parametrize("command", ["./pytest -q", "scripts/git status", "C:git.exe status", "git:sh status",
                                      "/usr/bin/git status", "nice scripts/git status", "rtk ./pytest -q",
-                                     "ao lock -- scripts/git status", "scripts/nice git status"])
+                                     "polyctl lock -- scripts/git status", "scripts/nice git status"])
 def test_review_four_program_files_are_code_not_bare_tools(command):
     rule = f"Bash({command})"
     assert any("code" in reason and granted == rule for reason, _, granted in _problems(rule))

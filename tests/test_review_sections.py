@@ -3,7 +3,7 @@ import re
 import sys
 from types import SimpleNamespace
 
-from ao import cli, language, lib as A
+from polyctl import cli, language, lib as A
 from tests.test_review_chain import _repo_with_change
 
 # A section's question follows the section marker, read here in either language (LANGUAGE-PROMPTS).
@@ -13,10 +13,10 @@ import os, re, sys
 prompt = sys.argv[1]
 section = re.search(r"(Scenario \\d+|Lens `[a-z]+`)", re.split(MARKERS, prompt)[-1])
 name = section.group(1) if section else "whole"
-open(os.environ["AO_TEST_CALLS"], "a").write(name + "\\n")
-if name in os.environ.get("AO_TEST_FAIL", "").split(","):
+open(os.environ["POLYCTL_TEST_CALLS"], "a").write(name + "\\n")
+if name in os.environ.get("POLYCTL_TEST_FAIL", "").split(","):
     sys.exit(1)
-high = 1 if name in os.environ.get("AO_TEST_HIGH", "").split(",") else 0
+high = 1 if name in os.environ.get("POLYCTL_TEST_HIGH", "").split(",") else 0
 print("VERDICT: " + ("NEEDS_CHANGES" if high else "APPROVED"))
 print("BLOCKER: 0"); print("HIGH: %d" % high); print("MEDIUM: 0"); print("LOW: 0")
 if high:
@@ -34,12 +34,12 @@ def _args(boundary=None):
 def _setup(project, tmp_path, monkeypatch, board_line, fail="", high=""):
     root = project["root"]
     _repo_with_change(root)
-    with open(os.path.join(root, ".ao", "board.md"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "board.md"), "w", encoding="utf-8") as fh:
         fh.write(f"# Board\n\n## running\n{board_line}\n\n## blocked\n\n## queued\n\n## verified\n\n## done\n")
     calls = tmp_path / "calls.txt"
-    monkeypatch.setenv("AO_TEST_CALLS", str(calls))
-    monkeypatch.setenv("AO_TEST_FAIL", fail)
-    monkeypatch.setenv("AO_TEST_HIGH", high)
+    monkeypatch.setenv("POLYCTL_TEST_CALLS", str(calls))
+    monkeypatch.setenv("POLYCTL_TEST_FAIL", fail)
+    monkeypatch.setenv("POLYCTL_TEST_HIGH", high)
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": [sys.executable, "-c", REVIEWER, "{prompt}"]})
     return root, cfg, calls
 
@@ -69,7 +69,7 @@ def test_a_review_cut_off_resumes_asking_only_what_was_not_answered(project, tmp
     assert calls.read_text().splitlines()[:3] == ["Scenario 1", "Scenario 2", "Scenario 3"]
 
     calls.write_text("", encoding="utf-8")
-    monkeypatch.setenv("AO_TEST_FAIL", "")
+    monkeypatch.setenv("POLYCTL_TEST_FAIL", "")
     assert cli.cmd_review(cfg, _args(SCENARIOS)) == 0
 
     assert calls.read_text().splitlines() == ["Scenario 3"]

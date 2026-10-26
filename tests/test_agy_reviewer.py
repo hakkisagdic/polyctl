@@ -1,4 +1,4 @@
-"""An agy reviewer runs as an agent of ao's whose tools only read (AGY-REVIEWER).
+"""An agy reviewer runs as an agent of polyctl's whose tools only read (AGY-REVIEWER).
 
 Measured on agy 1.3.0 on 2026-10-06 and again on agy 1.4.0 and 1.4.2 on 2026-10-18. No flag leaves agy reading:
 `--dangerously-skip-permissions` only widens what a
@@ -6,14 +6,14 @@ run may do, and a print run denies a write or a command only because nobody is t
 tools are view_file, grep_search, find_by_name and list_dir, it read the file it was asked to and had no tool to write
 a file or run a command; the same agent on 1.4.0 answered the marker word it had read, said a write and a `touch` were
 not permitted, and left no file behind. The person's MCP servers stay attached to every agent, Linear's writing tools among them, and
-a call to one was denied only because no rule in the person's settings allowed it: ao refuses the reviewer while those
+a call to one was denied only because no rule in the person's settings allowed it: polyctl refuses the reviewer while those
 settings allow more than reading. Its answer is the `response` of the one JSON record it prints.
 """
 import json
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.standin import program
 
 AGY = ["agy", "--print={prompt}", "--output-format=json", "--model=gemini-3.1-pro-high"]
@@ -46,7 +46,7 @@ def _front_matter(path):
 def test_an_agy_reviewer_runs_as_an_agent_whose_tools_only_read(tmp_path, home):
     argv, why = cli._reviewer_agent(str(tmp_path), AGY)
 
-    assert why is None and argv[:-1] == AGY and argv[-1].startswith("--agent=ao-reviewer-")
+    assert why is None and argv[:-1] == AGY and argv[-1].startswith("--agent=polyctl-reviewer-")
     name = argv[-1].split("=", 1)[1]
     config, body = _front_matter(tmp_path / ".agents" / "agents" / f"{name}.md")
     assert config["name"] == name and config["tools"] == READS
@@ -74,7 +74,7 @@ def test_a_person_s_settings_that_allow_reading_alone_keep_the_reviewer(tmp_path
 
 
 @pytest.mark.parametrize("document", ["{not json", json.dumps({"permissions": {"allow": "mcp(*)"}})])
-def test_settings_ao_cannot_read_as_rules_refuse_the_reviewer(tmp_path, home, document):
+def test_settings_polyctl_cannot_read_as_rules_refuse_the_reviewer(tmp_path, home, document):
     _settings(home, document)
 
     assert "would not only read as a reviewer" in cli._reviewer_agent(str(tmp_path), AGY)[1]
@@ -102,7 +102,7 @@ def test_an_agy_reviewer_is_eligible_and_a_command_that_names_an_agent_of_its_ow
 
 
 def _harness(tmp_path, record, notice=""):
-    """A stand-in agy: it checks the agent ao named holds read tools alone, and prints `record`. A program on
+    """A stand-in agy: it checks the agent polyctl named holds read tools alone, and prints `record`. A program on
     Windows too (WINDOWS-LANE-PARITY)."""
     harness = program(tmp_path, "agy", f"""import os, sys
 name = [arg for arg in sys.argv if arg.startswith("--agent=")][0].split("=", 1)[1]

@@ -9,8 +9,8 @@ report or since when. A report an anomaly stands for is now named by that anomal
 import os
 import time
 
-from ao import email, features as F, lib as A, telegram
-from ao import watchdog as W
+from polyctl import email, features as F, lib as A, telegram
+from polyctl import watchdog as W
 from tests.scenarios import World
 
 NOTIFY = W.notify                  # the scenario world replaces it; the ladder tests need the real one

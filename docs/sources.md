@@ -4,23 +4,23 @@ A team's real backlog lives in Linear, Jira or GitHub Issues, not in a file in t
 repository. If the orchestrator cannot see it, someone has to relay items by hand,
 and in practice that means the tracker fills up while the agent sits idle.
 
-## `ao` holds no tracker credential
+## `polyctl` holds no tracker credential
 
 The MCP client is the **agent**, not this tool. An architect turn pulls with a
-tracker's own MCP server, normalises the result to a file, and `ao source import`
+tracker's own MCP server, normalises the result to a file, and `polyctl source import`
 admits it. So:
 
-- `ao` gains no network code, no API client, no token store, no new dependency.
+- `polyctl` gains no network code, no API client, no token store, no new dependency.
 - The file-only core still runs with nothing installed. A tracker is an addition
   for people who connect one, never a prerequisite.
 - Server definitions and credentials live in **keyflip's** MCP registry
-  (`keyflip mcpreg set/enable`), which is where identity already lives. `ao`
+  (`keyflip mcpreg set/enable`), which is where identity already lives. `polyctl`
   names a server; it never holds one. See [keyflip.md](keyflip.md).
 
 ```
-.ao/sources.json     what to pull, and what may be admitted
-.ao/inbox/<id>.json  a normalised pull, waiting to be admitted
-.ao/board.md         the admitted queue
+.polyctl/sources.json     what to pull, and what may be admitted
+.polyctl/inbox/<id>.json  a normalised pull, waiting to be admitted
+.polyctl/board.md         the admitted queue
 ```
 
 ## Pulling is not authorising
@@ -38,16 +38,16 @@ treats them the same and infers scope for the second one, which is how a bug fix
 becomes a refactor nobody approved.
 
 So an item enters `queued` only with a written **acceptance boundary**. Without
-one it stays in `inbox` with a reason. `ao` enforces that rule and makes no
+one it stays in `inbox` with a reason. `polyctl` enforces that rule and makes no
 judgement of its own — it has no model. An architect turn decides and writes the
 boundary into the inbox file.
 
-*In ao since slice LEADS-ADAPTERS: an imported item is one board line.* A tracker
-item's title is anyone's text, and a line break in it went into `.ao/board.md` as
+*In polyctl since slice LEADS-ADAPTERS: an imported item is one board line.* A tracker
+item's title is anyone's text, and a line break in it went into `.polyctl/board.md` as
 it was - an item of its own, admitted under the boundary written for another. Each
-text an item's line carries is one line now, as `ao board add` writes it; an item
+text an item's line carries is one line now, as `polyctl board add` writes it; an item
 whose id the board cannot read whole, or whose text holds the `·` that separates a
-line's notes, is refused by name, its file stays in `.ao/inbox/` to be corrected
+line's notes, is refused by name, its file stays in `.polyctl/inbox/` to be corrected
 and imported again, and the import exits 1. So is an item with no id - none, an
 empty one, or one that is no text or whole number - named by its place in the
 file: it was dropped without a word, and its file marked imported.
@@ -59,7 +59,7 @@ boundary. Parking is for genuine ambiguity — a missing product decision — no
 an item being large. An item nobody decomposes is an item that never gets done.
 
 ```
-.ao/plans/<item-id>.md
+.polyctl/plans/<item-id>.md
 ```
 
 ```markdown
@@ -77,11 +77,11 @@ gates: quick
 Each phase becomes one board line, so the queue holds slices, never projects:
 
 ```
-- [ACME-187/1] route table extraction · plan: .ao/plans/ACME-187.md · acceptance: …
+- [ACME-187/1] route table extraction · plan: .polyctl/plans/ACME-187.md · acceptance: …
 ```
 
 The classification is worth doing with a cheap local model and the boundary with
-an expensive one — see [ollama](../src/ao/adapters/ollama.json) and [roles.md](roles.md).
+an expensive one — see [ollama](../src/polyctl/adapters/ollama.json) and [roles.md](roles.md).
 
 ## A plan is read, never edited
 
@@ -92,11 +92,11 @@ actor that defines or verifies it — applied to the specification itself.
 Without the rule, drift is invisible and self-justifying: an agent that finds the
 spec inconvenient edits the spec, and every later check then measures the work
 against a document the work itself produced. It is not hypothetical. In the run
-ao grew out of, the implementer had `.kiro/specs/<project>/design.md` in its
+polyctl grew out of, the implementer had `.kiro/specs/<project>/design.md` in its
 working set while implementing against it.
 
-`ao source import` records each plan's hash when the item is admitted, and
-`ao verify` reports a mismatch as a finding. Cheap to enforce, and it converts a
+`polyctl source import` records each plan's hash when the item is admitted, and
+`polyctl verify` reports a mismatch as a finding. Cheap to enforce, and it converts a
 silent failure into a visible one.
 
 ## One source, one repository

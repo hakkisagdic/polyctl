@@ -8,7 +8,7 @@ import os
 import sys
 import time
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 READS_PAYLOAD = "import json, os, sys\npayload = json.load(sys.stdin)\ncommand = payload['tool_input']['command']\n"
 
@@ -33,17 +33,17 @@ def _settings(base, *entries):
 
 
 def _machine(programs, timeout=30):
-    """The machine settings a person writes: which programs ao may ask, and for how long."""
-    with open(os.environ["AO_SETTINGS"], "w", encoding="utf-8") as fh:
+    """The machine settings a person writes: which programs polyctl may ask, and for how long."""
+    with open(os.environ["POLYCTL_SETTINGS"], "w", encoding="utf-8") as fh:
         json.dump({"filters": {"probe_programs": programs, "probe_timeout_seconds": timeout}}, fh)
 
 
 def test_a_hook_that_passes_every_measurement_through_has_its_exclusions_in_force(project, tmp_path, monkeypatch):
     root = project["root"]
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         json.dump({"gates": {"test": {"run": "python3 -m pytest -q"}}, "profiles": {"quick": ["test"]}}, fh)
     seen = tmp_path / "seen.jsonl"
-    monkeypatch.setenv("AO_PROBE_TEST_TOKEN", "never-for-a-hook")
+    monkeypatch.setenv("POLYCTL_PROBE_TEST_TOKEN", "never-for-a-hook")
     records = (f"with open({str(seen)!r}, 'a', encoding='utf-8') as fh:\n"
                "    fh.write(json.dumps({'payload': payload, 'env': sorted(os.environ), 'cwd': os.getcwd()}) + '\\n')\n")
     rewrites_edits = {"matcher": "Edit|Write", "hooks": [
@@ -62,7 +62,7 @@ def test_a_hook_that_passes_every_measurement_through_has_its_exclusions_in_forc
     assert first["payload"]["cwd"] == os.path.abspath(root)
     assert os.path.realpath(first["cwd"]) == os.path.realpath(root)
     project_dir = A.load_adapter("claude-code")["directives"]["command_hooks"]["project_dir_env"]
-    assert project_dir in first["env"] and "AO_PROBE_TEST_TOKEN" not in first["env"]
+    assert project_dir in first["env"] and "POLYCTL_PROBE_TEST_TOKEN" not in first["env"]
     monkeypatch.setattr(A, "probe_filters", lambda root: [result])
     text = "\n".join(cli._measurement_lines(project))
     assert f"passes all {len(asked)} measurement commands through unchanged: its exclusions are in force" in text
@@ -109,7 +109,7 @@ def test_a_hook_that_hangs_is_cut_off_by_the_timeout_and_reported(project, tmp_p
     assert "is not verified: it did not answer within 1s" in A.filter_probe_text(result)
 
 
-def test_no_hook_runs_unless_the_agents_ao_governs_can_neither_write_it_nor_choose_its_program(project, tmp_path):
+def test_no_hook_runs_unless_the_agents_polyctl_governs_can_neither_write_it_nor_choose_its_program(project, tmp_path):
     root = project["root"]
     ran = tmp_path / "ran"
     marks = f"open({str(ran)!r}, 'a', encoding='utf-8').write(command + '\\n')\n"
@@ -131,7 +131,7 @@ def test_no_hook_runs_unless_the_agents_ao_governs_can_neither_write_it_nor_choo
     [result] = A.probe_filters(root)
     assert not ran.exists() and result["asked"] == 0 and "lies inside the project" in result["why"]
 
-    # A user-level filter whose program the machine does not allow ao to run.
+    # A user-level filter whose program the machine does not allow polyctl to run.
     _machine([])
     _settings(A.HOME, _hook(tmp_path, "compress", marks))
     [result] = A.probe_filters(root)
@@ -147,12 +147,12 @@ def test_no_hook_runs_unless_the_agents_ao_governs_can_neither_write_it_nor_choo
 
 def test_a_hook_argument_naming_a_project_path_not_there_yet_is_refused(project, tmp_path):
     """FILTER-EXCLUSIONS-2: a relative argument counted as a path only if it existed, so an agent could write
-    `.ao/filter.toml` after the check and have the hook read it, once per command measured."""
+    `.polyctl/filter.toml` after the check and have the hook read it, once per command measured."""
     root = project["root"]
     ran = tmp_path / "ran"
     marks = f"open({str(ran)!r}, 'a', encoding='utf-8').write(command + '\\n')\n"
     _machine([os.path.basename(sys.executable)])
-    for word in ("--config=.ao/filter.toml", "filter.toml"):
+    for word in ("--config=.polyctl/filter.toml", "filter.toml"):
         hook = _hook(tmp_path, "config", marks)
         hook["args"].append(word)
         _settings(A.HOME, hook)
@@ -165,7 +165,7 @@ def test_a_hook_argument_naming_a_project_path_not_there_yet_is_refused(project,
                             allowed, os.environ.get("PATH", ""))[1] is None
     # as a URL names it: `"file://" + root` holds a backslash on Windows, which is refused as read differently
     import pathlib
-    uri = pathlib.Path(root, ".ao", "rules.toml").as_uri()
+    uri = pathlib.Path(root, ".polyctl", "rules.toml").as_uri()
     assert "lies inside the project" in A._probe_program([sys.executable, uri], root, allowed,
                                                          os.environ.get("PATH", ""))[1]
 
@@ -176,7 +176,7 @@ def test_a_file_address_is_judged_by_the_path_it_decodes_to(project):
     import pathlib
     root = project["root"]
     allowed = [A._program_name(sys.executable)]
-    uri = pathlib.Path(root, ".ao", "filter.toml").as_uri()
+    uri = pathlib.Path(root, ".polyctl", "filter.toml").as_uri()
     encoded = "file:///" + uri[len("file:///"):].replace("/", "%2F")
 
     for word in (uri, encoded, "--config=" + encoded):
@@ -185,7 +185,7 @@ def test_a_file_address_is_judged_by_the_path_it_decodes_to(project):
 
 
 def _on_windows(monkeypatch):
-    """ao's path rules as Windows has them, on every platform: ntpath, and the file-address decoder Windows uses."""
+    """polyctl's path rules as Windows has them, on every platform: ntpath, and the file-address decoder Windows uses."""
     import ntpath
     import shutil
     import urllib.request
@@ -200,12 +200,12 @@ def _on_windows(monkeypatch):
 
 
 def test_a_file_address_whose_drive_colon_is_encoded_names_that_drive(monkeypatch):
-    """FILTER-EXCLUSIONS-4: url2pathname looks for a drive before it decodes, so `/C%3A/x` was `\\C:\\x` to ao,
+    """FILTER-EXCLUSIONS-4: url2pathname looks for a drive before it decodes, so `/C%3A/x` was `\\C:\\x` to polyctl,
     outside C:\\repo, and C:\\x to Node's fileURLToPath and Rust's url, which decode first."""
     _on_windows(monkeypatch)
-    for word in ("file:///C%3A/repo/.ao/filter.toml", "file:///c%3a/repo/.ao/filter.toml",
-                 "file:///%43%3A/repo/.ao/filter.toml", "--config=file:///C%3A/repo/.ao/filter.toml",
-                 "file://localhost/C%3A/repo/.ao/filter.toml"):
+    for word in ("file:///C%3A/repo/.polyctl/filter.toml", "file:///c%3a/repo/.polyctl/filter.toml",
+                 "file:///%43%3A/repo/.polyctl/filter.toml", "--config=file:///C%3A/repo/.polyctl/filter.toml",
+                 "file://localhost/C%3A/repo/.polyctl/filter.toml"):
         why = A._probe_program(["rtk", word], "C:\\repo", {"rtk"}, "")[1]
         assert why and "lies inside the project" in why, word
     assert A._probe_program(["rtk", "file:///C%3A/elsewhere/filter.toml"], "C:\\repo", {"rtk"}, "")[1] is None
@@ -218,7 +218,7 @@ def test_a_file_address_holding_a_nul_is_refused(project):
     import pathlib
     root = project["root"]
     allowed = [A._program_name(sys.executable)]
-    uri = pathlib.Path(root, ".ao", "filter.toml").as_uri()
+    uri = pathlib.Path(root, ".polyctl", "filter.toml").as_uri()
 
     for word in (uri.replace("filter.toml", "%00filter.toml"), uri + "%00/../../..",
                  "--config=" + uri + "%00/../../.."):
@@ -248,11 +248,11 @@ def test_an_answer_is_read_as_the_harness_reads_it():
 
 
 def test_a_file_address_without_its_slashes_is_read_as_the_path_it_names(monkeypatch):
-    """FILTER-EXCLUSIONS-5: `file:/C:/x` is an address with no authority, which Node reads as C:\\x; ao took it for a
+    """FILTER-EXCLUSIONS-5: `file:/C:/x` is an address with no authority, which Node reads as C:\\x; polyctl took it for a
     relative path under the project, which on Windows its realpath could not follow, and the hook ran."""
     _on_windows(monkeypatch)
-    why = A._probe_program(["rtk", "file:/C:/repo/.ao/filter.toml"], "C:\\repo", {"rtk"}, "")[1]
-    assert why and "C:\\repo\\.ao\\filter.toml lies inside the project" in why
+    why = A._probe_program(["rtk", "file:/C:/repo/.polyctl/filter.toml"], "C:\\repo", {"rtk"}, "")[1]
+    assert why and "C:\\repo\\.polyctl\\filter.toml lies inside the project" in why
     assert A._probe_program(["rtk", "--config=file:/C:/elsewhere/filter.toml"], "C:\\repo", {"rtk"}, "")[1] is None
 
 
@@ -265,7 +265,7 @@ def test_a_path_that_cannot_be_followed_to_where_it_lies_is_refused(monkeypatch)
     monkeypatch.setattr(ntpath, "realpath", lambda path, *a, **k: "f::$DATA" if str(path).endswith("::$DATA")
                         else real(path, *a, **k))
 
-    why = A._probe_program(["rtk", "C:\\repo\\.ao\\f::$DATA"], "C:\\repo", {"rtk"}, "")[1]
+    why = A._probe_program(["rtk", "C:\\repo\\.polyctl\\f::$DATA"], "C:\\repo", {"rtk"}, "")[1]
 
     assert why and "cannot follow" in why
 
@@ -273,21 +273,21 @@ def test_a_path_that_cannot_be_followed_to_where_it_lies_is_refused(monkeypatch)
 def test_a_file_address_with_a_query_or_fragment_is_refused(project, monkeypatch):
     """FILTER-EXCLUSIONS-6: url2pathname kept a query and a fragment as path before Python 3.14, so
     `filter.toml#/../../..` was judged above the project, where Node's fileURLToPath drops the fragment and opens
-    the project's filter.toml; from 3.14 it drops them, so `x?/../repo/.ao/filter.toml` was judged outside, where a
+    the project's filter.toml; from 3.14 it drops them, so `x?/../repo/.polyctl/filter.toml` was judged outside, where a
     program decoding all the text after the scheme opens the project's file."""
     import pathlib
     root = os.path.realpath(project["root"])
     allowed = [A._program_name(sys.executable)]
-    uri = pathlib.Path(root, ".ao", "filter.toml").as_uri()
-    beside = pathlib.Path(os.path.dirname(root), "x").as_uri() + "?/../" + os.path.basename(root) + "/.ao/filter.toml"
+    uri = pathlib.Path(root, ".polyctl", "filter.toml").as_uri()
+    beside = pathlib.Path(os.path.dirname(root), "x").as_uri() + "?/../" + os.path.basename(root) + "/.polyctl/filter.toml"
     for word in (uri + "#/../../..", uri + "?x=/../../..", "--config=" + uri + "#/../../..", beside):
         why = A._probe_program([sys.executable, word], root, allowed, os.environ.get("PATH", ""))[1]
         assert why and "query or fragment" in why, word
 
     _on_windows(monkeypatch)
-    for word in ("file:///C%3A/repo/.ao/filter.toml?../../../../..", "file:///C:/repo/.ao/filter.toml#/../../..",
-                 "file:/C:/repo/.ao/filter.toml?x=/../../..", "file://localhost/C%3A/repo/.ao/filter.toml#/../../..",
-                 "file:///C:/elsewhere/x?/../../repo/.ao/filter.toml"):
+    for word in ("file:///C%3A/repo/.polyctl/filter.toml?../../../../..", "file:///C:/repo/.polyctl/filter.toml#/../../..",
+                 "file:/C:/repo/.polyctl/filter.toml?x=/../../..", "file://localhost/C%3A/repo/.polyctl/filter.toml#/../../..",
+                 "file:///C:/elsewhere/x?/../../repo/.polyctl/filter.toml"):
         why = A._probe_program(["rtk", word], "C:\\repo", {"rtk"}, "")[1]
         assert why and "query or fragment" in why, word
     # A percent-encoded ? or # is a character of the path, which every program reads alike.
@@ -296,39 +296,39 @@ def test_a_file_address_with_a_query_or_fragment_is_refused(project, monkeypatch
 
 def test_a_file_address_with_a_backslash_or_a_control_character_is_refused(project):
     """FILTER-EXCLUSIONS-6: Node and Rust's url read a `\\` in a file address as `/` and drop a tab, CR or LF, so
-    `x\\..\\repo/.ao/filter.toml` and `x/.<TAB>./repo/.ao/filter.toml` open the project's file where ao judged
+    `x\\..\\repo/.polyctl/filter.toml` and `x/.<TAB>./repo/.polyctl/filter.toml` open the project's file where polyctl judged
     another path."""
     import pathlib
     root = os.path.realpath(project["root"])
     base, name = pathlib.Path(root).parent.as_uri(), os.path.basename(root)
     allowed = [A._program_name(sys.executable)]
 
-    for word in (f"{base}/x\\..\\{name}/.ao/filter.toml", f"{base}/x/.\t./{name}/.ao/filter.toml",
-                 f"{base}/x/.\n./{name}/.ao/filter.toml", f"--config={base}/x/.\r./{name}/.ao/filter.toml"):
+    for word in (f"{base}/x\\..\\{name}/.polyctl/filter.toml", f"{base}/x/.\t./{name}/.polyctl/filter.toml",
+                 f"{base}/x/.\n./{name}/.polyctl/filter.toml", f"--config={base}/x/.\r./{name}/.polyctl/filter.toml"):
         why = A._probe_program([sys.executable, word], root, allowed, os.environ.get("PATH", ""))[1]
         assert why and "read differently" in why, repr(word)
 
 
 def test_a_bare_file_address_without_a_leading_slash_is_refused(project, monkeypatch):
-    """FILTER-EXCLUSIONS-7: `file:x/y` has no authority and no root; a URL reader takes the path from the root and ao
+    """FILTER-EXCLUSIONS-7: `file:x/y` has no authority and no root; a URL reader takes the path from the root and polyctl
     took it under the project, so the two could name different files."""
     root = os.path.realpath(project["root"])
     allowed = [A._program_name(sys.executable)]
 
-    for word in ("file:.ao/filter.toml", "file:../elsewhere/filter.toml", "--config=file:x/y.toml"):
+    for word in ("file:.polyctl/filter.toml", "file:../elsewhere/filter.toml", "--config=file:x/y.toml"):
         why = A._probe_program([sys.executable, word], root, allowed, os.environ.get("PATH", ""))[1]
         assert why and "read differently" in why, word
     _on_windows(monkeypatch)
-    assert "read differently" in A._probe_program(["rtk", "file:C:/repo/.ao/filter.toml"], "C:\\repo", {"rtk"}, "")[1]
+    assert "read differently" in A._probe_program(["rtk", "file:C:/repo/.polyctl/filter.toml"], "C:\\repo", {"rtk"}, "")[1]
 
 
 def test_a_file_address_a_url_reader_finds_once_it_drops_spaces_and_controls_is_refused(project):
     """FILTER-EXCLUSIONS-8: a URL reader drops C0 controls and spaces at a word's ends and a tab, CR or LF anywhere
-    before it reads the scheme, so `<TAB>file:///repo/.ao/filter.toml#/../..` is the project's file to Node's
-    fileURLToPath, where ao read a relative path climbing out of the project and let it pass."""
+    before it reads the scheme, so `<TAB>file:///repo/.polyctl/filter.toml#/../..` is the project's file to Node's
+    fileURLToPath, where polyctl read a relative path climbing out of the project and let it pass."""
     import pathlib
     root = os.path.realpath(project["root"])
-    uri = pathlib.Path(root, ".ao", "filter.toml").as_uri()
+    uri = pathlib.Path(root, ".polyctl", "filter.toml").as_uri()
     climb = "#" + "/.." * (root.count(os.sep) + 6)
     allowed = [A._program_name(sys.executable)]
 

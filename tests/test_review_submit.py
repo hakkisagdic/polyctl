@@ -5,7 +5,7 @@ import subprocess
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_review_chain import _fake, _repo_with_change
 
 APPROVED = ("VERDICT: APPROVED", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0")
@@ -108,7 +108,7 @@ def test_commit_ok_on_a_submitted_review_refuses_another_tree(project, capsys):
     assert A.index_candidate(root)["index_tree"] in out and "reviewed " + "0" * 40 in out
 
 
-def test_ao_reviews_lists_state_and_names_a_lost_runner(project, capsys):
+def test_polyctl_reviews_lists_state_and_names_a_lost_runner(project, capsys):
     root = project["root"]
     _state(root, "R-11", pid=2 ** 22 + 12345, submitted_at=int(time.time()) - 300)
     _state(root, "R-12", state="finished", verdict="APPROVED", finished_at=int(time.time()))

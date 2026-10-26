@@ -3,7 +3,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from ao import allowlist as AL, cli, language, lib as A, storage
+from polyctl import allowlist as AL, cli, language, lib as A, storage
 from tests.test_capability_matrix import _strict_config
 from tests.test_commit_authority import _allow_commit_prerequisites
 from tests.test_review_chain import _args, _fake, _repo_with_change
@@ -14,10 +14,10 @@ REJECTED = ("VERDICT: NEEDS_CHANGES", "BLOCKER: 1", "HIGH: 0", "MEDIUM: 0", "LOW
 
 
 def _unreachable(project):
-    """A running slice whose only reviewer is down: ao writes a stand-in request."""
+    """A running slice whose only reviewer is down: polyctl writes a stand-in request."""
     root = project["root"]
     _repo_with_change(root)
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     text = open(board, encoding="utf-8").read()
     open(board, "w", encoding="utf-8").write(text.replace("## running\n", "## running\n- [S1] slice · acceptance: b\n"))
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": _fake("down", exit_code=17)})
@@ -54,7 +54,7 @@ def test_an_unreachable_reviewer_leaves_a_request_a_person_can_carry(project, ca
     assert request["candidate"] == A.index_candidate(root)["digest"] and request["collected"] is None
     assert f"NONCE: {request['nonce']}" in text
     assert language.text(cfg, "prompt.review-candidate") in text and "VERDICT: APPROVED" in text
-    assert f"ao collect-review {request['nonce']}" in capsys.readouterr().out
+    assert f"polyctl collect-review {request['nonce']}" in capsys.readouterr().out
 
 
 def test_a_collected_rejection_is_a_round_recorded_with_its_transport_and_limits(project, tmp_path, capsys):
@@ -148,5 +148,5 @@ def test_collecting_is_a_persons_act_never_an_agents(project, tmp_path, capsys):
     assert _collect(cfg, "f" * 32, answer, capsys)[0] == 2
     assert _collect(_strict_config(project), request["nonce"], answer, capsys)[0] == 2
     assert _carried_rows(cfg["root"]) == []
-    assert not AL.admits("Bash(ao review:*)", "ao collect-review n --response r --model m --by b")
-    assert any(command.startswith("ao collect-review") for _, command in AL.FORBIDDEN)
+    assert not AL.admits("Bash(polyctl review:*)", "polyctl collect-review n --response r --model m --by b")
+    assert any(command.startswith("polyctl collect-review") for _, command in AL.FORBIDDEN)

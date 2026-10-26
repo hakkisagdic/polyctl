@@ -16,9 +16,9 @@ part, so none stands outside what is read here.
 import ast
 import os
 
-from ao import lib as A
+from polyctl import lib as A
 
-SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "ao")
+SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "polyctl")
 MODULES = ("lib.py", "cli.py")
 
 
@@ -126,7 +126,7 @@ def test_a_fallback_one_file_binds_is_replaced_by_another_file_s_plain_import_an
     assert _collisions("lib.py", read) == {"fcntl": ["import fcntl", "a definition at lib.py:4"]}
 
 
-# ---- ao's own ---------------------------------------------------------------------------------------------
+# ---- polyctl's own ---------------------------------------------------------------------------------------------
 
 def test_every_file_in_the_parts_folder_is_a_part_of_one_module():
     loaded = [rel for module in MODULES for rel in _files(module) if rel != module]
@@ -136,7 +136,7 @@ def test_every_file_in_the_parts_folder_is_a_part_of_one_module():
     assert sorted(loaded) == there
 
 
-def test_no_name_is_bound_twice_in_a_namespace_ao_s_parts_load_into():
+def test_no_name_is_bound_twice_in_a_namespace_polyctl_s_parts_load_into():
     found = {module: _collisions(module) for module in MODULES}
 
     assert found == {module: {} for module in MODULES}, \

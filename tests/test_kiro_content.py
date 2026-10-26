@@ -1,13 +1,13 @@
 """A Kiro CLI user takes ECC's Kiro layer through the content seam, with no fork (#15).
 
-Backlog #15 asked for a Kiro target in a fork of ECC's installer. ao's content seam already
+Backlog #15 asked for a Kiro target in a fork of ECC's installer. polyctl's content seam already
 borrowed skills pinned and text only; it now borrows steering files and agent definitions
 too, wherever a harness's adapter declares them. These build a repository in the shapes ECC
 keeps in `.kiro/` - steering in each inclusion mode, agents as CLI JSON beside their IDE
 Markdown, a skill, IDE hooks, scripts - and hold what the seam promises of it: a full-commit
 pin, front matter as written, agents in the CLI's format with no field that runs a command,
 hooks named and never imported, executables refused on every platform, a dry run that
-writes nothing, drift that `ao content verify` names, and no write outside the harness's own
+writes nothing, drift that `polyctl content verify` names, and no write outside the harness's own
 directory but the record.
 """
 import hashlib
@@ -20,7 +20,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 
-from ao import cli, lib as A, storage  # noqa: F401  (storage: loaded before a test listens to writes)
+from polyctl import cli, lib as A, storage  # noqa: F401  (storage: loaded before a test listens to writes)
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 STEERING = {
@@ -59,7 +59,7 @@ def _ecc(tmp_path):
     files.update({
         "steering/setup.md": "#!/bin/sh\necho a steering file that runs\n",
         "steering/tdd-workflow.md": "---\ninclusion: manual\n---\n\n# TDD, as steering\n",
-        "steering/ao-playbook.md": "# a playbook that is not ao's\n",
+        "steering/polyctl-playbook.md": "# a playbook that is not polyctl's\n",
         "agents/planner.json": _agent("planner"),
         "agents/planner.md": "---\nname: planner\ndescription: The planner.\nallowedTools:\n  - read\n---\n\n"
                              "You are the planner.\n",
@@ -136,7 +136,7 @@ def test_the_layer_is_borrowed_at_its_pin_and_steering_keeps_its_front_matter(pr
         assert _read(root, f".kiro/steering/{name}.md") == text.encode()
     assert _read(root, ".kiro/steering/tdd-workflow.md") \
         == b"---\ninclusion: manual\n---\n\n# TDD\n\nWrite the test first.\n"
-    with open(os.path.join(root, ".ao", "content.json"), encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "content.json"), encoding="utf-8") as fh:
         record = json.load(fh)
     assert sorted(entry["steering"] for entry in record["steering"]) == sorted(STEERING)
     assert {(entry["source"], entry["pin"]) for kind in ("skills", "steering", "agents") for entry in record[kind]} \
@@ -146,7 +146,7 @@ def test_the_layer_is_borrowed_at_its_pin_and_steering_keeps_its_front_matter(pr
     digest = "sha256:" + hashlib.sha256(planner).hexdigest()
     assert record["agents"] == [{"agent": "planner", "source": source, "pin": pin, "skipped": [],
                                  "files": {".kiro/agents/planner.json": digest}}]
-    # The CLI ao runs loads every steering file whatever its inclusion says: a mode it does not honour is named, not faked.
+    # The CLI polyctl runs loads every steering file whatever its inclusion says: a mode it does not honour is named, not faked.
     for name, mode in (("coding-style", "auto"), ("python-patterns", "fileMatch"), ("review-mode", "manual"),
                        ("tdd-workflow", "manual")):
         assert f"unsupported .kiro/steering/{name}.md (inclusion: {mode} - Kiro CLI 2.x, which this adapter runs, " \
@@ -173,7 +173,7 @@ def test_agents_land_as_cli_definitions_with_no_field_that_runs_a_command(projec
     assert ".kiro/agents/builder.json keeps allowedTools fs_read, shell: the tools it uses without asking" in out
     assert ".kiro/agents/planner.json names no resources: a custom agent loads no steering and no skills" in out
     assert "skipped agents/impostor.json (it names itself 'kiro_default', and an agent is named as its file)" in out
-    with open(os.path.join(root, ".ao", "content.json"), encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "content.json"), encoding="utf-8") as fh:
         builder = next(entry for entry in json.load(fh)["agents"] if entry["agent"] == "builder")
     assert [line.split(" (")[0] for line in builder["skipped"]] == ["agents/builder.json hooks",
                                                                     "agents/builder.json mcpServers"]
@@ -195,7 +195,7 @@ def test_an_agent_loads_no_mcp_configuration_and_no_file_from_outside_the_projec
     """KIRO-CONTENT-2: includeMcpJson started every MCP server the user configured, and a resource outside the
     project's tree - a key, a credential - was loaded into the agent's context, neither of them named."""
     root = project["root"]
-    outside = ["file:///etc/hosts", "file://~/.ssh/id_rsa", "file://../secrets.md", "file://D:/ao-home/a.md"]
+    outside = ["file:///etc/hosts", "file://~/.ssh/id_rsa", "file://../secrets.md", "file://D:/polyctl-home/a.md"]
     source, pin = _layer(tmp_path, {"agents/reader.json": _agent(
         "reader", includeMcpJson=True, resources=outside[:2] + ["file://README.md"] + outside[2:] + ["skill://tdd"])})
 
@@ -223,7 +223,7 @@ def test_a_file_another_entry_vendored_is_refused_whatever_its_bytes(project, tm
     assert _add(project, f"{source}@{pin}", steering="foo") == 2
 
     assert ".kiro/steering/foo.md was vendored as skill foo: remove that first" in _out(capsys)
-    with open(os.path.join(root, ".ao", "content.json"), encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "content.json"), encoding="utf-8") as fh:
         record = json.load(fh)
     assert [entry["skill"] for entry in record["skills"]] == ["foo"] and record["steering"] == []
 
@@ -240,7 +240,7 @@ def test_hooks_are_never_imported_and_each_is_named_with_the_reason(project, tmp
     assert "skipped hooks/README.md (hooks are never imported)" in out
     assert "skipped hooks/ (hooks are never imported)" in out                      # the skill's own
     assert not os.path.exists(os.path.join(root, ".kiro", "hooks"))
-    with open(os.path.join(root, ".ao", "content.json"), encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "content.json"), encoding="utf-8") as fh:
         record = json.load(fh)
     assert not [target for kind in record.values() for entry in kind for target in entry["files"] if "hook" in target]
 
@@ -350,7 +350,7 @@ def test_nothing_is_written_outside_the_harness_directory_but_the_record(project
         _LISTENING.clear()
 
     assert code == 0, _out(capsys)
-    home, record = os.path.realpath(os.path.join(root, ".kiro")), os.path.realpath(os.path.join(root, ".ao"))
+    home, record = os.path.realpath(os.path.join(root, ".kiro")), os.path.realpath(os.path.join(root, ".polyctl"))
     work = os.path.realpath(str(scratch))
     existed = {os.path.realpath(os.path.join(str(tmp_path), *rel.split("/"))) for rel, kind in before.items()
                if kind == "directory"}
@@ -367,29 +367,29 @@ def test_nothing_is_written_outside_the_harness_directory_but_the_record(project
     assert _WRITES and [write for write in _WRITES if not allowed(*write)] == []
     after = _tree(tmp_path)
     changed = sorted(rel for rel in set(before) | set(after) if before.get(rel) != after.get(rel))
-    assert changed and [rel for rel in changed if rel != "proj/.ao/content.json" and rel != "proj/.kiro"
+    assert changed and [rel for rel in changed if rel != "proj/.polyctl/content.json" and rel != "proj/.kiro"
                         and not rel.startswith("proj/.kiro/")] == []
     assert os.listdir(str(scratch)) == []
 
 
-def test_a_directory_named_elsewhere_a_link_a_file_ao_did_not_vendor_or_a_clash_writes_nothing(project, tmp_path,
+def test_a_directory_named_elsewhere_a_link_a_file_polyctl_did_not_vendor_or_a_clash_writes_nothing(project, tmp_path,
                                                                                                  capsys):
     root = project["root"]
     source, pin = _ecc(tmp_path)
     with open(os.path.join(A.adapters_dir(), "kiro.json"), encoding="utf-8") as fh:
         kiro = json.load(fh)
-    layer = os.path.join(root, ".ao", "adapters")
+    layer = os.path.join(root, ".polyctl", "adapters")
     os.makedirs(layer)
-    # A project's adapter layer is writable by the agents it describes: here it points steering at ao's
+    # A project's adapter layer is writable by the agents it describes: here it points steering at polyctl's
     # own state and agents at the product.
     with open(os.path.join(layer, "kiro.json"), "w", encoding="utf-8") as fh:
-        json.dump(dict(kiro, directives=dict(kiro["directives"], steering_dir=".ao", agents_dir="src/agents")), fh)
+        json.dump(dict(kiro, directives=dict(kiro["directives"], steering_dir=".polyctl", agents_dir="src/agents")), fh)
     before = _tree(root)
 
     assert _add(project, f"{source}@{pin}", steering="coding-style", agents="planner") == 2
 
     out = _out(capsys)
-    assert "refused .ao/coding-style.md is outside kiro's own directory (.kiro)" in out
+    assert "refused .polyctl/coding-style.md is outside kiro's own directory (.kiro)" in out
     assert "refused src/agents/planner.json is outside kiro's own directory (.kiro)" in out
     assert _tree(root) == before
 
@@ -406,16 +406,16 @@ def test_a_directory_named_elsewhere_a_link_a_file_ao_did_not_vendor_or_a_clash_
         linked = False                                   # Windows without the privilege to make one
     before = _tree(root)
 
-    assert _add(project, f"{source}@{pin}", steering="coding-style,tdd-workflow,ao-playbook", skills="tdd-workflow",
+    assert _add(project, f"{source}@{pin}", steering="coding-style,tdd-workflow,polyctl-playbook", skills="tdd-workflow",
                 agents="planner") == 2
 
     out = _out(capsys)
-    assert "refused .kiro/steering/coding-style.md exists and ao did not vendor it as steering coding-style: " \
+    assert "refused .kiro/steering/coding-style.md exists and polyctl did not vendor it as steering coding-style: " \
            "move it aside first" in out
     assert "refused .kiro/steering/tdd-workflow.md would be written by both skill tdd-workflow and steering " \
            "tdd-workflow" in out
-    assert "refused .kiro/steering/ao-playbook.md is a file a harness or ao keeps for itself" in out
+    assert "refused .kiro/steering/polyctl-playbook.md is a file a harness or polyctl keeps for itself" in out
     assert not linked or "refused .kiro/agents/planner.json passes through a symbolic link" in out
     assert "not vendored: nothing was written" in out
     assert _tree(root) == before and _tree(str(outside)) == {}
-    assert not os.path.exists(os.path.join(root, ".ao", "content.json"))
+    assert not os.path.exists(os.path.join(root, ".polyctl", "content.json"))

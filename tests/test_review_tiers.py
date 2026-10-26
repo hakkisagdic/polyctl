@@ -1,11 +1,11 @@
 """Someone who runs one harness reviews in tiers, each recorded and labeled (REVIEW-TIERS).
 
-ao lands code only after a review by a model family other than the one that wrote it, and a
-single-harness user could not meet that rule. `ao init --profile claude-claude`, which the
+polyctl lands code only after a review by a model family other than the one that wrote it, and a
+single-harness user could not meet that rule. `polyctl init --profile claude-claude`, which the
 documents recommended, was refused as a reviewer "via unresolved binary" with the binary on
-PATH; `ao role set reviewer claude-code --model m1` answered "assigned" and `ao review` then
+PATH; `polyctl role set reviewer claude-code --model m1` answered "assigned" and `polyctl review` then
 refused; no person could review a candidate; and the one configuration that worked, a
-reviewer with no implementer, compared the reviewer with nobody while `ao doctor` passed.
+reviewer with no implementer, compared the reviewer with nobody while `polyctl doctor` passed.
 
 Three tiers now, decided by one rule: another model family, the default; another model of
 the implementer's family, only where a person opted in on the record, labeled "same family:
@@ -22,8 +22,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import allowlist as AL, cli, lib as A, matrix as M, storage, tiers as T
-from ao import watchdog as W
+from polyctl import allowlist as AL, cli, lib as A, matrix as M, storage, tiers as T
+from polyctl import watchdog as W
 from tests.test_capability_matrix import _strict_config
 from tests.test_catchup_ready import APPROVED, _catchup, _land, _legacy_waiver
 from tests.test_commit_authority import _allow_commit_prerequisites
@@ -40,13 +40,13 @@ def _plain(capsys):
 
 
 def _write(root, cfg):
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in cfg.items() if key != "root"}, fh)
     return A.load_config(root)
 
 
 def _running(root, item):
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     with open(board, encoding="utf-8") as fh:
         text = fh.read()
     with open(board, "w", encoding="utf-8") as fh:
@@ -202,10 +202,10 @@ def test_a_name_that_belongs_to_an_agent_or_a_role_is_refused_wherever_a_person_
     assert cli.cmd_config(cfg, SimpleNamespace(**dict(vars(opt_in), by=PERSON, machine=True))) == 2
     assert not os.path.exists(A.opt_ins_path(root))
 
-    # Both acts are a person's: no grant ao checks may admit them (#58).
+    # Both acts are a person's: no grant polyctl checks may admit them (#58).
     forbidden = [command for _, command in AL.FORBIDDEN]
-    assert any(command.startswith("ao person-review") for command in forbidden)
-    assert any(command.startswith("ao config set review.same_family") for command in forbidden)
+    assert any(command.startswith("polyctl person-review") for command in forbidden)
+    assert any(command.startswith("polyctl config set review.same_family") for command in forbidden)
     for rule in AL.rules(["claude", "-p", "{prompt}", "--allowedTools", A.load_adapter("claude-code")["options"]["architect_tools"]]):
         assert [command for command in forbidden if AL.admits(rule, command)] == [], rule
 
@@ -217,7 +217,7 @@ def test_a_reviewer_of_the_implementers_family_is_refused_in_one_sentence_by_rol
     implementer = {"adapter": "claude-code", "session": "s1", "name": "claude", "model": "model-a"}
     cfg = _write(root, dict(project, implementer=implementer))
     sentence = cli._tier_refusal("it runs the implementer's own engine (claude)")
-    assert all(way in sentence for way in ("another model family", "review.same_family labeled", "ao person-review"))
+    assert all(way in sentence for way in ("another model family", "review.same_family labeled", "polyctl person-review"))
 
     role = SimpleNamespace(action="set", role="reviewer", actor="claude-code", model="model-b", effort=None,
                            family=None, hotfix=False)
@@ -239,8 +239,8 @@ def test_a_reviewer_of_the_implementers_family_is_refused_in_one_sentence_by_rol
     out = _plain(capsys)
     assert cli._tier_refusal("it runs the implementer's own engine (codex)") in out and "unresolved binary" not in out
     assert "--review-tier same-family --by <name>" in out and "--review-tier person" in out
-    assert "ao mode lite --by" in out
-    assert not (fresh / ".ao").exists()
+    assert "polyctl mode lite --by" in out
+    assert not (fresh / ".polyctl").exists()
 
 
 def test_another_model_of_the_implementers_family_reviews_once_a_person_opted_in_and_is_labeled_everywhere(
@@ -271,9 +271,9 @@ def test_another_model_of_the_implementers_family_reviews_once_a_person_opted_in
     assert (row["tier"], row["reviewer"], row["slice"]) == (T.SAME_FAMILY, "r-same", "S1")        # the ledger row
     assert f"- tier: {T.SAME_FAMILY_LABEL}" in _artefact(cfg, row).splitlines()                    # the header
     assert cli.cmd_reviews(cfg, SimpleNamespace()) == 0
-    assert re.search(rf"{rid}\s+finished.*APPROVED\s+{T.SAME_FAMILY_LABEL}", _plain(capsys))        # ao reviews
+    assert re.search(rf"{rid}\s+finished.*APPROVED\s+{T.SAME_FAMILY_LABEL}", _plain(capsys))        # polyctl reviews
     code, out = _commit_ok(cfg, monkeypatch, capsys, review=rid)
-    assert code == 0 and f"tier {T.SAME_FAMILY_LABEL}" in out                                       # ao commit-ok
+    assert code == 0 and f"tier {T.SAME_FAMILY_LABEL}" in out                                       # polyctl commit-ok
     # The tier belongs in landed stats only after the granted candidate lands (TRIAGE-2-MEDIUM).
     stats_args = SimpleNamespace(all=False, since=None, until=None, slices=True)
     assert cli.cmd_stats(cfg, stats_args) == 1
@@ -283,7 +283,7 @@ def test_another_model_of_the_implementers_family_reviews_once_a_person_opted_in
     subprocess.run([A.git_binary(), "-c", "core.hooksPath=", "commit", "-q", "-m", message],
                    cwd=root, check=True, capture_output=True)
     assert cli.cmd_stats(cfg, stats_args) == 0
-    stats = _plain(capsys)                                                                          # ao stats
+    stats = _plain(capsys)                                                                          # polyctl stats
     assert f"1 slice(s) on {T.SAME_FAMILY_LABEL}" in stats
     assert re.search(rf"S1\s+APPROVED\s+{T.SAME_FAMILY_LABEL}", stats)
 
@@ -345,9 +345,9 @@ def test_catch_up_closes_a_waiver_on_a_persons_review_of_exactly_its_range_whate
 
     # Nobody established the family that wrote the range, so no model may review it.
     assert _catchup(cfg, plan=True) == 0
-    assert "ao person-review --commits <range> --by <name>" in _plain(capsys)
+    assert "polyctl person-review --commits <range> --by <name>" in _plain(capsys)
 
-    short = f"{waiver['head'][:12]}..{end[:12]}"                   # as ao catchup --plan names it
+    short = f"{waiver['head'][:12]}..{end[:12]}"                   # as polyctl catchup --plan names it
     code, shown = _person(cfg, capsys, commits=short)
     assert code == 0 and "waived review for B7" in shown
     assert _person(cfg, capsys, commits=short, verdict="APPROVED", digest=_digest(shown))[0] == 0
@@ -373,7 +373,7 @@ def test_the_doctor_names_the_tier_in_force_and_a_project_with_no_implementer_as
     unrecorded = dict(_same_family(project, opted=False), review={"same_family": "labeled"})
     problems = dict(cli.doctor_problems(unrecorded))
     assert "review-tier" in problems
-    assert "ao config set review.same_family labeled --by <name>" in problems["review-opt-in"]
+    assert "polyctl config set review.same_family labeled --by <name>" in problems["review-opt-in"]
     tier, problems = cli._active_review_tier(_same_family(project))
     assert tier.startswith(f"{T.SAME_FAMILY_LABEL} (r-same); opted in by {PERSON}") and problems == []
 
@@ -386,7 +386,7 @@ def test_the_doctor_names_the_tier_in_force_and_a_project_with_no_implementer_as
     monkeypatch.setattr(cli, "_reviewer_probe", lambda probe_cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
         "configured": True, "ok": True, "route": "r1", "binary": "/fixture/reviewer", "version": "1.0",
         "reason": "exact nonce echoed", "kind": "success", "tier": None})
-    # Nothing installed, as on CI: with an `ao` on PATH the doctor runs the architect's harness with --version.
+    # Nothing installed, as on CI: with a `polyctl` on PATH the doctor runs the architect's harness with --version.
     monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)
     capsys.readouterr()
     cli.cmd_doctor(bare, SimpleNamespace(check=False))
@@ -410,7 +410,7 @@ def test_the_single_harness_profile_initialises_once_a_tier_is_chosen(project, t
     args = vars(_init_args(profile=None, implementer="claude-code", agent="kiro", review_tier="same-family"))
     assert cli.cmd_init({"root": str(same)}, _init_args(**args)) == 1 and "--by is required" in _plain(capsys)
     assert cli.cmd_init({"root": str(same)}, _init_args(**dict(args, by="claude"))) == 1
-    assert "names an agent or a role" in _plain(capsys) and not (same / ".ao").exists()
+    assert "names an agent or a role" in _plain(capsys) and not (same / ".polyctl").exists()
 
     assert cli.cmd_init({"root": str(same)}, _init_args(**dict(args, by=PERSON))) == 0
     assert f"exact nonce echoed; {T.SAME_FAMILY_LABEL}" in _plain(capsys)

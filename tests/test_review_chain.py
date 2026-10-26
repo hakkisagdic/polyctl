@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.standin import program
 
 
@@ -107,7 +107,7 @@ def test_fallback_reviewer_takes_over(project, tmp_path, monkeypatch):
     _repo_with_change(root)
     sleeps = []
     monkeypatch.setattr(cli, "_review_retry_wait", sleeps.append)
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     text = open(board, encoding="utf-8").read()
     open(board, "w", encoding="utf-8").write(
         text.replace("## running\n", "## running\n- [B2] slice · acceptance: b\n")
@@ -493,7 +493,7 @@ def test_commits_range_reviews_landed_work(project, tmp_path):
 
 
 def test_reopened_window_is_open_work(project):
-    from ao import watchdog as W
+    from polyctl import watchdog as W
     root = project["root"]
     A.set_reviewer_state(root, pending_review=True, until=A.time.time() - 5)
     assert any("reviewer window" in r for r in W.open_work(project, root))
@@ -594,8 +594,8 @@ def test_resource_spawn_failure_gets_one_delayed_retry(
 
     def flaky_popen(*args, **kwargs):
         cwd = os.path.basename(str(kwargs.get("cwd") or ""))
-        if cwd.startswith("ao-reviewer-") \
-                and not cwd.startswith("ao-reviewer-version-"):
+        if cwd.startswith("polyctl-reviewer-") \
+                and not cwd.startswith("polyctl-reviewer-version-"):
             reviewer_calls.append((args, kwargs))
             if len(reviewer_calls) == 1:
                 raise BlockingIOError(errno.EAGAIN, "temporary process pressure")
@@ -991,7 +991,7 @@ def test_reviewer_resolver_passes_over_a_relative_path_entry(
     project, tmp_path, monkeypatch,
 ):
     """WINDOWS-NO-CWD-EXEC: a relative PATH entry was made absolute against the current directory, which can be a
-    tree an agent writes, so a reviewer program left there under the name was the one ao resolved and ran. It is
+    tree an agent writes, so a reviewer program left there under the name was the one polyctl resolved and ran. It is
     passed over now: the reviewer reached only through it is not found, and nothing runs. The reviewer is a program
     Windows starts too, so the relative entry is passed over there as well (WINDOWS-LANE-PARITY)."""
     program(tmp_path / "relative-bin", "ao59-relative-reviewer",

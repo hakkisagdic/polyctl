@@ -21,8 +21,8 @@ import time
 
 import pytest
 
-from ao import email, lib as A, telegram
-from ao import watchdog as W
+from polyctl import email, lib as A, telegram
+from polyctl import watchdog as W
 from tests.scenarios import World
 
 NOTIFY = W.notify                  # the scenario world replaces it; the ladder tests below ring the real one
@@ -42,7 +42,7 @@ def world(project, monkeypatch, tmp_path):
 def _harness(project, monkeypatch, tmp_path):
     """A world whose implementer's harness writes the error its service returned into the transcript."""
     cfg = dict(project, implementer={"adapter": "claude-code", "session": "s1", "name": "claude"})
-    with open(os.path.join(project["root"], ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(project["root"], ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in cfg.items() if key != "root"}, fh)
     return World(cfg, monkeypatch, tmp_path)
 
@@ -260,7 +260,7 @@ def test_no_core_module_holds_the_words_or_the_fields_an_adapter_declares_for_a_
     named = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(map(re.escape, sorted(fields))) + r")(?![A-Za-z0-9_])")
 
     found = []
-    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
+    for path in sorted((ROOT / "src" / "polyctl").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         docs = {id(node.body[0].value) for node in ast.walk(tree)
                 if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.body
@@ -546,7 +546,7 @@ def test_a_board_holding_a_byte_that_is_not_utf8_is_parked_and_kept_byte_for_byt
     world = _nudges_run(_say(_harness(project, monkeypatch, tmp_path), (600, "prompt", PROMPT),
                              (400, "harness", LIMIT)), monkeypatch)
     world.board("running", SLICE)
-    path = os.path.join(world.root, ".ao", "board.md")
+    path = os.path.join(world.root, ".polyctl", "board.md")
     with open(path, "ab") as fh:
         fh.write(b"\n- [B1] a note an editor saved as cp1254: \xfd\n")
 
@@ -580,7 +580,7 @@ def test_a_park_the_watchdog_state_lost_is_read_back_from_the_board(project, mon
 
 
 def test_a_board_move_changes_one_line_and_leaves_every_other_as_written(project):
-    path = os.path.join(project["root"], ".ao", "board.md")
+    path = os.path.join(project["root"], ".polyctl", "board.md")
     with open(path, encoding="utf-8") as fh:
         written = fh.read().replace("## running\n", f"## running\n{SLICE} · role: implementer\n- [B9] another\n")
     with open(path, "w", encoding="utf-8") as fh:

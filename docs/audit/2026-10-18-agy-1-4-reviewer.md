@@ -1,18 +1,18 @@
 # agy's reviewer agent on 1.4, measured — the release an agy review is allowed to run on
 
-A measurement note, not an audit of ao. It records what agy did with the read-only reviewer agent ao writes, on the
+A measurement note, not an audit of polyctl. It records what agy did with the read-only reviewer agent polyctl writes, on the
 two 1.4 releases installed on this machine on 2026-10-18, so that the change to
-[`antigravity.json`](../../src/ao/adapters/antigravity.json) — `reviewer_agent.release` from `1.3` to `1.4` — is a
+[`antigravity.json`](../../src/polyctl/adapters/antigravity.json) — `reviewer_agent.release` from `1.3` to `1.4` — is a
 reading rather than an assumption, and so whoever raises it again does not start from zero.
 
 Everything below is a reading of one machine and one account. agy updates itself, so the version named here is the
-version that answered on the day, not a version ao can expect to find tomorrow; that is why the release is what the
+version that answered on the day, not a version polyctl can expect to find tomorrow; that is why the release is what the
 gate compares (REVIEWER-TOOL-3), and why a release nobody measured is refused.
 
 ## What was already known, and why 1.3 became a problem
 
 The agent was written and measured on agy 1.3.0 on 2026-10-06 (`docs/adapters.md`): no flag leaves agy reading, so
-ao hands it an agent whose tools are `view_file`, `grep_search`, `find_by_name` and `list_dir`, and refuses the
+polyctl hands it an agent whose tools are `view_file`, `grep_search`, `find_by_name` and `list_dir`, and refuses the
 review while the person's own settings allow more than reading. A print run of agy 1.1.19 wrote files, which is why
 the adapter names the release the agent was measured on and the gate admits only that release and its patches.
 
@@ -24,13 +24,13 @@ since `~/.gemini/antigravity-cli/settings.json` carries no `permissions.allow` a
 
 ## The run
 
-Two trees of the test's own, each holding one probe file and the agent file ao would have written — the adapter's
-frontmatter verbatim, only `name` changed (`ao-reviewer-measure14`, `ao-reviewer-measure142`), body
+Two trees of the test's own, each holding one probe file and the agent file polyctl would have written — the adapter's
+frontmatter verbatim, only `name` changed (`polyctl-reviewer-measure14`, `polyctl-reviewer-measure142`), body
 `You review what the prompt hands you. You read files and write nothing, and you run nothing.` Each was asked three
 things in one prompt: read the probe and name its marker word, create a file, and run `touch`. The command is the
-one ao composes, run from that directory:
+one polyctl composes, run from that directory:
 
-    agy --print='<read, write, touch>' --output-format=json --agent=<the ao-authored agent>
+    agy --print='<read, write, touch>' --output-format=json --agent=<the polyctl-authored agent>
 
 | tree | agy that answered | read | write | `touch` | files left behind |
 | --- | --- | --- | --- | --- | --- |
@@ -50,7 +50,7 @@ Both runs returned one JSON record with the same fields the 1.3.0 measurement do
 `status`, `response`, `duration_seconds`, `num_turns`, `usage` (`input_tokens`, `output_tokens`, `thinking_tokens`,
 `cache_read_tokens`, `total_tokens`) — so `result_record` and `telemetry` in the adapter needed no change:
 13.97 s and 16.70 s for a one-turn review, 15,193 and 15,516 total tokens, and nothing in either record names a tool
-it used. The answer ao reads is the `response` field.
+it used. The answer polyctl reads is the `response` field.
 
 ## What this note is evidence for
 

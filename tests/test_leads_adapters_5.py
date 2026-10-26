@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ao import cli, features as F, lib as A, storage
+from polyctl import cli, features as F, lib as A, storage
 from tests.test_harness_config import _seen_by_a_person
 from tests.test_leads_adapters import _can_link, _git, _ignored, _write
 from tests.test_profiles import _init_args
@@ -80,7 +80,7 @@ def test_a_link_at_a_declared_prefix_reads_the_declared_children(project, tmp_pa
 @pytest.mark.parametrize("setting", ["features.review", "review.same_family"])
 def test_reading_an_absent_opt_in_leaves_no_lock(project, setting):
     root = project["root"]
-    directory = Path(root) / ".ao/ledger"
+    directory = Path(root) / ".polyctl/ledger"
     directory.mkdir(exist_ok=True)
     (directory / ".gitkeep").touch()
     before = set(directory.iterdir())
@@ -92,7 +92,7 @@ def test_reading_an_absent_opt_in_leaves_no_lock(project, setting):
 
 def test_init_refused_by_its_probe_leaves_no_opt_in_lock(project, capsys):
     cfg = _write_config(project["root"], dict(_same_family(project, opted=False), review={"same_family": "labeled"}))
-    directory = Path(project["root"]) / ".ao/ledger"
+    directory = Path(project["root"]) / ".polyctl/ledger"
     directory.mkdir(exist_ok=True)
     before = {path.name: path.read_bytes() for path in directory.iterdir()}
 
@@ -160,7 +160,7 @@ def _watch_opt_in_settlement(monkeypatch, path):
 
 @pytest.mark.parametrize("ledger_exists", [False, True])
 def test_an_absent_opt_in_with_an_in_tree_intent_is_refused_under_lock(project, monkeypatch, ledger_exists):
-    """An in-tree intent is not ao's: refuse it under the ledger lock, unread and unchanged (LEDGER-HISTORY)."""
+    """An in-tree intent is not polyctl's: refuse it under the ledger lock, unread and unchanged (LEDGER-HISTORY)."""
     root = project["root"]
     path = A.opt_ins_path(root)
     if ledger_exists:

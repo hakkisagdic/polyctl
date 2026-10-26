@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from ao import cli, lib as A, watchdog as W
+from polyctl import cli, lib as A, watchdog as W
 
 NUDGED_AT = "2026-09-16 12:00:00"
 
@@ -22,7 +22,7 @@ def _turn(records, start, usage, *calls):
 
 
 def test_hunts_are_counted_when_the_transcript_has_no_turns(project, monkeypatch, capsys):
-    """BUG-HUNTER-2: `ao cost --features` returned before what it counts apart when the transcript had no turns."""
+    """BUG-HUNTER-2: `polyctl cost --features` returned before what it counts apart when the transcript had no turns."""
     monkeypatch.setattr(A, "session_paths", lambda cfg: (None, None))
     A.hunter_record(project["root"], "run", files=[], cursor=0, ok=True, leads=0, sent=0, hunter="h1")
 
@@ -37,8 +37,8 @@ def test_each_feature_is_priced_from_what_the_transcript_and_the_watchdog_record
                                                                                   capsys):
     nudged = time.mktime(time.strptime(NUDGED_AT, "%Y-%m-%d %H:%M:%S"))
     records = []
-    _turn(records, nudged - 3600, 3.0, ("shell", {"command": "ao review --boundary b"}))
-    _turn(records, nudged - 1800, 1.0, ("shell", {"command": "ao board"}))
+    _turn(records, nudged - 3600, 3.0, ("shell", {"command": "polyctl review --boundary b"}))
+    _turn(records, nudged - 1800, 1.0, ("shell", {"command": "polyctl board"}))
     _turn(records, nudged + 30, 2.0, ("fs_read", {"path": "src/a.py"}))
     _turn(records, nudged + 600, 10.0, ("fs_write", {"path": "src/a.py", "text": "x = 1"}))
     _turn(records, nudged + 7200, 4.0, ("fs_read", {"path": "src/b.py"}))

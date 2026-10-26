@@ -1,16 +1,16 @@
-"""A `.git` planted in the project must not move ao's commit authority to another repository (NESTED-GIT).
+"""A `.git` planted in the project must not move polyctl's commit authority to another repository (NESTED-GIT).
 
-ao runs every enrollment and candidate query as `git -C <project root>`. Where the project is a subdirectory of its
+polyctl runs every enrollment and candidate query as `git -C <project root>`. Where the project is a subdirectory of its
 repository, an implementer agent - which may write any file in the working tree (docs/threat-model.md) - can plant
 `<project>/.git`, or a `.git` anywhere between the project and the repository's top: a directory holding a second
-repository whose history added and then removed `.ao-project`, a `gitdir:` file, or a symlink. Git then resolves
+repository whose history added and then removed `.polyctl-project`, a `gitdir:` file, or a symlink. Git then resolves
 `git -C <project>` to that other repository, `_project_enrollment` read the project as uninitialized, and
-`ao commit-check` exited 0, so a commit of the OUTER repository landed unchecked. The v5 hook asked for the marker
-from the top and was not fooled, but it handed the decision to ao, which was.
+`polyctl commit-check` exited 0, so a commit of the OUTER repository landed unchecked. The v5 hook asked for the marker
+from the top and was not fooled, but it handed the decision to polyctl, which was.
 
-The fix: the hook is version 6. It names in AO_COMMIT_TOP the top of the working tree Git ran it in - taken from
-`pwd -P`, not from a Git query, so a planted `.git` cannot move it - and ao refuses when `git -C <project>` resolves
-to another repository. The test shows `ao commit-check` refuses and a real `git commit` through the installed hook
+The fix: the hook is version 6. It names in POLYCTL_COMMIT_TOP the top of the working tree Git ran it in - taken from
+`pwd -P`, not from a Git query, so a planted `.git` cannot move it - and polyctl refuses when `git -C <project>` resolves
+to another repository. The test shows `polyctl commit-check` refuses and a real `git commit` through the installed hook
 does not land, for a `.git` directory, a `gitdir:` file and a symlink; a project at its repository's top behaves
 exactly as before; and a genuine nested repository committed through its own top is governed as its own.
 A redirect is not broken enrollment: refusing it records nothing in either repository, and permitted
@@ -25,9 +25,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli
+from polyctl import cli
 from tests.test_commit_authority import _persist_exact_candidate_grant
-from tests.test_hook_paths import _make_current_ao_available, _strip_colour
+from tests.test_hook_paths import _make_current_polyctl_available, _strip_colour
 
 MARKER = cli.PROJECT_MARKER_BYTES
 REDIRECT = "will not move its commit authority to another repository"
@@ -39,14 +39,14 @@ def _run(cwd, *argv):
 
 
 def _outer_with_subproject(tmp_path, project_rel="proj"):
-    """An outer repository whose ao project is its `project_rel` subdirectory, the marker committed, the v6 hook in."""
+    """An outer repository whose polyctl project is its `project_rel` subdirectory, the marker committed, the v6 hook in."""
     outer = tmp_path / "outer"
     proj = outer / project_rel
-    (proj / ".ao").mkdir(parents=True)
+    (proj / ".polyctl").mkdir(parents=True)
     assert _run(outer, "init", "-q").returncode == 0
     (proj / cli.PROJECT_MARKER).write_bytes(MARKER)
-    (proj / ".ao" / "config.json").write_text('{"project":"p"}\n', encoding="utf-8")
-    (proj / ".gitignore").write_text(".ao/\n", encoding="utf-8")
+    (proj / ".polyctl" / "config.json").write_text('{"project":"p"}\n', encoding="utf-8")
+    (proj / ".gitignore").write_text(".polyctl/\n", encoding="utf-8")
     (proj / "work.txt").write_text("one\n", encoding="utf-8")
     assert _run(outer, "add", "--", project_rel).returncode == 0
     assert _run(outer, "commit", "-q", "-m", "enrol " + project_rel).returncode == 0
@@ -60,7 +60,7 @@ def _outer_with_subproject(tmp_path, project_rel="proj"):
 
 
 def _inner_repo_that_dropped_the_marker(path):
-    """A throwaway repository whose history added and then removed `.ao-project`: reads as uninitialized."""
+    """A throwaway repository whose history added and then removed `.polyctl-project`: reads as uninitialized."""
     path.mkdir(parents=True, exist_ok=True)
     assert _run(path, "init", "-q").returncode == 0
     (path / cli.PROJECT_MARKER).write_bytes(MARKER)
@@ -86,7 +86,7 @@ def _plant(tmp_path, proj, kind):
     return inner / ".git"
 
 
-# ---- ao commit-check refuses a planted .git, whatever its kind ------------------------------------
+# ---- polyctl commit-check refuses a planted .git, whatever its kind ------------------------------------
 
 @pytest.mark.parametrize("kind", ("directory", "gitfile", "symlink"))
 @pytest.mark.parametrize("project_rel", ("proj", "parent/proj"))
@@ -99,7 +99,7 @@ def test_commit_check_refuses_when_a_planted_git_redirects_the_project(
     outer, proj = _outer_with_subproject(tmp_path, project_rel)
     planted = proj if project_rel == "proj" else proj.parent
     inner_git = _plant(tmp_path, planted, kind)
-    # The hook names the real top; ao must hold its authority to it and refuse the redirect.
+    # The hook names the real top; polyctl must hold its authority to it and refuse the redirect.
     if anchored:
         monkeypatch.setenv(cli.COMMIT_TOP_ENV, str(outer))
     else:
@@ -112,8 +112,8 @@ def test_commit_check_refuses_when_a_planted_git_redirects_the_project(
         code = cli.cmd_hooks({"root": str(proj)}, SimpleNamespace(action="install"))
     out = _strip_colour(capsys.readouterr().out)
 
-    assert not (inner_git / "ao-enrolled.json").exists()
-    assert not (outer / ".git" / "ao-enrolled.json").exists()
+    assert not (inner_git / "polyctl-enrolled.json").exists()
+    assert not (outer / ".git" / "polyctl-enrolled.json").exists()
     assert state["state"] == "redirected"
     assert REDIRECT in state["detail"]
     assert code == 1 and "refused" in out.lower() and REDIRECT in out
@@ -139,7 +139,7 @@ def test_an_intermediate_repository_cannot_claim_the_outer_project(tmp_path, mon
     outer, proj = _outer_with_subproject(tmp_path, "parent/proj")
     parent = proj.parent
     assert _run(parent, "init", "-q").returncode == 0
-    assert _run(parent, "add", "proj/.ao-project").returncode == 0
+    assert _run(parent, "add", "proj/.polyctl-project").returncode == 0
     if evidence == "head":
         assert _run(parent, "commit", "-q", "-m", "forged enrollment").returncode == 0
         assert _run(parent, "read-tree", "--empty").returncode == 0
@@ -151,8 +151,8 @@ def test_an_intermediate_repository_cannot_claim_the_outer_project(tmp_path, mon
     assert REDIRECT in out and "remove the planted .git" in out
     assert code == (2 if evidence == "head" else 1)
     assert cli._project_repository_top(str(proj)) == str(outer)
-    assert not (parent / ".git" / "ao-enrolled.json").exists()
-    assert not (outer / ".git" / "ao-enrolled.json").exists()
+    assert not (parent / ".git" / "polyctl-enrolled.json").exists()
+    assert not (outer / ".git" / "polyctl-enrolled.json").exists()
 
 
 def _redirect_command(proj, command):
@@ -184,9 +184,9 @@ def test_standalone_commands_keep_outer_enrollment(tmp_path, monkeypatch, capsys
     out = _strip_colour(capsys.readouterr().out)
     assert REDIRECT in out and "remove the planted .git" in out
     assert code == (2 if command == "range" else 1)
-    assert (proj / ".ao" / "config.json").is_file()
-    assert not (inner_git / "ao-enrolled.json").exists()
-    assert not (outer / ".git" / "ao-enrolled.json").exists()
+    assert (proj / ".polyctl" / "config.json").is_file()
+    assert not (inner_git / "polyctl-enrolled.json").exists()
+    assert not (outer / ".git" / "polyctl-enrolled.json").exists()
 
 
 def _branch_without_the_project_marker(outer, evidence):
@@ -196,7 +196,7 @@ def _branch_without_the_project_marker(outer, evidence):
         assert cli.A.record_enrollment(str(outer)) is None
         assert _run(outer, "update-ref", "-d", old_ref).returncode == 0
         if evidence == "unreadable-record":
-            (outer / ".git" / "ao-enrolled.json").write_text("broken json", encoding="utf-8")
+            (outer / ".git" / "polyctl-enrolled.json").write_text("broken json", encoding="utf-8")
     assert _run(outer, "symbolic-ref", "HEAD", "refs/heads/without-marker").returncode == 0
     assert _run(outer, "read-tree", "--empty").returncode == 0
     if evidence == "pre-marker":
@@ -212,7 +212,7 @@ def test_outer_enrollment_survives_a_branch_without_the_marker(
     """An empty current index/HEAD cannot erase an ancestor's enrollment (NESTED-GIT)."""
     outer, proj = _outer_with_subproject(tmp_path)
     _branch_without_the_project_marker(outer, evidence)
-    record = outer / ".git" / "ao-enrolled.json"
+    record = outer / ".git" / "polyctl-enrolled.json"
     before = record.read_bytes() if record.exists() else None
     inner_git = _plant(tmp_path, proj, "gitfile")
     monkeypatch.delenv(cli.COMMIT_TOP_ENV, raising=False)
@@ -222,7 +222,7 @@ def test_outer_enrollment_survives_a_branch_without_the_marker(
     assert REDIRECT in out and "remove the planted .git" in out
     assert code == 1
     assert cli._project_repository_top(str(proj)) == str(outer)
-    assert not (inner_git / "ao-enrolled.json").exists()
+    assert not (inner_git / "polyctl-enrolled.json").exists()
     assert (record.read_bytes() if record.exists() else None) == before
 
 
@@ -234,7 +234,7 @@ def test_hooks_rechecks_a_git_planted_between_enrollment_and_record_selection(
     _branch_without_the_project_marker(outer, evidence)
     monkeypatch.delenv(cli.COMMIT_TOP_ENV, raising=False)
     enrollment = cli._project_enrollment
-    record = outer / ".git" / "ao-enrolled.json"
+    record = outer / ".git" / "polyctl-enrolled.json"
     before = record.read_bytes() if record.exists() else None
     planted = []
 
@@ -247,7 +247,7 @@ def test_hooks_rechecks_a_git_planted_between_enrollment_and_record_selection(
     monkeypatch.setattr(cli, "_project_enrollment", enroll_then_plant)
     code = cli.cmd_hooks({"root": str(proj)}, SimpleNamespace(action="install"))
     out = _strip_colour(capsys.readouterr().out)
-    assert planted and not (planted[0] / "ao-enrolled.json").exists()
+    assert planted and not (planted[0] / "polyctl-enrolled.json").exists()
     assert (record.read_bytes() if record.exists() else None) == before
     assert code == 1 and REDIRECT in out and "remove the planted .git" in out
 
@@ -272,7 +272,7 @@ def test_commit_check_usage_and_unreadable_ranges_keep_exit_two(tmp_path, monkey
 
 @pytest.mark.parametrize("command", ("commit-check", "hooks"))
 def test_an_unresolvable_repository_is_refused_not_guessed(tmp_path, monkeypatch, capsys, command):
-    """Where ao cannot resolve the project's repository at all, it refuses rather than judge the wrong one."""
+    """Where polyctl cannot resolve the project's repository at all, it refuses rather than judge the wrong one."""
     outer, proj = _outer_with_subproject(tmp_path)
     # `proj/.git` is a gitfile pointing nowhere: `git -C proj` cannot resolve a repository.
     (proj / ".git").write_text("gitdir: %s\n" % (tmp_path / "absent"), encoding="utf-8")
@@ -290,7 +290,7 @@ def test_an_unresolvable_repository_is_refused_not_guessed(tmp_path, monkeypatch
     assert code == 1 and "refused" in out.lower()
     assert "redirect" in out and "remove that redirect" in out
     assert not (tmp_path / "absent").exists()
-    assert not (outer / ".git" / "ao-enrolled.json").exists()
+    assert not (outer / ".git" / "polyctl-enrolled.json").exists()
 
 
 # ---- a real git commit through the installed hook does not land -----------------------------------
@@ -299,14 +299,14 @@ def _redirect_project_directory(tmp_path, outer, proj, inside, at_parent):
     """Forge enrollment history beyond a directory symlink, with no outer enrollment record (NESTED-GIT)."""
     fake = (outer if inside else tmp_path) / "fake"
     target = fake / "proj"
-    (target / ".ao").mkdir(parents=True)
+    (target / ".polyctl").mkdir(parents=True)
     assert _run(fake, "init", "-q").returncode == 0
     (target / cli.PROJECT_MARKER).write_bytes(MARKER)
-    assert _run(fake, "add", "proj/.ao-project").returncode == 0
+    assert _run(fake, "add", "proj/.polyctl-project").returncode == 0
     assert _run(fake, "commit", "-q", "-m", "forge enrollment").returncode == 0
-    assert _run(fake, "rm", "-q", "proj/.ao-project").returncode == 0
+    assert _run(fake, "rm", "-q", "proj/.polyctl-project").returncode == 0
     assert _run(fake, "commit", "-q", "-m", "drop enrollment").returncode == 0
-    (target / ".ao" / "config.json").write_text('{"project":"fake"}\n', encoding="utf-8")
+    (target / ".polyctl" / "config.json").write_text('{"project":"fake"}\n', encoding="utf-8")
     replaced = proj.parent if at_parent else proj
     replaced.rename(outer / "saved-project")
     replaced.symlink_to(fake if at_parent else target, target_is_directory=True)
@@ -323,7 +323,7 @@ def test_directory_symlinks_cannot_move_repository_authority(
     head = _run(outer, "rev-parse", "HEAD").stdout
     monkeypatch.delenv(cli.COMMIT_TOP_ENV, raising=False)
     if entry == "hook":
-        _make_current_ao_available(monkeypatch, tmp_path)
+        _make_current_polyctl_available(monkeypatch, tmp_path)
         done = _run(outer, "commit", "-m", "unreviewed symlink redirect")
         code, out = done.returncode, done.stdout + done.stderr
     else:
@@ -336,8 +336,8 @@ def test_directory_symlinks_cannot_move_repository_authority(
     assert code != 0, out
     assert "redirect" in out and str(outer) in out
     assert _run(outer, "rev-parse", "HEAD").stdout == head
-    assert not (fake / ".git" / "ao-enrolled.json").exists()
-    assert not (outer / ".git" / "ao-enrolled.json").exists()
+    assert not (fake / ".git" / "polyctl-enrolled.json").exists()
+    assert not (outer / ".git" / "polyctl-enrolled.json").exists()
 
 
 def test_hook_top_wins_even_when_an_outer_repository_claims_the_project(tmp_path, monkeypatch):
@@ -355,8 +355,8 @@ def test_directory_symlink_cannot_substitute_a_marker_path_in_the_same_repositor
     """Matching repository identities alone must not authorize a different project path (NESTED-GIT)."""
     outer, proj = _outer_with_subproject(tmp_path)
     target = outer / "other"
-    (target / ".ao").mkdir(parents=True)
-    (target / ".ao" / "config.json").write_text('{"project":"other"}\n', encoding="utf-8")
+    (target / ".polyctl").mkdir(parents=True)
+    (target / ".polyctl" / "config.json").write_text('{"project":"other"}\n', encoding="utf-8")
     proj.rename(outer / "saved-project")
     proj.symlink_to(target, target_is_directory=True)
     if anchored:
@@ -371,24 +371,24 @@ def test_directory_symlink_cannot_substitute_a_marker_path_in_the_same_repositor
 def test_a_git_commit_through_the_hook_does_not_land_over_a_planted_git(tmp_path, monkeypatch, kind):
     outer, proj = _outer_with_subproject(tmp_path)
     inner_git = _plant(tmp_path, proj, kind)
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
     head = _run(outer, "rev-parse", "HEAD").stdout
 
     done = _run(outer, "commit", "-m", "land unchecked over a planted .git")
 
-    assert not (inner_git / "ao-enrolled.json").exists()
-    assert not (outer / ".git" / "ao-enrolled.json").exists()
+    assert not (inner_git / "polyctl-enrolled.json").exists()
+    assert not (outer / ".git" / "polyctl-enrolled.json").exists()
     assert done.returncode != 0
     assert "remove the planted .git" in (done.stdout + done.stderr)
     assert REDIRECT in (done.stdout + done.stderr)
     assert _run(outer, "rev-parse", "HEAD").stdout == head          # nothing landed
 
 
-def test_a_clean_subproject_commit_reaches_ao_and_is_refused_for_lack_of_a_grant(tmp_path, monkeypatch):
-    """The hook path is intact for an honest project: with no `.git` planted the commit reaches ao, which refuses it
+def test_a_clean_subproject_commit_reaches_polyctl_and_is_refused_for_lack_of_a_grant(tmp_path, monkeypatch):
+    """The hook path is intact for an honest project: with no `.git` planted the commit reaches polyctl, which refuses it
     for want of a grant rather than standing aside."""
     outer, proj = _outer_with_subproject(tmp_path)
-    _make_current_ao_available(monkeypatch, tmp_path)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
     head = _run(outer, "rev-parse", "HEAD").stdout
 
     done = _run(outer, "commit", "-m", "honest change")
@@ -416,15 +416,15 @@ def test_a_project_at_the_repository_top_is_unchanged(project, monkeypatch):
 @pytest.mark.parametrize("gitfile", (False, True))
 def test_a_genuine_nested_repository_committed_through_its_own_top_is_governed_as_its_own(
         tmp_path, monkeypatch, gitfile):
-    """A separate repository a person made inside another and ran `ao init` in is committed through its own top, which
-    the hook there names, so ao governs it as its own and does not read it as a redirect."""
+    """A separate repository a person made inside another and ran `polyctl init` in is committed through its own top, which
+    the hook there names, so polyctl governs it as its own and does not read it as a redirect."""
     outer = tmp_path / "outer"
     inner = outer / "subproject"
-    (inner / ".ao").mkdir(parents=True)
+    (inner / ".polyctl").mkdir(parents=True)
     assert _run(outer, "init", "-q").returncode == 0
     assert _run(inner, "init", "-q").returncode == 0                # a real repository of its own
     (inner / cli.PROJECT_MARKER).write_bytes(MARKER)
-    (inner / ".ao" / "config.json").write_text('{"project":"inner"}\n', encoding="utf-8")
+    (inner / ".polyctl" / "config.json").write_text('{"project":"inner"}\n', encoding="utf-8")
     assert _run(inner, "add", cli.PROJECT_MARKER).returncode == 0
     assert _run(inner, "commit", "-q", "-m", "enrol inner").returncode == 0
 
@@ -446,25 +446,25 @@ def test_a_genuine_nested_repository_committed_through_its_own_top_is_governed_a
     assert cli._commit_repository_binding(str(inner)) is None
 
 
-# ---- older hooks read as legacy and `ao hooks install` upgrades them ---------------------------
+# ---- older hooks read as legacy and `polyctl hooks install` upgrades them ---------------------------
 
 @pytest.mark.parametrize("version", (5, 6))
 def test_an_older_hook_reads_as_legacy_and_install_puts_the_current_one_in_its_place(project, version):
     root = project["root"]
-    hooks = Path(cli._ao_hook_inventory(root)["active_dir"])
+    hooks = Path(cli._polyctl_hook_inventory(root)["active_dir"])
     for role in ("pre-commit", "pre-push"):
         (hooks / role).write_bytes(cli._render_v5_local_hook(role, ".") if version == 5
                                   else cli._render_local_hook(role, ".", version=6))
         (hooks / role).chmod(0o755)
 
-    before = cli._ao_hook_inventory(root)
+    before = cli._polyctl_hook_inventory(root)
     assert {t["static_state"] for t in before["targets"] if t["active"]} == {"legacy (behavior unverified)"}
     assert cli.cmd_hooks(project, SimpleNamespace(action="install", allow_shared_hooks=False)) == 0
 
-    for target in cli._ao_hook_inventory(root)["targets"]:
+    for target in cli._polyctl_hook_inventory(root)["targets"]:
         if target["active"]:
             assert target["static_state"] == "current-local (behavior unverified)"
-            assert b"# agent-orchestrator: ao-hook-v7 " in (hooks / target["role"]).read_bytes()
+            assert b"# polyctl: polyctl-hook-v7 " in (hooks / target["role"]).read_bytes()
 
 
 @pytest.mark.parametrize("command", ("commit-check", "broken-commit-check", "hooks"))
@@ -473,7 +473,7 @@ def test_enrollment_write_uses_the_hook_top_if_a_git_is_planted_after_the_check(
     """A checked project can gain a .git before the write; the write stays at the hook's top (NESTED-GIT)."""
     outer, proj = _outer_with_subproject(tmp_path)
     if command == "broken-commit-check":
-        (proj / ".ao" / "config.json").write_text("invalid", encoding="utf-8")
+        (proj / ".polyctl" / "config.json").write_text("invalid", encoding="utf-8")
     monkeypatch.setenv(cli.COMMIT_TOP_ENV, str(outer))
     record = cli.A.record_enrollment
     written_from = []
@@ -482,7 +482,7 @@ def test_enrollment_write_uses_the_hook_top_if_a_git_is_planted_after_the_check(
         inner_git = _plant(tmp_path, proj, "gitfile")
         written_from.append(root)
         assert record(root) is None
-        assert not (inner_git / "ao-enrolled.json").exists()
+        assert not (inner_git / "polyctl-enrolled.json").exists()
         return None
 
     measured = []
@@ -503,7 +503,7 @@ def test_enrollment_write_uses_the_hook_top_if_a_git_is_planted_after_the_check(
     assert written_from == [str(outer)]
     if command == "commit-check":
         assert measured and measured[0]["head"] == _run(outer, "rev-parse", "HEAD").stdout.strip()
-    kept = json.loads((outer / ".git" / "ao-enrolled.json").read_text(encoding="utf-8"))
+    kept = json.loads((outer / ".git" / "polyctl-enrolled.json").read_text(encoding="utf-8"))
     assert kept["repository"] == str(outer / ".git")
 
 
@@ -531,8 +531,8 @@ def test_other_enrollment_callers_refuse_a_redirect(tmp_path, monkeypatch, capsy
         code = cli.cmd_hooks(cfg, SimpleNamespace(action=command.split("-")[1]))
     out = _strip_colour(capsys.readouterr().out)
     assert code == 1 and REDIRECT in out and "remove the planted .git" in out
-    assert not (inner_git / "ao-enrolled.json").exists()
-    assert not (outer / ".git" / "ao-enrolled.json").exists()
+    assert not (inner_git / "polyctl-enrolled.json").exists()
+    assert not (outer / ".git" / "polyctl-enrolled.json").exists()
 
 
 def _fake_head_repository(tmp_path, outer, proj, monkeypatch):
@@ -572,8 +572,8 @@ def test_a_fake_base_grant_cannot_authorize_the_outer_commit_after_enrollment(
     planted = proj / ".git"
     planted.write_text("gitdir: %s\n" % inner_git, encoding="utf-8")
     monkeypatch.setenv("GIT_INDEX_FILE", str(outer / ".git" / "index"))
-    cfg = {"root": str(proj), "reviews": ".ao/reviews"}
-    (proj / ".ao" / "reviews").mkdir()
+    cfg = {"root": str(proj), "reviews": ".polyctl/reviews"}
+    (proj / ".polyctl" / "reviews").mkdir()
     fake_candidate = _persist_exact_candidate_grant(cfg)
     assert fake_candidate["head"] == fake_head != real_head
     planted.unlink()
@@ -600,7 +600,7 @@ def test_a_fake_base_grant_cannot_authorize_the_outer_commit_after_enrollment(
     assert code == 1 and "AUTHORIZED" not in out
     assert measured and measured[0]["head"] == real_head
     assert "latest grant does not match the current index candidate" in out
-    assert not (inner_git / "ao-enrolled.json").exists()
+    assert not (inner_git / "polyctl-enrolled.json").exists()
     assert measure(str(proj))["head"] == fake_head
 
 
@@ -611,8 +611,8 @@ def test_later_grant_measurements_keep_the_repository_when_git_is_planted(
     outer, proj = _outer_with_subproject(tmp_path)
     inner_git, fake_head = _fake_head_repository(tmp_path, outer, proj, monkeypatch)
     real_head = _run(outer, "rev-parse", "HEAD").stdout.strip()
-    cfg = {"root": str(proj), "reviews": ".ao/reviews"}
-    (proj / ".ao" / "reviews").mkdir()
+    cfg = {"root": str(proj), "reviews": ".polyctl/reviews"}
+    (proj / ".polyctl" / "reviews").mkdir()
     _persist_exact_candidate_grant(cfg)
     monkeypatch.setenv(cli.COMMIT_TOP_ENV, str(outer))
     measured = []
@@ -646,11 +646,11 @@ def test_a_linked_worktree_check_uses_its_own_index_and_keeps_the_project_root(
     linked = tmp_path / "linked"
     assert _run(outer, "worktree", "add", "-q", "-b", "linked", str(linked)).returncode == 0
     root = linked / "proj"
-    (root / ".ao" / "reviews").mkdir(parents=True)
-    (root / ".ao" / "config.json").write_text('{"project":"p"}\n', encoding="utf-8")
+    (root / ".polyctl" / "reviews").mkdir(parents=True)
+    (root / ".polyctl" / "config.json").write_text('{"project":"p"}\n', encoding="utf-8")
     (root / "work.txt").write_text("linked candidate\n", encoding="utf-8")
     assert _run(linked, "add", "proj/work.txt").returncode == 0
-    cfg = {"root": str(root), "reviews": ".ao/reviews"}
+    cfg = {"root": str(root), "reviews": ".polyctl/reviews"}
     candidate = _persist_exact_candidate_grant(cfg)
     outer_candidate = cli.A.index_candidate(str(outer))
     assert candidate["index_tree"] != outer_candidate["index_tree"]

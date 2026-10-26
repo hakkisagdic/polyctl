@@ -4,7 +4,7 @@ import subprocess
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 
 OLD = time.time() - 40 * 86400
 KINDS = ("grant", "verification", "board", "tracked", "loose", "recent")
@@ -35,7 +35,7 @@ def test_a_referenced_artefact_survives_a_prune_that_removes_its_neighbours(proj
         _artefact(root, name, when=time.time() if kind == "recent" else OLD)
     A.record_authority(root, True, [], "sha256:t", "V-1", "C-1", review=names["grant"])
     A.record_verification(root, {"id": "V-2", "at": 1, "passed": True, "review": names["verification"]})
-    with open(os.path.join(root, ".ao", "board.md"), "a", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "board.md"), "a", encoding="utf-8") as fh:
         fh.write(f"- [S-1] a slice · review: {names['board']}\n")
     _commit(root, os.path.join("semantic-review", names["tracked"]))
     directory = os.path.join(root, "semantic-review")
@@ -50,7 +50,7 @@ def test_a_referenced_artefact_survives_a_prune_that_removes_its_neighbours(proj
     _prune(project, apply=True)
 
     assert set(os.listdir(directory)) == set(names.values()) - {names["loose"]}
-    moved = glob.glob(os.path.join(A.HOME, ".ao", "archive", A.project_key(root), "semantic-review-*",
+    moved = glob.glob(os.path.join(A.HOME, ".polyctl", "archive", A.project_key(root), "semantic-review-*",
                                    names["loose"]))
     assert len(moved) == 1 and "VERDICT: APPROVED" in open(moved[0], encoding="utf-8").read()
 

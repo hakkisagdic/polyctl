@@ -1,12 +1,12 @@
-"""Harness configuration an agent writes reaches no harness ao starts before a person has seen it (HARNESS-CONFIG).
+"""Harness configuration an agent writes reaches no harness polyctl starts before a person has seen it (HARNESS-CONFIG).
 
 REVIEW-TREE-3 kept a candidate's hooks, plugins and MCP servers from running as its reviewer's: measured on
 2026-10-07, Claude Code ran a SessionStart hook from a tree's .claude/settings.json before it had even signed in. The
 same files act wherever else a harness starts in a tree an agent writes, so a hook the implementer put there ran in its
 own next nudge, outside the permissions that hold its commands, and in the architect's session when the watchdog woke it
-in the same checkout - each before a review had seen it (backlog #112). Now `ao verify`, `ao doctor` and the watchdog
+in the same checkout - each before a review had seen it (backlog #112). Now `polyctl verify`, `polyctl doctor` and the watchdog
 name every change, staged or not, to what an adapter declares its harness reads from a project, and no wake, refill,
-nudge, hunt or lane starts in a tree that holds one until a person has read it with `ao harness seen`.
+nudge, hunt or lane starts in a tree that holds one until a person has read it with `polyctl harness seen`.
 """
 import hashlib
 import json
@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import allowlist as AL, cli, lib as A, watchdog as W
+from polyctl import allowlist as AL, cli, lib as A, watchdog as W
 from tests.scenarios import World
 
 UNSEEN = (".claude/settings.json", "modified", "ab" * 32)
@@ -187,7 +187,7 @@ def test_a_fifo_or_a_device_where_a_harness_reads_is_named_and_never_waited_on(p
     assert shown["AGENTS.md"] == ("link", "/dev/zero", ("special", "a device"))
 
 
-def test_past_its_limit_ao_stops_reading_and_says_so_rather_than_name_some(project, monkeypatch):
+def test_past_its_limit_polyctl_stops_reading_and_says_so_rather_than_name_some(project, monkeypatch):
     root = project["root"]
     monkeypatch.setattr(A, "HARNESS_CONFIG_LIMIT", 3)
     for n in range(4):
@@ -254,7 +254,7 @@ def test_a_person_reads_each_change_then_records_exactly_the_bytes_shown(project
     assert "AGENTS.md (modified)" in out and "+run this first\\x1b[8m, unseen\\x1b[0m \\u202eevil" in out
     assert ".claude/settings.json (untracked)" in out and '+{"hooks": {}}' in out
     digest = A.harness_config_digest(A.unseen_harness_config(root))
-    assert f"ao harness seen --by {A.copyable_word('Ayşe')} --digest {digest}" in out  # this platform's shell
+    assert f"polyctl harness seen --by {A.copyable_word('Ayşe')} --digest {digest}" in out  # this platform's shell
     assert not os.path.exists(A.project_file(root, "harness-seen"))               # shown, and nothing recorded
 
     _write(root, ".claude/settings.json", '{"hooks": {"SessionStart": []}}\n')    # changed after it was shown
@@ -296,13 +296,13 @@ def test_the_command_line_reads_as_the_documents_show_it():
     assert (args.action, args.by, args.digest, args.fn) == ("seen", "Ayşe", "sha256:ab", cli.cmd_harness)
 
 
-def test_no_grant_ao_checks_admits_recording_what_a_person_has_seen():
-    assert ("records harness configuration as seen", "ao harness seen --by p --digest d") in AL.FORBIDDEN
-    assert ("records harness configuration as seen", "ao harness seen --by p --digest d", "Bash(ao harness:*)") \
-        in AL.problems(["claude", "--allowedTools", "Bash(ao harness:*)"])
+def test_no_grant_polyctl_checks_admits_recording_what_a_person_has_seen():
+    assert ("records harness configuration as seen", "polyctl harness seen --by p --digest d") in AL.FORBIDDEN
+    assert ("records harness configuration as seen", "polyctl harness seen --by p --digest d", "Bash(polyctl harness:*)") \
+        in AL.problems(["claude", "--allowedTools", "Bash(polyctl harness:*)"])
     for key in ("implementer_tools", "architect_tools"):
         rules = A.load_adapter("claude-code")["options"][key].split(",")
-        assert not any(AL.admits(rule, "ao harness seen --by p --digest d") for rule in rules)
+        assert not any(AL.admits(rule, "polyctl harness seen --by p --digest d") for rule in rules)
 
 
 # ---- verify and doctor name them -------------------------------------------------------------------------------------
@@ -312,7 +312,7 @@ def _gates(root):
     spec = {"gates": {"smoke": {"run": subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv),
                                 "expect": "exit_zero", "timeout": 60}},
             "profiles": {"quick": ["smoke"]}, "default_profile": "quick"}
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         json.dump(spec, fh)
 
 
@@ -333,7 +333,7 @@ def test_verify_names_what_nobody_has_seen_and_records_it_without_failing(projec
     out = capsys.readouterr().out
     assert "harness configuration nobody has seen" in out
     assert ".claude/settings.json (untracked)" in out and "AGENTS.md (added)" in out
-    assert "not a failed gate" in out and "ao harness seen --by <name>" in out
+    assert "not a failed gate" in out and "polyctl harness seen --by <name>" in out
     record = A.latest_verification(root)
     assert record["passed"] is True
     assert [change["path"] for change in record["harness_config"]["unseen"]] == [".claude/settings.json", "AGENTS.md"]
@@ -345,7 +345,7 @@ def test_doctor_names_them_and_pages_a_person_under_the_watchdogs_own_alarm(proj
     _write(root, ".claude/settings.json", "{}\n")
 
     found = dict(cli._harness_config_problem(root))["harness-config"]
-    assert ".claude/settings.json (untracked)" in found and "ao harness seen --by <name>" in found
+    assert ".claude/settings.json (untracked)" in found and "polyctl harness seen --by <name>" in found
     assert any(".claude/settings.json (untracked)" in line for line in cli._harness_config_lines(project))
     rang = []
     monkeypatch.setattr(W, "notify", lambda title, msg, root=None, **kw: rang.append((title, kw)) or True)
@@ -382,7 +382,7 @@ def test_the_watchdog_names_them_to_a_person_once_for_what_they_hold(project, mo
     W.tell_harness_config(root, "proj")
     (title, msg, kw), = rang
     assert title == "proj: harness configuration nobody has seen" and ".claude/settings.json (untracked)" in msg
-    assert "ao harness seen --by <name>" in msg
+    assert "polyctl harness seen --by <name>" in msg
     assert (kw["audience"], kw["key"], kw["what"]) == (
         "human", "harness-config", A.harness_config_digest(A.unseen_harness_config(root)))
 
@@ -505,12 +505,12 @@ def test_what_cannot_be_read_holds_every_turn(world, monkeypatch):
 
 def test_a_lane_does_not_start_while_harness_configuration_stands_unseen(project, capsys):
     root = project["root"]
-    _write(root, ".ao/board.md", BOARD)
+    _write(root, ".polyctl/board.md", BOARD)
     _write(root, "AGENTS.md", "an agent's rules\n")
 
     assert cli.cmd_lane(project, SimpleNamespace(action="start", item="B")) == 2
     out = capsys.readouterr().out
-    assert "refused" in out and "AGENTS.md (untracked)" in out and "ao harness seen --by <name>" in out
+    assert "refused" in out and "AGENTS.md (untracked)" in out and "polyctl harness seen --by <name>" in out
     assert A.lane_record(root, "B") is None and _git(root, "branch", "--list", "lane/B").strip() == ""
 
     _seen_by_a_person(root)
@@ -520,7 +520,7 @@ def test_a_lane_does_not_start_while_harness_configuration_stands_unseen(project
 def test_a_lanes_post_create_command_does_not_run_on_configuration_written_while_git_made_the_lane(project,
                                                                                                     monkeypatch):
     root = project["root"]
-    _write(root, ".ao/board.md", BOARD)
+    _write(root, ".polyctl/board.md", BOARD)
     asked = []
 
     def written_meanwhile(root):
@@ -597,8 +597,8 @@ def test_a_change_committed_with_no_grant_is_a_change_still(project, monkeypatch
 
 def test_a_change_committed_where_no_grant_was_ever_made_is_a_change_still(project):
     """From the review of HARNESS-CONFIG: with no grant on record there was nothing to measure from, so a hook committed
-    with `git commit --no-verify` went unseen. The HEAD the configuration was first read at - `ao init`'s, or the first
-    reading's - is measured from, and a later `ao init` does not move it."""
+    with `git commit --no-verify` went unseen. The HEAD the configuration was first read at - `polyctl init`'s, or the first
+    reading's - is measured from, and a later `polyctl init` does not move it."""
     root = project["root"]
     _committed(root, {"README.md": "a project\n"})
     assert A.unseen_harness_config(root) == []                  # the first reading keeps HEAD to measure from
@@ -607,7 +607,7 @@ def test_a_change_committed_where_no_grant_was_ever_made_is_a_change_still(proje
     _committed(root, {".claude/settings.json": '{"hooks": {"SessionStart": []}}\n'})
 
     assert _named(root) == [(".claude/settings.json", "committed")]
-    assert A.record_harness_baseline(root, "ao init") is None and A.harness_baseline(root) == first
+    assert A.record_harness_baseline(root, "polyctl init") is None and A.harness_baseline(root) == first
 
 
 def test_a_granted_commit_after_an_ungranted_one_does_not_make_it_seen(project, monkeypatch):

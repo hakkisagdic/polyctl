@@ -8,7 +8,7 @@ import os
 import subprocess
 import time
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_merge_check import _commit_files, _git
 
 
@@ -39,7 +39,7 @@ def test_a_merge_older_than_the_window_is_not_asked_for_and_a_recent_one_is(proj
 
 
 def test_the_doctor_says_when_the_merge_ledger_cannot_be_read(project, monkeypatch, tmp_path):
-    from ao import email, telegram
+    from polyctl import email, telegram
     monkeypatch.setattr(email, "CONF", str(tmp_path / "no-email.json"))
     monkeypatch.setattr(telegram, "CONF", str(tmp_path / "no-telegram.json"))
 

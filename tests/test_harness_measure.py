@@ -8,7 +8,7 @@ window) and are fixed; the rest are kept with their measured bound recorded besi
 """
 import inspect
 
-from ao import journal, lib as A
+from polyctl import journal, lib as A
 
 
 def test_cloud_generic_fetches_a_fork_pr_from_the_pull_namespace():

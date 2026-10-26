@@ -18,7 +18,7 @@ import re
 import time
 from datetime import datetime
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.scenarios import World
 from tests.test_second_harness_cost import (HARNESS, R1, R2, R3, R4, R5, R6, _append, _call, _prompt, _response,
                                             _result, _spent, _text)
@@ -114,8 +114,8 @@ def test_a_quiet_session_whose_subagent_works_is_neither_idle_nor_ended(project,
 def test_a_secondary_projects_subagent_at_work_is_the_implementer_working_there(project, monkeypatch, tmp_path):
     now = time.time()
     other = tmp_path / "secondary"
-    (other / ".ao").mkdir(parents=True)
-    (other / ".ao" / "config.json").write_text(json.dumps({
+    (other / ".polyctl").mkdir(parents=True)
+    (other / ".polyctl" / "config.json").write_text(json.dumps({
         "project": "secondary", "mailbox": "agent-mail", "reviews": "semantic-review",
         "implementer": {"adapter": HARNESS, "session": "s1", "name": "claude"}}), encoding="utf-8")
     cfg, _ = _world(project, monkeypatch, tmp_path / "store", _background(now),
@@ -133,7 +133,7 @@ def _watched(project, monkeypatch, tmp_path, subagent_last, runtime=True):
     monkeypatch.setattr(A, "turn_ended", turn_ended)              # the reading itself, not the world's stand-in
     stored = {key: value for key, value in project.items() if key != "root"}
     stored["implementer"] = {"adapter": HARNESS, "session": "transcript", "name": "claude"}
-    with open(os.path.join(world.root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(world.root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(stored, fh)
     now = time.time()
     _written(world.transcript, [
@@ -230,7 +230,7 @@ def test_the_liveness_readers_stat_the_subagent_transcripts_and_open_none_of_the
 
     assert (state, ended, last) == ("working", False, os.path.getmtime(os.path.join(beside, "agent-a0.jsonl")))
     assert [path for path in opened if path.startswith(beside + os.sep)] == []
-    with real_open(os.path.join(project["root"], ".ao", "ledger", "progress.jsonl"), encoding="utf-8") as fh:
+    with real_open(os.path.join(project["root"], ".polyctl", "ledger", "progress.jsonl"), encoding="utf-8") as fh:
         size = json.loads(fh.readlines()[-1])["size"]
     assert size == os.path.getsize(transcript) + sum(os.path.getsize(os.path.join(beside, name)) for name in subagents)
     assert os.path.getsize(os.path.join(beside, "agent-a0.jsonl")) > 3_000_000     # longer than any tail a reader takes

@@ -6,7 +6,7 @@ turn still running, and the refill wake waited for good.
 """
 import time
 
-from ao import lib as A, watchdog as W
+from polyctl import lib as A, watchdog as W
 
 
 def test_a_turn_whose_start_was_not_read_is_believed_by_its_pid_for_a_bounded_time(monkeypatch):

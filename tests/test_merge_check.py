@@ -6,7 +6,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 GATE = "import glob, runpy; [runpy.run_path(p) for p in sorted(glob.glob('use_*.py'))]"
 
@@ -34,11 +34,11 @@ def test_two_green_branches_whose_merge_is_red_are_caught_and_every_merge_is_acc
     command = (subprocess.list2cmdline if os.name == "nt" else shlex.join)([sys.executable, "-c", GATE])
     spec = {"gates": {"test": {"run": command, "timeout": 60}},
             "profiles": {"full": ["test"]}, "default_profile": "full"}
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         json.dump(spec, fh)
     monkeypatch.setattr(A, "GATE_LOCK", str(tmp_path / "gate.lock"))
     base = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
-    _git(root, "add", ".ao/gates.json")
+    _git(root, "add", ".polyctl/gates.json")
     _commit_files(root, "one argument", **{"lib.py": "def f(x):\n    return x\n", "use_a.py": "import lib\nlib.f(1)\n"})
     for name, files in (("caller", {"use_b.py": "import lib\nlib.f(3)\n"}), ("docs", {"notes.txt": "notes\n"}),
                         ("other", {"other.txt": "other\n"})):
@@ -71,7 +71,7 @@ def test_two_green_branches_whose_merge_is_red_are_caught_and_every_merge_is_acc
 
 def test_a_merge_that_does_not_apply_is_recorded_as_a_conflict_without_running_gates(project, tmp_path, monkeypatch):
     root = project["root"]
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         json.dump({"gates": {"test": {"run": "exit 1"}}, "profiles": {"full": ["test"]}}, fh)
     monkeypatch.setattr(A, "GATE_LOCK", str(tmp_path / "gate.lock"))
     base = _git(root, "rev-parse", "--abbrev-ref", "HEAD")

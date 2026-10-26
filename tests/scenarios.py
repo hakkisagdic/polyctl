@@ -11,8 +11,8 @@ import os
 import time
 from types import SimpleNamespace
 
-from ao import lib as A
-from ao import watchdog as W
+from polyctl import lib as A
+from polyctl import watchdog as W
 
 
 class World:
@@ -23,7 +23,7 @@ class World:
         self.tmp = tmp_path
         self.notices = []
         self.procs = {}                 # pid -> {"argv", "cwd", "ppid", "pgid", "tty", "headless"}
-        self.helpers = {}                 # pid -> AO helper role
+        self.helpers = {}                 # pid -> polyctl helper role
         self.transcript = tmp_path / "transcript.jsonl"
         self.transcript.write_text(json.dumps({"payload": {"type": "turn_end"}}) + "\n", encoding="utf-8")
         self.transcript_age(0)
@@ -53,7 +53,7 @@ class World:
         self.cfg.setdefault("architect", {})["cwd"] = target
         stored = dict(self.cfg)
         stored.pop("root", None)
-        with open(os.path.join(self.root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+        with open(os.path.join(self.root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
             json.dump(stored, fh)
         return self
 
@@ -66,7 +66,7 @@ class World:
         return self
 
     def board(self, section, line):
-        p = os.path.join(self.root, ".ao", "board.md")
+        p = os.path.join(self.root, ".polyctl", "board.md")
         s = open(p, encoding="utf-8").read()
         open(p, "w", encoding="utf-8").write(s.replace(f"## {section}\n", f"## {section}\n{line}\n", 1))
         return self
@@ -82,7 +82,7 @@ class World:
     # ---- the fakes
     def _patch(self):
         mp, w = self.mp, self
-        from ao import procs
+        from polyctl import procs
         mp.setattr(A, "session_paths", lambda cfg: (str(w.transcript), None))
         mp.setattr(procs, "all_pids", lambda: list(w.procs))
         mp.setattr(procs, "argv", lambda pid: w.procs.get(pid, {}).get("argv"))
@@ -93,7 +93,7 @@ class World:
         mp.setattr(A, "_pid_alive", lambda pid: pid in w.procs)
         mp.setattr(A, "_executable", lambda t: t.startswith("/agents/"))
         mp.setattr(W.shutil, "which", lambda name, path=None, mode=None: f"/agents/{os.path.basename(name)}"
-                   if os.path.basename(name) in ("kiro-cli", "claude", "ao") else None)
+                   if os.path.basename(name) in ("kiro-cli", "claude", "polyctl") else None)
         mp.setattr(A, "resolve_binary", lambda name, path=None: (f"/agents/{os.path.basename(name)}", "2.1.261"))
         w.spawned = []
 

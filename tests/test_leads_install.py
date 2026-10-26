@@ -1,22 +1,22 @@
 """The bug hunter's leads on install, removal, scheduling and the proof, each held (LEADS-INSTALL).
 
-ao's read-only bug hunter read src/ao/parts on 2026-10-12. `ao remove` took a person's own .gitignore lines
-whenever they read like ao's, ignored every error of deleting the project's state and said it was gone, and found a
+polyctl's read-only bug hunter read src/polyctl/parts on 2026-10-12. `polyctl remove` took a person's own .gitignore lines
+whenever they read like polyctl's, ignored every error of deleting the project's state and said it was gone, and found a
 project's systemd jobs by their files alone, missing a timer the manager still ran. A stop that left the watchdog's
 service running counted as done, and so did every Task Scheduler query that failed, whatever its reason. An MCP
 entry that served another project was taken as this one's, and the MCP file was rewritten where it resolved
 seconds earlier, through whatever link had been swapped in since, over whatever another program had written
-meanwhile; an emptied one was deleted with its directory unsynced. `ao adapters conform` started its fixture
-through a first line Windows never runs, `ao prove` merged two runs of one second into one archive and left its
-worktree registered when the archive could not be written, `ao doctor` hid the heartbeat, alarms and channels
-whenever ao was not on an agent's PATH, and `ao lane start` lost its exit 130 to whatever reading the lane's
+meanwhile; an emptied one was deleted with its directory unsynced. `polyctl adapters conform` started its fixture
+through a first line Windows never runs, `polyctl prove` merged two runs of one second into one archive and left its
+worktree registered when the archive could not be written, `polyctl doctor` hid the heartbeat, alarms and channels
+whenever polyctl was not on an agent's PATH, and `polyctl lane start` lost its exit 130 to whatever reading the lane's
 record raised. Each test here fails without its fix.
 
 An independent review then found the fixes failing open in five places. The removal checked a path and deleted it
 by path, so a link swapped in for one of its directories between the two sent the delete outside the project; a
 user manager or a launchd that did not answer read as holding nothing, and so did a Task Scheduler that refused
 every query alike; the MCP file was compared before its new bytes were written on Windows, which left the whole
-write for a change to be lost in; and a comment in ao's words made the lines under it ao's, a person's own among
+write for a change to be lost in; and a comment in polyctl's words made the lines under it polyctl's, a person's own among
 them. The delete now walks directories held open from the project down, a scheduler that cannot be asked keeps
 the project's state, absence needs Task Scheduler to list its tasks, the comparison is the last step before the
 replace everywhere, and init names the lines it adds by their count and digest.
@@ -38,7 +38,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import storage, cli, lib as A
+from polyctl import storage, cli, lib as A
 from tests.standin import program
 from tests.test_linux_scheduler import _args as _watchdog_args
 from tests.test_linux_scheduler import _systemd, _units
@@ -51,7 +51,7 @@ NOT_FOUND = "ERROR: The system cannot find the file specified."
 
 
 def _removable(tmp_path, monkeypatch, name="svc"):
-    """A project past the first phase of `ao remove`, on a machine where none of its jobs is scheduled."""
+    """A project past the first phase of `polyctl remove`, on a machine where none of its jobs is scheduled."""
     _home(tmp_path, monkeypatch)
     monkeypatch.setattr(cli, "_installed_jobs", lambda key: [])
     root = _project(tmp_path, name)
@@ -67,28 +67,28 @@ def _write_json(path, document):
 
 def _serving(root, *more):
     """The MCP entry skillkit.register_mcp writes for the project at `root`."""
-    return {"command": "/opt/ao/bin/ao", "args": ["-C", str(root), "mcp", "serve", *more]}
+    return {"command": "/opt/polyctl/bin/polyctl", "args": ["-C", str(root), "mcp", "serve", *more]}
 
 
-# ---- e8e33d6d06b54193: the .gitignore lines ao added, and only those ------------------------------------------
+# ---- e8e33d6d06b54193: the .gitignore lines polyctl added, and only those ------------------------------------------
 
 def test_the_lines_init_wrote_go_and_the_same_lines_a_person_wrote_before_stay(tmp_path, monkeypatch):
     _home(tmp_path, monkeypatch)
     root = tmp_path / "repo"
     root.mkdir()
     _git_init(root)
-    (root / ".gitignore").write_text("build/\n.ao/hold\nagent-mail/*.md\n", encoding="utf-8")
+    (root / ".gitignore").write_text("build/\n.polyctl/hold\nagent-mail/*.md\n", encoding="utf-8")
     args = _init_args(profile=None, agent="kiro", no_mcp=True)
     args.allow_uncovered_gates = True
     assert cli.cmd_init({"root": str(root)}, args) == 0
     written = (root / ".gitignore").read_text(encoding="utf-8")
-    added = [line for line in cli.AO_GITIGNORE if line not in (".ao/hold", "agent-mail/*.md")]
+    added = [line for line in cli.POLYCTL_GITIGNORE if line not in (".polyctl/hold", "agent-mail/*.md")]
     # Init adds no line already there, under a comment that names the lines it added.
     assert written.endswith("\n" + cli._gitignore_block(added) + "\n" + "\n".join(added) + "\n")
 
-    found = cli._gitignore_without_ao(str(root))
+    found = cli._gitignore_without_polyctl(str(root))
 
-    assert [line for line in found[1] if line] == ["build/", ".ao/hold", "agent-mail/*.md"]
+    assert [line for line in found[1] if line] == ["build/", ".polyctl/hold", "agent-mail/*.md"]
     assert found[2] == 1 + len(added)                                  # the comment and the four lines init added
 
 
@@ -99,11 +99,11 @@ def _gitignore(root, text):
 
 
 def test_a_persons_block_under_aos_comment_stays_named_and_inits_own_goes(tmp_path, monkeypatch, capsys):
-    """The review's case: a .gitignore that held ao's comment over `.ao/hold` before init - copied from another
+    """The review's case: a .gitignore that held polyctl's comment over `.polyctl/hold` before init - copied from another
     project - lost both to the removal, with the block init added."""
     root, cfg = _removable(tmp_path, monkeypatch)
-    added = [line for line in cli.AO_GITIGNORE if line != ".ao/hold"]
-    theirs = f"build/\n{cli.AO_GITIGNORE_COMMENT}\n.ao/hold\n"
+    added = [line for line in cli.POLYCTL_GITIGNORE if line != ".polyctl/hold"]
+    theirs = f"build/\n{cli.POLYCTL_GITIGNORE_COMMENT}\n.polyctl/hold\n"
     gitignore = _gitignore(root, theirs + "\n" + cli._gitignore_block(added) + "\n" + "\n".join(added) + "\n")
 
     assert cli.cmd_remove(cfg, SimpleNamespace(yes=False, allow_shared_hooks=False)) == 0
@@ -111,15 +111,15 @@ def test_a_persons_block_under_aos_comment_stays_named_and_inits_own_goes(tmp_pa
     assert cli.cmd_remove(cfg, REMOVE) == 0
 
     assert gitignore.read_text(encoding="utf-8") == theirs + "\n"
-    assert "   .gitignore: the lines ao added" in listed and "stays .gitignore line 2 and the lines under it" in listed
-    assert "kept .gitignore line 2 and the lines under it: ao cannot tell it wrote them" in _plain(capsys)
+    assert "   .gitignore: the lines polyctl added" in listed and "stays .gitignore line 2 and the lines under it" in listed
+    assert "kept .gitignore line 2 and the lines under it: polyctl cannot tell it wrote them" in _plain(capsys)
 
 
-def test_a_block_ao_wrote_and_changed_since_or_an_older_aos_stays_named(tmp_path, monkeypatch, capsys):
+def test_a_block_polyctl_wrote_and_changed_since_or_an_older_aos_stays_named(tmp_path, monkeypatch, capsys):
     root, cfg = _removable(tmp_path, monkeypatch)
-    added = [".ao/inbox/", ".ao/hold"]
-    # A person took a line out of init's block, and an older ao's block names no lines.
-    text = f"{cli._gitignore_block(added)}\n.ao/inbox/\n\n{cli.AO_GITIGNORE_COMMENT}\n.ao/lanes/\n"
+    added = [".polyctl/inbox/", ".polyctl/hold"]
+    # A person took a line out of init's block, and an older polyctl's block names no lines.
+    text = f"{cli._gitignore_block(added)}\n.polyctl/inbox/\n\n{cli.POLYCTL_GITIGNORE_COMMENT}\n.polyctl/lanes/\n"
     gitignore = _gitignore(root, text)
 
     assert cli.cmd_remove(cfg, REMOVE) == 0
@@ -131,7 +131,7 @@ def test_a_block_ao_wrote_and_changed_since_or_an_older_aos_stays_named(tmp_path
 
 def test_only_the_lines_init_named_go_and_a_line_written_right_under_them_stays(tmp_path, monkeypatch):
     root, cfg = _removable(tmp_path, monkeypatch)
-    added = list(cli.AO_GITIGNORE) + [".mcp.json"]                     # init adds the MCP file it writes too
+    added = list(cli.POLYCTL_GITIGNORE) + [".mcp.json"]                     # init adds the MCP file it writes too
     text = "a/\r\n" + cli._gitignore_block(added) + "\r\n" + "\r\n".join(added) + "\r\nb/\r\n"
     gitignore = _gitignore(root, text)
     assert gitignore.read_bytes() == text.encode("utf-8")
@@ -167,15 +167,15 @@ def test_remove_stops_with_state_intact_while_the_watchdogs_service_runs(project
     _, watchdog, _ = _units(A.project_key(root).lower())
     assert cli.cmd_watchdog(project, _watchdog_args()) == 0
     subprocess.run(["git", "rm", "-q", "--", cli.PROJECT_MARKER], cwd=root, check=True)
-    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "ao goes"], cwd=root,
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "polyctl goes"], cwd=root,
                    check=True)
     fake.change(active=fake()["active"] + [f"{watchdog}.service"], stuck=[f"{watchdog}.service"])
 
     assert cli.cmd_remove(project, REMOVE) == 1
 
     out = _plain(capsys)
-    assert f"left systemd timer {watchdog}.timer: its service still active" in out and "AO state kept intact" in out
-    assert os.path.isdir(os.path.join(root, ".ao"))
+    assert f"left systemd timer {watchdog}.timer: its service still active" in out and "polyctl state kept intact" in out
+    assert os.path.isdir(os.path.join(root, ".polyctl"))
 
 
 # ---- 8490828cee28085c: a Task Scheduler query that failed for another reason than absence ---------------------
@@ -212,10 +212,10 @@ def test_a_failure_every_query_shares_proves_no_task_absent(monkeypatch, refused
     """The review's case: the name no task has fails as the task's own name does when nothing can be asked at all."""
     _task_scheduler(monkeypatch, {}, others=refused, listing=refused)
 
-    held = cli._task_held("ao-watchdog-svc")
+    held = cli._task_held("polyctl-watchdog-svc")
 
     assert held == f"it lists no task: {refused[0]}"
-    assert cli._installed_jobs("svc") == [("scheduled task", "ao-watchdog-svc"), ("scheduled task", "ao-doctor-svc")]
+    assert cli._installed_jobs("svc") == [("scheduled task", "polyctl-watchdog-svc"), ("scheduled task", "polyctl-doctor-svc")]
 
 
 def test_remove_keeps_the_state_of_a_project_when_task_scheduler_refuses_every_query(tmp_path, monkeypatch, capsys):
@@ -226,29 +226,29 @@ def test_remove_keeps_the_state_of_a_project_when_task_scheduler_refuses_every_q
     assert cli.cmd_remove({"root": root, "reviews": "semantic-review"}, REMOVE) == 1
 
     out = _plain(capsys)
-    assert ("left scheduled task ao-watchdog-svc: Task Scheduler cannot say whether it still holds it (it lists no "
-            "task: ERROR: Access is denied.)") in out and "AO state kept intact" in out
-    assert os.path.isdir(os.path.join(root, ".ao")) and A.registered_key(root) == A.project_key(root)
+    assert ("left scheduled task polyctl-watchdog-svc: Task Scheduler cannot say whether it still holds it (it lists no "
+            "task: ERROR: Access is denied.)") in out and "polyctl state kept intact" in out
+    assert os.path.isdir(os.path.join(root, ".polyctl")) and A.registered_key(root) == A.project_key(root)
 
 
 def test_a_task_scheduler_cannot_say_it_lacks_is_tried_named_and_left(monkeypatch):
     denied = ("ERROR: Access is denied.", 1)
-    asked = _task_scheduler(monkeypatch, {"ao-watchdog-svc": denied})
+    asked = _task_scheduler(monkeypatch, {"polyctl-watchdog-svc": denied})
 
-    assert cli._installed_jobs("Svc") == [("scheduled task", "ao-watchdog-svc")]     # the doctor's is not there
-    left = cli._unschedule("ao-watchdog-svc")
+    assert cli._installed_jobs("Svc") == [("scheduled task", "polyctl-watchdog-svc")]     # the doctor's is not there
+    left = cli._unschedule("polyctl-watchdog-svc")
 
     assert left == ("Task Scheduler cannot say whether it still holds it (ERROR: Access is denied.) — delete it from "
-                    "a prompt that can: schtasks /Delete /TN ao-watchdog-svc /F")
-    assert ("/Delete", "/TN", "ao-watchdog-svc", "/F") in asked
+                    "a prompt that can: schtasks /Delete /TN polyctl-watchdog-svc /F")
+    assert ("/Delete", "/TN", "polyctl-watchdog-svc", "/F") in asked
 
 
 def test_a_schtasks_that_cannot_be_run_proves_no_task_absent(monkeypatch):
     monkeypatch.setattr(cli, "_schtasks", lambda *args: ("", None))
     monkeypatch.setattr(cli, "_scheduler", lambda: "schtasks")
 
-    assert cli._installed_jobs("svc") == [("scheduled task", "ao-watchdog-svc"), ("scheduled task", "ao-doctor-svc")]
-    assert "schtasks could not be run" in cli._unschedule("ao-doctor-svc")
+    assert cli._installed_jobs("svc") == [("scheduled task", "polyctl-watchdog-svc"), ("scheduled task", "polyctl-doctor-svc")]
+    assert "schtasks could not be run" in cli._unschedule("polyctl-doctor-svc")
 
 
 def test_an_absence_said_in_any_language_is_an_absence(monkeypatch):
@@ -257,35 +257,35 @@ def test_an_absence_said_in_any_language_is_an_absence(monkeypatch):
     turkish = ("HATA: Sistem belirtilen dosyayı bulamıyor.", 1)
     _task_scheduler(monkeypatch, {}, others=turkish, listing=("Klasör: \\", 0))
 
-    assert cli._task_held("ao-watchdog-svc") is False and cli._installed_jobs("svc") == []
+    assert cli._task_held("polyctl-watchdog-svc") is False and cli._installed_jobs("svc") == []
 
 
 def test_remove_keeps_the_state_of_a_project_whose_task_cannot_be_read(tmp_path, monkeypatch, capsys):
     _home(tmp_path, monkeypatch)
     root = _project(tmp_path, "svc")
-    _task_scheduler(monkeypatch, {"ao-watchdog-svc": ("ERROR: Access is denied.", 1)})
+    _task_scheduler(monkeypatch, {"polyctl-watchdog-svc": ("ERROR: Access is denied.", 1)})
     cfg = {"root": root, "reviews": "semantic-review"}
 
     assert cli.cmd_remove(cfg, SimpleNamespace(yes=False, allow_shared_hooks=False)) == 0
-    assert "   scheduled task ao-watchdog-svc" in _plain(capsys)
+    assert "   scheduled task polyctl-watchdog-svc" in _plain(capsys)
     assert cli.cmd_remove(cfg, REMOVE) == 1
 
     out = _plain(capsys)
-    assert "left scheduled task ao-watchdog-svc: Task Scheduler cannot say" in out and "AO state kept intact" in out
-    assert os.path.isdir(os.path.join(root, ".ao")) and A.registered_key(root) == A.project_key(root)
+    assert "left scheduled task polyctl-watchdog-svc: Task Scheduler cannot say" in out and "polyctl state kept intact" in out
+    assert os.path.isdir(os.path.join(root, ".polyctl")) and A.registered_key(root) == A.project_key(root)
 
 
 def test_watchdog_uninstall_on_windows_says_which_task_it_left(project, monkeypatch, capsys):
     key = A.project_key(project["root"]).lower()
-    denied = {f"ao-doctor-{key}": ("ERROR: Access is denied.", 1)}
-    _task_scheduler(monkeypatch, denied, deletable={f"ao-watchdog-{key}"})
+    denied = {f"polyctl-doctor-{key}": ("ERROR: Access is denied.", 1)}
+    _task_scheduler(monkeypatch, denied, deletable={f"polyctl-watchdog-{key}"})
 
     assert cli.cmd_watchdog(project, SimpleNamespace(action="uninstall", idle_minutes=6, interval=120)) == 1
 
     out = _plain(capsys)
-    assert f"removed ao-watchdog-{key}" in out and f"left ao-doctor-{key}: Task Scheduler cannot say" in out
+    assert f"removed polyctl-watchdog-{key}" in out and f"left polyctl-doctor-{key}: Task Scheduler cannot say" in out
     assert cli.cmd_watchdog(project, SimpleNamespace(action="status", idle_minutes=6, interval=120)) == 0
-    assert f"ao-doctor-{key}: unknown — Task Scheduler cannot say (ERROR: Access is denied.)" in _plain(capsys)
+    assert f"polyctl-doctor-{key}: unknown — Task Scheduler cannot say (ERROR: Access is denied.)" in _plain(capsys)
 
 
 # ---- 33947736bda0bc52: a timer the manager runs after its files are gone ------------------------------------
@@ -328,7 +328,7 @@ def test_uninstall_finds_a_registered_projects_timer_the_manager_runs_without_it
 
 def _past_phase_one(root):
     subprocess.run(["git", "rm", "-q", "--", cli.PROJECT_MARKER], cwd=root, check=True)
-    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "ao goes"], cwd=root,
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "polyctl goes"], cwd=root,
                    check=True)
 
 
@@ -349,7 +349,7 @@ def test_a_user_manager_that_cannot_be_asked_keeps_the_state_of_a_project_whose_
     out = _plain(capsys)
     assert (f"left systemd timer {watchdog}.timer: systemctl --user reaches no user manager: Failed to connect to "
             "bus: No medium found — take it off from a login session of this user") in out
-    assert "AO state kept intact" in out and os.path.isdir(os.path.join(root, ".ao"))
+    assert "polyctl state kept intact" in out and os.path.isdir(os.path.join(root, ".polyctl"))
 
 
 @pytest.mark.skipif(os.name == "nt", reason=POSIX_SYSTEMD)
@@ -374,10 +374,10 @@ def test_an_answer_that_is_not_a_state_for_each_unit_is_no_answer(tmp_path, monk
     monkeypatch.setattr(cli, "_scheduler", lambda: "systemd")
     monkeypatch.setattr(cli, "_systemctl", lambda *args, merge=False: said)
 
-    loaded = cli._systemd_loaded("ao-watchdog-svc")
+    loaded = cli._systemd_loaded("polyctl-watchdog-svc")
 
     assert isinstance(loaded, str) and loaded, loaded
-    assert ("systemd timer", "ao-watchdog-svc.timer") in cli._installed_jobs("svc")
+    assert ("systemd timer", "polyctl-watchdog-svc.timer") in cli._installed_jobs("svc")
     assert cli._systemd_running({"a.timer": "inactive", "a.service": "failed"}) is False
 
 
@@ -395,7 +395,7 @@ def test_a_timer_taken_off_is_gone_only_when_the_manager_says_each_unit_stopped(
 
     assert left == (f"systemctl --user is-active answers 'maintenance' for {watchdog}.timer, neither running nor "
                     "stopped, so whether it still runs is not known — take it off from a login session of this "
-                    "user: ao watchdog uninstall")
+                    "user: polyctl watchdog uninstall")
 
 
 def _launchd_unlisted(monkeypatch):
@@ -421,8 +421,8 @@ def test_a_launchd_that_lists_nothing_keeps_the_state_of_a_project_it_may_run_a_
 
     out = _plain(capsys)
     assert (f"left launchd job {labels[0]}: launchd cannot say whether it still holds it (launchctl list exited 1)"
-            in out) and "AO state kept intact" in out
-    assert os.path.isdir(os.path.join(root, ".ao"))
+            in out) and "polyctl state kept intact" in out
+    assert os.path.isdir(os.path.join(root, ".polyctl"))
 
 
 @pytest.mark.skipif(os.name == "nt", reason=LAUNCHD_ONLY)
@@ -439,10 +439,10 @@ def test_uninstall_tries_and_names_each_registered_projects_jobs_when_launchd_li
 
 # ---- ae13156eded84720: what the recursive delete could not take ----------------------------------------------
 
-def test_a_part_of_ao_state_that_cannot_be_deleted_is_named_and_the_removal_is_not_complete(tmp_path, monkeypatch,
+def test_a_part_of_polyctl_state_that_cannot_be_deleted_is_named_and_the_removal_is_not_complete(tmp_path, monkeypatch,
                                                                                              capsys):
     root, cfg = _removable(tmp_path, monkeypatch)
-    held = Path(root) / ".ao" / "ledger" / "held.json"
+    held = Path(root) / ".polyctl" / "ledger" / "held.json"
     held.write_text("{}\n", encoding="utf-8")
     real_unlink = os.unlink
 
@@ -457,7 +457,7 @@ def test_a_part_of_ao_state_that_cannot_be_deleted_is_named_and_the_removal_is_n
     assert cli.cmd_remove(cfg, REMOVE) == 1
 
     out = _plain(capsys)
-    assert re.search(r"left \.ao/: \[Errno 13\] Permission denied: .*held\.json", out), out
+    assert re.search(r"left \.polyctl/: \[Errno 13\] Permission denied: .*held\.json", out), out
     assert "not complete" in out and "phase 2/2 complete" not in out
     assert held.exists() and not (Path(root) / "agent-mail").exists()        # the rest went all the same
 
@@ -465,28 +465,28 @@ def test_a_part_of_ao_state_that_cannot_be_deleted_is_named_and_the_removal_is_n
 @pytest.mark.skipif(os.name == "nt", reason=LINKS)
 def test_a_path_whose_directory_a_link_takes_outside_the_project_is_not_deleted_there(tmp_path, monkeypatch, capsys):
     """Found verifying the lead above: `.kiro` made a link to a directory elsewhere took the delete of
-    `.kiro/steering/ao-playbook.md` there."""
+    `.kiro/steering/polyctl-playbook.md` there."""
     root, cfg = _removable(tmp_path, monkeypatch)
     elsewhere = tmp_path / "elsewhere"
     (elsewhere / "steering").mkdir(parents=True)
-    playbook = elsewhere / "steering" / "ao-playbook.md"
+    playbook = elsewhere / "steering" / "polyctl-playbook.md"
     playbook.write_text("someone else's\n", encoding="utf-8")
     os.symlink(elsewhere, os.path.join(root, ".kiro"))
-    link = Path(root) / ".ao" / "shared"
+    link = Path(root) / ".polyctl" / "shared"
     os.symlink(elsewhere, link)                                              # a link inside: it goes, as a link
 
     assert cli.cmd_remove(cfg, REMOVE) == 1
 
     out = _plain(capsys)
     assert playbook.read_text(encoding="utf-8") == "someone else's\n"
-    assert "left .kiro/steering/ao-playbook.md: its directory resolves outside the project" in out
-    assert not os.path.lexists(link) and elsewhere.is_dir() and not (Path(root) / ".ao").exists()
+    assert "left .kiro/steering/polyctl-playbook.md: its directory resolves outside the project" in out
+    assert not os.path.lexists(link) and elsewhere.is_dir() and not (Path(root) / ".polyctl").exists()
 
 
 # The plan's harness paths under a directory of their own, and what stands at each elsewhere.
-UNDER_A_DIRECTORY = [(".kiro/steering", ["ao-coordination.md", "ao-playbook.md", "ao-single-writer.md",
-                                         "ao-machine.md"]),
-                     (".claude/skills", ["ao/SKILL.md"])]
+UNDER_A_DIRECTORY = [(".kiro/steering", ["polyctl-coordination.md", "polyctl-playbook.md", "polyctl-single-writer.md",
+                                         "polyctl-machine.md"]),
+                     (".claude/skills", ["polyctl/SKILL.md"])]
 
 
 @pytest.mark.skipif(os.name == "nt", reason=LINKS)
@@ -524,7 +524,7 @@ def test_a_link_swapped_in_inside_a_directory_as_it_is_emptied_deletes_nothing_o
     """Below the plan's path the delete walks directories it holds open too: a directory swapped for a link once
     the one above it was read is never entered."""
     root, cfg = _removable(tmp_path, monkeypatch)
-    ledger, elsewhere = Path(root) / ".ao" / "ledger", tmp_path / "elsewhere"
+    ledger, elsewhere = Path(root) / ".polyctl" / "ledger", tmp_path / "elsewhere"
     (ledger / "verifications.jsonl").write_text("{}\n", encoding="utf-8")
     elsewhere.mkdir()
     (elsewhere / "verifications.jsonl").write_text("theirs\n", encoding="utf-8")
@@ -554,13 +554,13 @@ def test_a_link_swapped_in_inside_a_directory_as_it_is_emptied_deletes_nothing_o
     assert cli.cmd_remove(cfg, REMOVE) == 1
 
     assert swapped and (elsewhere / "verifications.jsonl").read_text(encoding="utf-8") == "theirs\n"
-    assert "left .ao/: " in _plain(capsys)
+    assert "left .polyctl/: " in _plain(capsys)
 
 
 @pytest.mark.parametrize("reviews", ["..", ".", "x/../.."])
 def test_a_plan_path_naming_the_directory_above_or_the_project_itself_deletes_nothing(tmp_path, monkeypatch, capsys,
                                                                                     reviews):
-    """The reviews directory comes from .ao/config.json, which an agent writes: `..` passed the check of the
+    """The reviews directory comes from .polyctl/config.json, which an agent writes: `..` passed the check of the
     directory the path is in - the project - and the directory above the project was deleted whole."""
     _home(tmp_path, monkeypatch)
     monkeypatch.setattr(cli, "_installed_jobs", lambda key: [])
@@ -576,7 +576,7 @@ def test_a_plan_path_naming_the_directory_above_or_the_project_itself_deletes_no
 
     assert f"left {reviews}/: it names no path inside the project, and nothing is deleted for it" in _plain(capsys)
     assert beside.read_text(encoding="utf-8") == "kept\n" and (Path(root) / "src.py").exists()
-    assert not (Path(root) / ".ao").exists()                                 # the rest of the plan went
+    assert not (Path(root) / ".polyctl").exists()                                 # the rest of the plan went
 
 
 # ---- e7dfee67dadf7d2b: an MCP entry of another project's ----------------------------------------------------
@@ -584,23 +584,23 @@ def test_a_plan_path_naming_the_directory_above_or_the_project_itself_deletes_no
 @pytest.mark.parametrize("entry, ours", [
     (_serving("/p"), True),
     (_serving("/p", "--role", "reviewer"), True),
-    ({"command": "/usr/bin/python3", "args": ["-m", "ao", "-C", "/p", "mcp", "serve"]}, True),
-    (_serving("/other"), False),                                            # another project's ao
+    ({"command": "/usr/bin/python3", "args": ["-m", "polyctl", "-C", "/p", "mcp", "serve"]}, True),
+    (_serving("/other"), False),                                            # another project's polyctl
     ({"command": "/usr/bin/docker", "args": ["run", "tool", "mcp", "serve"]}, False),     # a program that ends so
-    ({"command": "ao", "args": ["mcp", "serve"]}, False),                   # registered some other way: left
+    ({"command": "polyctl", "args": ["mcp", "serve"]}, False),                   # registered some other way: left
 ])
 def test_an_mcp_entry_is_this_projects_when_it_serves_this_project(entry, ours):
-    assert cli._serves_ao(entry, "/p") is ours
+    assert cli._serves_polyctl(entry, "/p") is ours
 
 
-def test_remove_leaves_an_ao_entry_that_serves_another_project(tmp_path, monkeypatch, capsys):
+def test_remove_leaves_an_polyctl_entry_that_serves_another_project(tmp_path, monkeypatch, capsys):
     root, cfg = _removable(tmp_path, monkeypatch)
     other = _project(tmp_path, "web")
-    mcp = _write_json(Path(root) / ".mcp.json", {"mcpServers": {"ao": _serving(other), "x": {"command": "x"}}})
+    mcp = _write_json(Path(root) / ".mcp.json", {"mcpServers": {"polyctl": _serving(other), "x": {"command": "x"}}})
     before = mcp.read_bytes()
 
     assert cli.cmd_remove(cfg, SimpleNamespace(yes=False, allow_shared_hooks=False)) == 0
-    assert "the `ao` server entry" not in _plain(capsys)
+    assert "the `polyctl` server entry" not in _plain(capsys)
     assert cli.cmd_remove(cfg, REMOVE) == 0
 
     assert mcp.read_bytes() == before and "phase 2/2 complete" in _plain(capsys)
@@ -609,9 +609,9 @@ def test_remove_leaves_an_ao_entry_that_serves_another_project(tmp_path, monkeyp
 # ---- d9ed9f517729daf0, 0f85f4da96e261fd, 531407213a21d084: the MCP file, written where it lies ------------------
 
 def _kiro_file(root):
-    """ao's entry in Kiro's MCP file, beside another server's: (the file, its declared key, remove when empty)."""
+    """polyctl's entry in Kiro's MCP file, beside another server's: (the file, its declared key, remove when empty)."""
     return _write_json(Path(root) / ".kiro" / "settings" / "mcp.json",
-                       {"mcpServers": {"ao": _serving(root), "other": {"command": "other"}}}), "mcpServers", False
+                       {"mcpServers": {"polyctl": _serving(root), "other": {"command": "other"}}}), "mcpServers", False
 
 
 @pytest.mark.skipif(os.name == "nt", reason=LINKS)
@@ -621,7 +621,7 @@ def test_a_link_swapped_in_after_the_file_was_found_is_not_written_through(tmp_p
     assert cli._mcp_entries(root)[0] == [(str(path), key, empty)]
     # The person's own file elsewhere, holding an entry for this project too.
     outside = _write_json(tmp_path / "home" / ".kiro" / "settings" / "mcp.json",
-                          {"mcpServers": {"ao": _serving(root), "secret": {"env": {"TOKEN": "t"}}}})
+                          {"mcpServers": {"polyctl": _serving(root), "secret": {"env": {"TOKEN": "t"}}}})
     before = outside.read_bytes()
     os.remove(path)
     os.symlink(outside, path)
@@ -689,17 +689,17 @@ def test_a_directory_swapped_just_before_the_new_file_is_made_takes_the_write_no
 def test_a_change_made_to_the_file_while_the_entry_is_taken_out_is_not_overwritten(tmp_path, monkeypatch):
     root, _ = _removable(tmp_path, monkeypatch)
     path, key, empty = _kiro_file(root)
-    theirs = {"mcpServers": {"ao": _serving(root), "other": {"command": "other"}, "added": {"command": "new"}}}
+    theirs = {"mcpServers": {"polyctl": _serving(root), "other": {"command": "other"}, "added": {"command": "new"}}}
     real_dumps, written = json.dumps, []
 
     def dumps(*args, **kwargs):
-        if not written:                                   # the harness adds a server as ao writes
+        if not written:                                   # the harness adds a server as polyctl writes
             written.append(path.write_text(real_dumps(theirs), encoding="utf-8"))
         return real_dumps(*args, **kwargs)
 
     monkeypatch.setattr(json, "dumps", dumps)
 
-    with pytest.raises(ValueError, match="changed while ao was taking its entry out"):
+    with pytest.raises(ValueError, match="changed while polyctl was taking its entry out"):
         cli._drop_mcp_entry(str(path), key, empty, root)
 
     assert json.loads(path.read_text(encoding="utf-8")) == theirs
@@ -711,7 +711,7 @@ def test_a_change_made_while_the_new_file_is_written_is_not_overwritten(tmp_path
     Both held-folder backends compare after syncing the replacement."""
     root, _ = _removable(tmp_path, monkeypatch)
     path, key, empty = _kiro_file(root)
-    theirs = {"mcpServers": {"ao": _serving(root), "other": {"command": "other"}, "added": {"command": "new"}}}
+    theirs = {"mcpServers": {"polyctl": _serving(root), "other": {"command": "other"}, "added": {"command": "new"}}}
     real_fsync, written = os.fsync, []
 
     def fsync(fd):
@@ -721,7 +721,7 @@ def test_a_change_made_while_the_new_file_is_written_is_not_overwritten(tmp_path
 
     monkeypatch.setattr(os, "fsync", fsync)
 
-    with pytest.raises(ValueError, match="changed while ao was taking its entry out"):
+    with pytest.raises(ValueError, match="changed while polyctl was taking its entry out"):
         cli._drop_mcp_entry(str(path), key, empty, root)
 
     assert written and json.loads(path.read_text(encoding="utf-8")) == theirs
@@ -730,7 +730,7 @@ def test_a_change_made_while_the_new_file_is_written_is_not_overwritten(tmp_path
 
 def test_a_file_emptied_of_aos_entry_goes_with_its_directory_synced(tmp_path, monkeypatch):
     root, _ = _removable(tmp_path, monkeypatch)
-    path = _write_json(Path(root) / ".mcp.json", {"mcpServers": {"ao": _serving(root)}})
+    path = _write_json(Path(root) / ".mcp.json", {"mcpServers": {"polyctl": _serving(root)}})
     real_fsync, synced = os.fsync, []
 
     def fsync(fd):
@@ -748,7 +748,7 @@ def test_a_file_emptied_of_aos_entry_goes_with_its_directory_synced(tmp_path, mo
 
 def test_the_entry_goes_and_every_other_entry_and_key_stays(tmp_path, monkeypatch):
     root, _ = _removable(tmp_path, monkeypatch)
-    path = _write_json(Path(root) / ".mcp.json", {"mcpServers": {"ao": _serving(root, "--role", "implementer"),
+    path = _write_json(Path(root) / ".mcp.json", {"mcpServers": {"polyctl": _serving(root, "--role", "implementer"),
                                                                  "other": {"command": "o"}}, "inputs": [1]})
     path.chmod(0o640)
 
@@ -798,8 +798,8 @@ class _OneSecond(datetime):
 
 def _steps_writing(tag):
     def steps(cfg, root, tree, stamp, links, unlinked, heard):
-        os.makedirs(os.path.join(tree, ".ao"), exist_ok=True)
-        with open(os.path.join(tree, ".ao", f"{tag}.txt"), "w", encoding="utf-8") as fh:
+        os.makedirs(os.path.join(tree, ".polyctl"), exist_ok=True)
+        with open(os.path.join(tree, ".polyctl", f"{tag}.txt"), "w", encoding="utf-8") as fh:
             fh.write(tag)
         return True, None, None
     return steps
@@ -807,7 +807,7 @@ def _steps_writing(tag):
 
 def test_two_throwaways_in_one_second_keep_an_archive_each(project, monkeypatch):
     monkeypatch.setattr(cli, "datetime", _OneSecond)
-    archive = Path(A.HOME) / ".ao" / "archive" / A.project_key(project["root"])
+    archive = Path(A.HOME) / ".polyctl" / "archive" / A.project_key(project["root"])
     for tag in ("first", "second"):
         monkeypatch.setattr(cli, "_prove_steps", _steps_writing(tag))
         result = cli._prove_throwaway(project)
@@ -815,8 +815,8 @@ def test_two_throwaways_in_one_second_keep_an_archive_each(project, monkeypatch)
         assert result[3] and not os.path.exists(result[3])
 
     assert sorted(os.listdir(archive)) == ["prove-20261012-093000", "prove-20261012-093000-2"]
-    assert sorted(os.listdir(archive / "prove-20261012-093000" / ".ao")) == ["first.txt"]
-    assert sorted(os.listdir(archive / "prove-20261012-093000-2" / ".ao")) == ["second.txt"]
+    assert sorted(os.listdir(archive / "prove-20261012-093000" / ".polyctl")) == ["first.txt"]
+    assert sorted(os.listdir(archive / "prove-20261012-093000-2" / ".polyctl")) == ["second.txt"]
 
 
 def test_an_archive_that_cannot_be_written_is_said_and_the_worktree_goes_all_the_same(project, monkeypatch, capsys):
@@ -843,10 +843,10 @@ def test_an_archive_that_cannot_be_written_is_said_and_the_worktree_goes_all_the
     assert len(worktrees.splitlines()) == 1 and made and not os.path.exists(made[0])
 
 
-# ---- a54662ba1633a992: the doctor where ao is not on an agent's PATH -----------------------------------------
+# ---- a54662ba1633a992: the doctor where polyctl is not on an agent's PATH -----------------------------------------
 
-def test_the_doctor_says_the_heartbeat_alarms_and_channels_where_agents_cannot_run_ao(project, monkeypatch, capsys):
-    monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)    # no ao, nor any agent CLI, is found
+def test_the_doctor_says_the_heartbeat_alarms_and_channels_where_agents_cannot_run_polyctl(project, monkeypatch, capsys):
+    monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)    # no polyctl, nor any agent CLI, is found
     monkeypatch.setattr(A, "_run_program", lambda argv, **kwargs: ("", 0))    # a launchd or systemd holding nothing
     monkeypatch.setattr(cli, "_schtasks", lambda *args: ("", None))           # and no Task Scheduler to ask
     A.heartbeat(project["root"])
@@ -854,17 +854,17 @@ def test_the_doctor_says_the_heartbeat_alarms_and_channels_where_agents_cannot_r
     cli.cmd_doctor(project, SimpleNamespace(check=False))
 
     out = _plain(capsys)
-    assert "ao for agents   not on a spawned agent's PATH" in out
+    assert "polyctl for agents   not on a spawned agent's PATH" in out
     for line in ("last tick       0m", "channels        desktop on", "ping            off", "features        "):
         assert line in out, line
-    assert out.index("features        ") < out.index("ao for agents")
+    assert out.index("features        ") < out.index("polyctl for agents")
 
 
 # ---- 6822ab92d182a397: Ctrl-C during a lane start, whatever reading its record raises ------------------------
 
 def test_a_lane_start_stopped_by_a_signal_exits_130_whatever_its_record_holds(project, monkeypatch):
     root = project["root"]
-    lanes = Path(root) / ".ao" / "lanes"
+    lanes = Path(root) / ".polyctl" / "lanes"
     lanes.mkdir(parents=True)
     # A record nested deeper than the parser goes: reading it raises RecursionError, which no read of it caught.
     (lanes / "X.json").write_text("[" * 1_000_000 + "]" * 1_000_000, encoding="utf-8")
@@ -881,7 +881,7 @@ def test_a_lane_start_stopped_by_a_signal_exits_130_whatever_its_record_holds(pr
 def test_removal_refuses_without_either_held_backend(tmp_path, monkeypatch, operation):
     root = tmp_path / "repo"
     root.mkdir()
-    path = _write_json(root / "folder/mcp.json", {"mcpServers": {"ao": _serving(root)}})
+    path = _write_json(root / "folder/mcp.json", {"mcpServers": {"polyctl": _serving(root)}})
     before = path.read_bytes()
     monkeypatch.setattr(os, "supports_dir_fd", set())
     monkeypatch.setattr(storage, "_windows_tree_available", lambda: False)
@@ -971,7 +971,7 @@ def native_removal_handles(tmp_path, monkeypatch):
 def test_removal_uses_native_held_folders(tmp_path, monkeypatch, native_removal_handles, operation):
     root = tmp_path / "repo"
     root.mkdir()
-    path = _write_json(root / "folder/inner/mcp.json", {"mcpServers": {"ao": _serving(root)}})
+    path = _write_json(root / "folder/inner/mcp.json", {"mcpServers": {"polyctl": _serving(root)}})
     before = path.read_bytes()
     with native_removal_handles() as calls:
         if operation == "remove-tree":
@@ -1016,11 +1016,11 @@ def test_removal_unlinks_a_windows_junction_without_entering_it(tmp_path, monkey
 
 def test_remove_gitignore_rewrite_does_not_follow_a_swapped_leaf(tmp_path, monkeypatch):
     root, cfg = _removable(tmp_path, monkeypatch)
-    lines = [".ao/hold"]
+    lines = [".polyctl/hold"]
     path = _gitignore(root, cli._gitignore_block(lines) + "\n".join(["", *lines, ""]))
     outside = tmp_path / "person"
     outside.write_bytes(b"person's file")
-    original = cli._gitignore_without_ao
+    original = cli._gitignore_without_polyctl
     swapped, reads = [], []
     def read(where):
         result = original(where)
@@ -1033,13 +1033,13 @@ def test_remove_gitignore_rewrite_does_not_follow_a_swapped_leaf(tmp_path, monke
                 pytest.skip("symbolic links require permission on this Windows host")
             swapped.append(True)
         return result
-    monkeypatch.setattr(cli, "_gitignore_without_ao", read)
+    monkeypatch.setattr(cli, "_gitignore_without_polyctl", read)
     cli.cmd_remove(cfg, REMOVE)
     assert swapped and outside.read_bytes() == b"person's file"
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows keeps no POSIX mode")
 def test_mcp_removal_keeps_the_mode_despite_umask(tmp_path):
-    path = _write_json(tmp_path / "mcp.json", {"mcpServers": {"ao": _serving(tmp_path)}})
+    path = _write_json(tmp_path / "mcp.json", {"mcpServers": {"polyctl": _serving(tmp_path)}})
     path.chmod(0o664)
     previous = os.umask(0o077)
     try:
@@ -1065,8 +1065,8 @@ def test_held_opt_in_reader_refuses_an_in_tree_seal_intent(project):
 # Independent review: paths inside the project must still be opened without following links.
 @pytest.mark.skipif(os.name == "nt", reason=LINKS)
 @pytest.mark.parametrize("directory, leaf", [("link", "src"), ("link", ".git"),
-                                           (".kiro/steering", "ao-playbook.md"),
-                                           (".claude/skills/ao", "SKILL.md")])
+                                           (".kiro/steering", "polyctl-playbook.md"),
+                                           (".claude/skills/polyctl", "SKILL.md")])
 def test_review_paths_removal_refuses_internal_directory_links(tmp_path, directory, leaf):
     root = tmp_path / "repo"
     root.mkdir()
@@ -1092,7 +1092,7 @@ def test_review_paths_removal_refuses_internal_directory_links(tmp_path, directo
 def test_review_paths_mcp_refuses_internal_links_swapped_after_discovery(tmp_path, monkeypatch, empty, directory_link):
     root, _ = _removable(tmp_path, monkeypatch)
     path = Path(root) / (".mcp.json" if empty else ".kiro/settings/mcp.json")
-    document = {"mcpServers": {"ao": _serving(root)}}
+    document = {"mcpServers": {"polyctl": _serving(root)}}
     if not empty:
         document["mcpServers"]["person"] = {"command": "person"}
     _write_json(path, document)
@@ -1116,9 +1116,9 @@ def test_review_paths_mcp_refuses_internal_links_swapped_after_discovery(tmp_pat
 
 def test_review_paths_gitignore_accepts_non_utf8_bytes(tmp_path, monkeypatch):
     root, cfg = _removable(tmp_path, monkeypatch)
-    lines = [".ao/hold"]
+    lines = [".polyctl/hold"]
     path = Path(root) / ".gitignore"
-    path.write_bytes(b"build-\xff/\r\n" + (cli._gitignore_block(lines) + "\r\n.ao/hold\r\n").encode("utf-8"))
+    path.write_bytes(b"build-\xff/\r\n" + (cli._gitignore_block(lines) + "\r\n.polyctl/hold\r\n").encode("utf-8"))
 
     assert cli.cmd_remove(cfg, REMOVE) == 0
 
@@ -1149,12 +1149,12 @@ def test_review_paths_gitignore_fifo_is_refused_without_a_blocking_open(tmp_path
 @pytest.mark.skipif(os.name == "nt", reason=LINKS)
 def test_review_paths_gitignore_link_before_second_read_is_never_copied(tmp_path, monkeypatch, capsys):
     root, cfg = _removable(tmp_path, monkeypatch)
-    lines = [".ao/hold"]
-    path = _gitignore(root, cli._gitignore_block(lines) + "\n.ao/hold\n")
+    lines = [".polyctl/hold"]
+    path = _gitignore(root, cli._gitignore_block(lines) + "\n.polyctl/hold\n")
     outside = tmp_path / "private-ignore"
-    secret = "private contents\n" + cli._gitignore_block(lines) + "\n.ao/hold\n"
+    secret = "private contents\n" + cli._gitignore_block(lines) + "\n.polyctl/hold\n"
     outside.write_text(secret, encoding="utf-8")
-    original, reads = cli._gitignore_without_ao, []
+    original, reads = cli._gitignore_without_polyctl, []
 
     def read(where):
         reads.append(True)
@@ -1163,7 +1163,7 @@ def test_review_paths_gitignore_link_before_second_read_is_never_copied(tmp_path
             path.symlink_to(outside)
         return original(where)
 
-    monkeypatch.setattr(cli, "_gitignore_without_ao", read)
+    monkeypatch.setattr(cli, "_gitignore_without_polyctl", read)
 
     assert cli.cmd_remove(cfg, REMOVE) == 1
 

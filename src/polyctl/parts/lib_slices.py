@@ -1,0 +1,3308 @@
+"""Slices and projects: recall, worktrees, secondary projects, outcomes, bounded stores, hunting,
+backup, content, boundaries.
+
+A part of src/polyctl/lib.py (#44): moved out byte for byte and run in its namespace by `_part`,
+where it stood; it is not importable on its own.
+"""
+
+
+# ---- recall: what was decided, found or learned before, in every project (#43) ----------
+
+# Records are written in every language a project may choose, so the words that relate them are read in each.
+_RECALL_STOP = frozenset(language.words("recall-stop"))
+_RECALL_LETTERS = "".join(re.escape(letter) for letter in language.words("letters"))
+_RECALL_WORD = re.compile(rf"[a-z{_RECALL_LETTERS}0-9][a-z{_RECALL_LETTERS}0-9_.-]*")
+_FINDING_LINE = re.compile(r"^\s*- \[(BLOCKER|HIGH|MEDIUM|LOW)\]\s*(.+)$")
+
+
+def _recall_words(text):
+    words = (word.strip("._-") for word in _RECALL_WORD.findall(str(text or "").lower()))
+    return {word for word in words if len(word) >= 3 and word not in _RECALL_STOP}
+
+
+def _epoch(value):
+    """A recorded time as seconds, whether polyctl wrote it as a number or as ISO text."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def recall_roots(root=None):
+    """(project, root) for every project this machine has registered, the one asking first."""
+    out, seen = [], set()
+    if root:
+        out.append((project_key(root), root))
+        seen.add(os.path.realpath(root))
+    for name, row in sorted(project_registry().items()):
+        path = row.get("root")
+        if path and os.path.isdir(path) and os.path.realpath(path) not in seen:
+            seen.add(os.path.realpath(path))
+            out.append((name, path))
+    return out
+
+
+def recall_entries(project, root):
+    """What one project remembers, each with the file and row it came from (#43).
+
+    Questions asked and their answers, architect decisions, waivers, review
+    findings with their review's verdict, and lessons. A source that cannot be
+    read is passed over; the rest still answer.
+    """
+    entries = []
+
+    def add(kind, ident, at, text, outcome, source):
+        entries.append({"project": project, "kind": kind, "id": ident, "at": _epoch(at), "text": text,
+                        "outcome": outcome, "source": source})
+
+    for rec in decisions(root):
+        add("question", rec.get("id"), rec.get("answered_at") or rec.get("asked_at"),
+            " ".join(str(rec.get(key) or "") for key in ("question", "context", "answer")),
+            f"answered: {rec['answer']}" if rec.get("answer") else rec.get("state") or "open",
+            f"{DECISION_DIR}/{rec.get('id')}.json")
+    readers = ((decision_rows, "decision", ("decision", "why", "scope"), ".polyctl/ledger/decisions.jsonl"),
+               (waiver_rows, "waiver", ("gate", "slice", "why"), ".polyctl/ledger/waivers.jsonl"))
+    for reader, kind, fields, source in readers:
+        try:
+            rows = reader(root)
+        except Exception:
+            continue
+        for number, row in enumerate(rows, 1):
+            if isinstance(row, dict) and row.get("kind") == "proposal":
+                # A rule proposal is a row of the decision ledger, and no architect's decision (RULE-PROPOSALS);
+                # what a person answered is its question's, recalled above.
+                author = row.get("by") if isinstance(row.get("by"), dict) else {}
+                add("proposal", row.get("id"), row.get("at"),
+                    " ".join(str(row.get(key) or "") for key in ("text", "why", "rule_file")),
+                    f"proposed by {author.get('role') or 'a caller polyctl did not start'}", f"{source}:{number}")
+            elif isinstance(row, dict):
+                add(kind, row.get("id"), row.get("at"), " ".join(str(row.get(key) or "") for key in fields),
+                    row.get("event") or ("recorded by " + str(row.get("by") or "architect")), f"{source}:{number}")
+    reviews_dir = "semantic-review"
+    try:
+        with open(os.path.join(root, ".polyctl", "config.json"), encoding=UTF8) as fh:
+            reviews_dir = json.load(fh).get("reviews") or reviews_dir
+    except (OSError, ValueError, AttributeError):
+        pass
+    directory = os.path.join(root, reviews_dir)
+    for name in sorted(os.listdir(directory)) if os.path.isdir(directory) else []:
+        path = os.path.join(directory, name)
+        if name.startswith(".") or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding=UTF8, errors="replace") as fh:
+                body = fh.read()
+        except OSError:
+            continue
+        verdict = _review_verdict(body)
+        for number, line in enumerate(body.splitlines(), 1):
+            found = _FINDING_LINE.match(line)
+            if found:
+                add("finding", name, os.path.getmtime(path), found.group(2), f"{found.group(1)} in a {verdict} review",
+                    f"{reviews_dir}/{name}:{number}")
+    try:
+        with open(os.path.join(root, "docs", "lessons.md"), encoding=UTF8, errors="replace") as fh:
+            lessons = fh.read().splitlines()
+    except OSError:
+        lessons = []
+    starts = [number for number, line in enumerate(lessons) if line.startswith("## ")]
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(lessons)
+        add("lesson", lessons[start][3:].strip(), None, "\n".join(lessons[start:end]), "a lesson",
+            f"docs/lessons.md:{start + 1}")
+    return entries
+
+
+def recall(text, root=None, limit=10, exclude=(), share=0.5):
+    """Records in every registered project that share the words of `text`, best first (#43).
+
+    Plain words over the files polyctl already keeps: no index, no service, no network.
+    One or two words must all appear; longer text needs `share` of its words.
+    """
+    words = _recall_words(text)
+    if not words:
+        return []
+    need = len(words) if len(words) <= 2 else max(2, int(len(words) * share + 0.999))
+    found = []
+    for project, path in recall_roots(root):
+        try:
+            entries = recall_entries(project, path)
+        except Exception:
+            continue
+        for entry in entries:
+            if entry["id"] in exclude:
+                continue
+            score = len(words & _recall_words(entry["text"]))
+            if score >= need:
+                found.append(dict(entry, score=score))
+    found.sort(key=lambda entry: (-entry["score"], -(entry["at"] or 0)))
+    return found[:limit]
+
+
+def architect_absence(root, cfg):
+    """When the architect was last seen, and the questions waiting for its return (#84).
+
+    Seen means its session wrote, it recorded a decision, or it left mail still in
+    the mailbox, whichever is newest.
+    """
+    seen = []
+    try:
+        # Its own session's last write. The newest transcript where the architect works is as likely
+        # the implementer's, when both run one harness there (SESSION-IDENTITY).
+        state = session_state(cfg, "architect")
+        if state is not None:
+            transcript = role_session_paths(dict(cfg, root=root), "architect")[0] if state["session"] else None
+            if transcript and os.path.exists(transcript):
+                seen.append(os.path.getmtime(transcript))
+        else:
+            found = discover_architect((cfg.get("architect") or {}).get("cwd") or root)
+            if found and found.get("age") is not None \
+                    and found.get("session") != (session_state(cfg, "implementer") or {}).get("session"):
+                seen.append(time.time() - float(found["age"]))
+    except Exception:
+        pass
+    try:
+        # Its decisions: a rule proposal in the same ledger is no decision, whoever made it (RULE-PROPOSALS).
+        rows = [row for row in decision_rows(root) if row.get("kind") != "proposal"]
+        if rows and _epoch(rows[-1].get("at")):
+            seen.append(_epoch(rows[-1].get("at")))
+    except Exception:
+        pass
+    mailbox_dir = cfg.get("mailbox", "agent-mail")
+    for name in mailbox(root, mailbox_dir):
+        if from_architect(name, cfg):
+            try:
+                seen.append(os.path.getmtime(os.path.join(root, mailbox_dir, name)))
+            except OSError:
+                pass
+    waiting = sorted(decisions(root, "open"), key=lambda d: d.get("asked_at") or 0)
+    return {"seen_at": max(seen) if seen else None, "waiting": [d["id"] for d in waiting],
+            "oldest_at": waiting[0].get("asked_at") if waiting else None}
+
+
+# ---- a worktree lives exactly as long as its slice (#42) --------------------------------
+
+def default_branch(root):
+    """The branch work lands on: origin's HEAD, else main, else master, else the main checkout's."""
+    remote = git_text(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+    if remote.startswith("refs/remotes/origin/"):
+        return remote[len("refs/remotes/origin/"):]
+    for name in ("main", "master"):
+        if git_text(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}"):
+            return name
+    trees = worktree_list(root)
+    return trees[0]["branch"] if trees else None
+
+
+def worktree_list(root):
+    """Every worktree of the repository: {"path", "head", "branch", "prunable"}, the main one first."""
+    listed = _git_output(root, "worktree", "list", "--porcelain", "-z")
+    out = []
+    for record in listed.split(b"\0\0"):
+        fields = {}
+        for attribute in record.split(b"\0"):
+            key, _, value = os.fsdecode(attribute).partition(" ")
+            if key:
+                fields[key] = value
+        if "worktree" in fields:
+            branch = fields.get("branch", "")
+            out.append({"path": fields["worktree"], "head": fields.get("HEAD"),
+                        "branch": branch[len("refs/heads/"):] if branch.startswith("refs/heads/") else None,
+                        "prunable": "prunable" in fields})
+    return out
+
+
+def reviews_in_flight(root):
+    """Submitted reviews in one checkout whose runner is alive or has only just started."""
+    directory = os.path.join(root, ".polyctl", "reviews")
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    flying = []
+    for name in names:
+        if not (name.startswith("R-") and name.endswith(".json")):
+            continue
+        try:
+            with open(os.path.join(directory, name), encoding=UTF8) as fh:
+                state = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(state, dict) and state.get("state") == "running" and (
+                _pid_alive(state.get("pid")) if state.get("pid")
+                else time.time() - float(state.get("submitted_at") or 0) < 60):
+            flying.append(state.get("id") or name[:-5])
+    return flying
+
+
+def _tree_bytes(path):
+    total = 0
+    for directory, subdirs, files in os.walk(path):
+        subdirs[:] = [d for d in subdirs if not os.path.islink(os.path.join(directory, d))]
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(directory, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def worktree_facts(root, cfg, sizes=False):
+    """What decides whether each worktree may go (#42).
+
+    A worktree may go when its branch is merged into the default branch, when the
+    board rejected the slice that owns it (`worktree:` or `branch:` on the item),
+    or when its directory is already gone - and never while it holds product
+    changes nobody committed, a review in flight, or the command that is asking,
+    and never when it is a lane, which `polyctl lane remove` retires (LANE-START).
+    """
+    target = default_branch(root)
+    board_items = board(root)
+    owners = []
+    for state, items in board_items.items():
+        for item in items:
+            owners.append((state, item))
+    here = os.path.realpath(root)
+    trees = worktree_list(root)
+    lanes = lane_keeps(root, trees)
+    out = []
+    for index, tree in enumerate(trees):
+        path, branch = tree["path"], tree["branch"]
+        real = os.path.realpath(path)
+        slice_state = next((state for state, item in owners
+                            if (item["notes"].get("worktree") and os.path.realpath(item["notes"]["worktree"]) == real)
+                            or (branch and item["notes"].get("branch") == branch)), None)
+        targets = [target, "origin/" + target] if target else []
+        merged_into = next((ref for ref in targets if branch and branch != target and subprocess.run(
+            [git_binary(), "merge-base", "--is-ancestor", tree["head"], ref], cwd=root,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0), None)
+        merged = merged_into is not None
+        exists = os.path.isdir(path)
+        keep = []
+        try:
+            dirty = product_dirty(path, cfg, strict=True) if exists else []
+        except RuntimeError:
+            dirty = []
+            keep.append("status unreadable; inspect the worktree and retry pruning")
+        flying = reviews_in_flight(path) if exists else []
+        if index == 0:
+            keep.append("the main checkout")
+        if real == here:
+            keep.append("the checkout asking")
+        if dirty:
+            keep.append(f"{len(dirty)} uncommitted product change(s)")
+        if flying:
+            keep.append(f"review in flight: {', '.join(flying)}")
+        if os.path.normcase(real) in lanes:
+            keep.append(lanes[os.path.normcase(real)])
+        why = "merged into " + merged_into if merged else "its slice was rejected" if slice_state == "rejected" \
+            else "its directory is gone" if not exists or tree["prunable"] else None
+        may_go = bool(why) and not keep
+        # Sizes are for what may go: walking every dependency tree on disk is not free.
+        out.append(dict(tree, merged=merged, slice_state=slice_state, dirty=len(dirty), in_flight=flying,
+                        keep=keep, why=why, may_go=may_go,
+                        bytes=_tree_bytes(path) if sizes and may_go and exists else None))
+    return out
+
+
+class WorktreeCleanupRefused(RuntimeError):
+    """Unsafe administration refuses cleanup; an ordinary Git failure remains distinct (PRUNE-LINKS)."""
+
+
+def _check_worktree_cleanup(root):
+    """Refuse linked or unreadable worktree administration before cleanup (PRUNE-LINKS)."""
+    import stat
+    try:
+        common = _git_output(root, "rev-parse", "--git-common-dir").decode(UTF8, "surrogateescape").strip()
+    except RuntimeError as exc:
+        raise WorktreeCleanupRefused(f"cannot locate the common git directory: {exc}; "
+                                    "repair it before polyctl prunes any worktree") from exc
+    if not common:
+        raise WorktreeCleanupRefused("cannot locate the common git directory; repair it before polyctl prunes any worktree")
+    common = os.path.join(root, common)
+    worktrees = os.path.join(common, "worktrees")
+    path = worktrees
+    try:
+        # Let the filesystem fold case as Git does; a name scan missed Worktrees links (PRUNE-LINKS).
+        try:
+            info = os.lstat(worktrees)
+        except FileNotFoundError:
+            info = None
+        if info is not None:
+            if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise WorktreeCleanupRefused(f"remove the link or junction at {path}; "
+                                            "polyctl prunes no worktree while it is there")
+            if not stat.S_ISDIR(info.st_mode):
+                raise WorktreeCleanupRefused(f"remove the non-directory entry at {path}; "
+                                            "polyctl prunes no worktree while it is there")
+            with os.scandir(worktrees) as entries:
+                for entry in entries:
+                    path = entry.path
+                    info = entry.stat(follow_symlinks=False)
+                    if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                        raise WorktreeCleanupRefused(f"remove the link or junction at {path}; "
+                                                    "polyctl prunes no worktree while it is there")
+    except OSError as exc:
+        raise WorktreeCleanupRefused(f"cannot read {path}: {exc}; restore access or remove the unreadable entry; "
+                                    "polyctl prunes no worktree while it cannot be read") from exc
+
+
+def _git_worktree_cleanup(root, *args):
+    """Git follows linked worktree administration while deleting; refuse it before every cleanup (PRUNE-LINKS)."""
+    _check_worktree_cleanup(root)
+    return _git_output(root, "worktree", *args)
+
+
+def prune_worktree(root, fact, apply=False, now=None, lane=None):
+    """Retire one worktree that may go: archive its coordination state and branch tip, then remove both (#42).
+
+    The `.polyctl/` state and review artefacts go to ~/.polyctl/archive/<project>/, and the
+    branch tip stays reachable as refs/polyctl/archive/<branch>-<stamp>, so what the
+    worktree held can still be read after it is gone.
+    """
+    import shutil
+
+    def changes():
+        # A lane's prepared files stay exempt at both rechecks (TRIAGE-3-MEDIUM).
+        return lane_changes(fact["path"], lane) if lane is not None else \
+            product_dirty(fact["path"], load_config(root), strict=True)
+
+    # Refuse unsafe administration before a status failure can mask it (PRUNE-LINKS).
+    if apply:
+        _check_worktree_cleanup(root)
+
+    # Facts shown earlier are no permission to discard changes made since (TRIAGE-3-MEDIUM).
+    if apply and os.path.isdir(fact["path"]):
+        if changes():
+            raise RuntimeError("uncommitted product changes appeared; keep the worktree and commit or save them first")
+    stamp = datetime.fromtimestamp(time.time() if now is None else now).strftime("%Y%m%d-%H%M%S")
+    name = os.path.basename(os.path.normpath(fact["path"]))
+    archive = os.path.join(HOME, ".polyctl", "archive", project_key(root), f"worktree-{name}-{stamp}")
+    steps = []
+    for part in (".polyctl", "semantic-review"):
+        source = os.path.join(fact["path"], part)
+        if os.path.isdir(source):
+            steps.append(f"archive {part}/ to {archive}")
+            if apply:
+                shutil.copytree(source, os.path.join(archive, part), symlinks=True)
+    if fact["branch"]:
+        steps.append(f"keep {fact['branch']} at refs/polyctl/archive/{fact['branch']}-{stamp}")
+        if apply:
+            _git_output(root, "update-ref", f"refs/polyctl/archive/{fact['branch']}-{stamp}", fact["head"])
+    steps.append(f"remove the worktree {fact['path']}")
+    if apply and os.path.isdir(fact["path"]):
+        if changes():
+            raise RuntimeError("uncommitted product changes appeared while archiving; keep the worktree and save them")
+        _git_worktree_cleanup(root, "remove", "--force", fact["path"])
+    # Before the branch: git will not delete a branch a worktree it lists holds, and a worktree whose
+    # directory someone deleted stays listed until a prune, so its branch could never go (LANE-START).
+    steps.append("git worktree prune")
+    if apply:
+        _git_worktree_cleanup(root, "prune")
+    if fact["branch"]:
+        steps.append(f"delete the branch {fact['branch']}")
+        if apply:
+            _git_output(root, "branch", "-D", fact["branch"])
+    return steps
+
+
+# ---- the secondary project: the same agent, another queue (#8, #22, #92) ----------------
+
+HUMAN_WAITING = language.words("human")
+
+
+def secondary_projects(cfg):
+    """The projects this one names as secondary (`"secondary": [{"root", "name"}]`), each with its config (#8)."""
+    out = []
+    for entry in (cfg or {}).get("secondary") or []:
+        other_root = entry.get("root") if isinstance(entry, dict) else entry
+        if not isinstance(other_root, str) or not os.path.isdir(os.path.join(other_root, ".polyctl")):
+            continue
+        try:
+            other = load_config(other_root, record=False)
+        except Exception:
+            continue
+        name = (entry.get("name") if isinstance(entry, dict) else None) or next_project_key(other_root)
+        out.append({"name": name, "root": other_root, "cfg": other})
+    return out
+
+
+def working_elsewhere(cfg, idle_seconds):
+    """The secondary project the implementer is writing in now, if it is (#22).
+
+    While the implementer worked in a polyctl worktree, the watchdog of the project
+    it had left read the same agent as idle with a slice running and nudged it
+    back. Presence belongs to the agent: a transcript moving in a secondary
+    project is the agent working.
+    """
+    newest, now = None, time.time()
+    for other in secondary_projects(cfg):
+        try:
+            transcript, _ = session_paths(other["cfg"])
+            age = now - last_write(transcript, transcript_shape(implementer_adapter(other["cfg"])))
+        except (OSError, TypeError, ValueError):
+            continue
+        # Configuration order said where the agent was, even with newer activity elsewhere (TRIAGE-2-LOW).
+        if age < idle_seconds and (newest is None or age < newest["age"]):
+            newest = {"name": other["name"], "root": other["root"], "age": age}
+    return newest
+
+
+def secondary_ready(cfg):
+    """The first READY item of a secondary project, for an implementer with nothing READY here (#8)."""
+    for other in secondary_projects(cfg):
+        try:
+            items = ready(other["root"])
+        except Exception:
+            continue
+        if items:
+            return {"name": other["name"], "root": other["root"], "item": items[0]["id"]}
+    return None
+
+
+def human_waits(root):
+    """Blocked board items the implementer declared as waiting on a person: `waiting: human` (#92)."""
+    return [item for item in board(root)["blocked"]
+            if (item["notes"].get("waiting") or "").strip().lower() in HUMAN_WAITING]
+
+
+# ---- the process is measured by its outcomes (#49) ---------------------------------------
+
+def _since_epoch(text):
+    try:
+        return datetime.strptime(str(text).strip()[:16], "%Y-%m-%d %H:%M").timestamp()
+    except ValueError:
+        return None
+
+
+def slice_outcomes(root, project=None):
+    """What happened to every slice that landed, from what polyctl already recorded (#49).
+
+    On 2026-09-07 the round budget, the size guideline and the review pipeline
+    were all re-decided in one day on anecdote. Each outcome is read, never
+    typed: the verdicts in the order polyctl recorded them (a re-specification keeps
+    the history, it does not start a new one), rounds, ready-to-landed time, size
+    by kind, and whether a defect was later found in what landed - a
+    retrospective review that asked for changes, or a board item `fixes:` it.
+    """
+    from .storage import read_chained_history
+    project = project or project_key(root)
+    reviews = [row for row in read_chained_history(review_ledger_path(root), REVIEW_CHAIN) if isinstance(row, dict)]
+    # Include grants retired into sealed history (LEDGER-HISTORY).
+    grants = [row for row in authority_history(root) if isinstance(row, dict) and row.get("granted") is True]
+    # Permission to commit was counted as a landing even when abandoned (TRIAGE-2-MEDIUM).
+    landed = {}
+    if grants:
+        for commit in landed_commits(root, "HEAD"):
+            tokens = _polyctl_trailers(commit["trailers"]).get("Polyctl-Grant", [])
+            if len(tokens) == 1:
+                landed.setdefault(tokens[0], commit["at"])
+    verifications = [row for row in verification_history(root) if isinstance(row, dict)]
+    waivers = {row.get("id"): row for row in read_chained_history(waivers_path(root), WAIVER_CHAIN, legacy_prefix=True)
+               if isinstance(row, dict) and row.get("event") == "waived"}
+    by_artefact = {row.get("artefact"): row for row in reviews}
+    items = {item["id"]: item for state_items in board(root).values() for item in state_items}
+    fixed = {item["notes"]["fixes"].strip() for item in items.values() if item["notes"].get("fixes")}
+    out = {}
+    for grant in grants:
+        if grant.get("token") not in landed:
+            continue
+        linked = by_artefact.get(grant.get("review")) or {}
+        slice_id = linked.get("slice") or (waivers.get(grant.get("waiver")) or {}).get("slice")
+        if not slice_id or slice_id in out:
+            continue
+        mine = [row for row in reviews if row.get("slice") == slice_id]
+        prospective = [row for row in mine if row.get("kind") == "index-candidate"
+                       and row.get("verdict") in ("APPROVED", "NEEDS_CHANGES")]
+        candidate = (grant.get("candidate") or {}).get("digest")
+        size = next((row.get("candidate_size") for row in reversed(verifications)
+                     if (row.get("candidate") or {}).get("digest") == candidate and row.get("candidate_size")), None)
+        started = _since_epoch((items.get(slice_id) or {}).get("notes", {}).get("since", "")) \
+            or (min(float(row.get("at") or 0) for row in mine) if mine else None)
+        landed_at = landed[grant["token"]]
+        retro = [row for row in mine if row.get("kind") == "commit-range" and row.get("verdict") == "NEEDS_CHANGES"]
+        out[slice_id] = {
+            "project": project, "slice": slice_id, "verdicts": [row.get("verdict") for row in prospective],
+            "rounds": len(prospective), "first_pass": bool(prospective) and prospective[0].get("verdict") == "APPROVED",
+            "waived": not prospective and bool(grant.get("waiver")),
+            "started_at": started, "landed_at": landed_at,
+            "hours": round((landed_at - started) / 3600, 2) if started and landed_at >= started else None,
+            "size": size, "defect_found": bool(retro) or slice_id in fixed,
+            # The tier of the review the grant stood on, so weaker independence is counted (REVIEW-TIERS).
+            "tier": linked.get("tier"),
+        }
+    return list(out.values())
+
+
+def outcome_stats(outcomes):
+    """The distribution a process change is judged against: rounds, first-pass rate, time, size, defects."""
+    def spread(values):
+        values = sorted(v for v in values if v is not None)
+        if not values:
+            return None
+        from statistics import median
+        from math import ceil
+        middle = median(values)
+        if isinstance(middle, float) and middle.is_integer():
+            middle = int(middle)
+        return {"median": middle, "p90": values[ceil(len(values) * 0.9) - 1],
+                "n": len(values)}
+    reviewed = [o for o in outcomes if not o["waived"]]
+    return {
+        "slices": len(outcomes), "waived": len(outcomes) - len(reviewed),
+        "rounds": spread(o["rounds"] for o in reviewed),
+        "first_pass_pct": round(100 * sum(o["first_pass"] for o in reviewed) / len(reviewed)) if reviewed else None,
+        "hours": spread(o["hours"] for o in outcomes),
+        "product_lines": spread((o["size"]["kinds"]["product"]["added"] + o["size"]["kinds"]["product"]["deleted"])
+                                if isinstance(o.get("size"), dict) else None for o in outcomes),
+        "defects_pct": round(100 * sum(o["defect_found"] for o in outcomes) / len(outcomes)) if outcomes else None,
+        "tiers": {tier: sum(1 for o in outcomes if o.get("tier") == tier)
+                  for tier in sorted({o.get("tier") for o in outcomes if o.get("tier")})},
+    }
+
+
+# ---- every store is bounded, without being asked (#50) -----------------------------------
+
+OBSERVATION_LOGS = ("nudge-log", "watchdog-log", "refill-log", "escalate-log", "cycles")      # PROJECT_FILES
+
+
+def bound_store(path, kb, in_place=False):
+    """Keep an observation store within its bound as it is written: past it, the oldest records go (#50).
+
+    Measured 2026-09-08: notices 3.2 MB, a nudge log 2.6 MB, and `polyctl prune`, which
+    existed and defaulted to a dry run, had never been run - the only outcome a
+    manual cleanup has. A store is trimmed once it is a quarter over its bound,
+    back to three quarters of it, at a line boundary, so it is not rewritten on
+    every write. Evidence is never trimmed here; it is sealed.
+
+    A log a started process writes is trimmed `in_place`, in the file it holds open: replaced
+    by a new file, the process wrote on into the old one, and what a wake that failed said
+    never reached the log its failure is read from (JOURNAL-3).
+    """
+    limit = int(kb) * 1024
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return False
+    if size <= limit * 1.25:
+        return False
+    if in_place:
+        return _trim_in_place(path, int(limit * 0.75))
+    from .storage import replace_file_durably
+    with open(path, "rb") as fh:
+        fh.seek(size - int(limit * 0.75))
+        tail = fh.read()
+    replace_file_durably(path, tail[tail.find(b"\n") + 1:])
+    return True
+
+
+def _trim_in_place(path, keep):
+    """Keep the last `keep` bytes of `path`, from a line boundary, in the same file (JOURNAL-3).
+
+    A writer appends to the file's end, so what it writes after the trim follows the kept tail;
+    what it appended while the tail was read is read on from where that read ended (JOURNAL-3-2).
+    No portable cut asks whether the end moved, so a line appended between that last read and the
+    cut is lost, and a writer whose handle does not append - a child's on Windows (CPython
+    gh-86772) - writes on past the new end: the watchdog leaves a log a process it started still
+    writes whole until that process ends.
+    """
+    try:
+        with open(path, "r+b") as fh:
+            size = fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, size - keep))
+            tail = fh.read()
+            tail = tail[tail.find(b"\n") + 1:]
+            tail += fh.read()                       # appended while the tail was read, read once (JOURNAL-3-2)
+            fh.seek(0)
+            fh.write(tail)
+            fh.truncate()
+            fh.flush()
+            os.fsync(fh.fileno())
+    except OSError:
+        return False
+    return True
+
+
+def observation_stores(root, state_dir=None):
+    """Every observation store of a project: its ledgers' and the watchdog's logs, as paths."""
+    key = project_key(root)
+    state_dir = state_dir or os.path.join(HOME, ".polyctl")
+    stores = [os.path.join(root, ".polyctl", "ledger", name) for name in ("notices.jsonl", "progress.jsonl")]
+    return stores + [os.path.join(state_dir, project_file_name(what, key)) for what in OBSERVATION_LOGS]
+
+
+def bound_observation_logs(root, state_dir=None, busy=()):
+    """Hold every observation store to its bound; the watchdog does this each cycle (#50).
+
+    The notices are folded first: what the bound trims still counts in a window (NOTICE-WINDOW). A
+    fold that could not be written leaves them whole, past their bound, where `polyctl doctor` names
+    them (NOTICE-WINDOW-2).
+
+    A log in `busy` is one a process the watchdog started may still write, and is left whole until
+    that process ends; on Windows a log is replaced, never cut under a handle that does not append,
+    and one another process holds stays over its bound this cycle while the rest are bounded
+    (JOURNAL-3-2).
+    """
+    limit = settings.get(load_config(root), "retention.observation_kb")
+    notices = os.path.join(root, ".polyctl", "ledger", "notices.jsonl") if not fold_notice_times(root) else None
+    bounded = []
+    for path in observation_stores(root, state_dir):
+        if path == notices or path in busy:
+            continue
+        try:
+            # Elsewhere a log a started process may still write is trimmed in the file it holds (JOURNAL-3).
+            if bound_store(path, limit, in_place=path.endswith(".log") and os.name != "nt"):
+                bounded.append(path)
+        except OSError:
+            continue
+    return bounded
+
+
+def stores_over_bound(root, cfg, state_dir=None):
+    """(path, amount, bound, unit) for observations and sealable evidence past their bounds (TRIAGE-1-LOW)."""
+    limit = settings.get(cfg, "retention.observation_kb") * 1024
+    out = []
+    for path in observation_stores(root, state_dir):
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if size > limit * 1.25:
+            out.append((path, size, limit, "bytes"))
+    from .storage import read_chained_jsonl
+    keep = settings.get(cfg, "retention.evidence_keep")
+    for name, chain, legacy in (("authority", AUTHORITY_CHAIN, False),
+                                ("verifications", VERIFICATION_CHAIN, True)):
+        path = os.path.join(root, ".polyctl", "ledger", name + ".jsonl")
+        count = len(read_chained_jsonl(path, chain, legacy_prefix=legacy))
+        if count > keep:
+            out.append((path, count, keep, "rows"))
+    return out
+
+
+# ---- a standing bug-hunter: read-only, bounded, leads not verdicts (#45) -----------------
+
+HUNT_CATEGORIES = ("correctness", "concurrency", "clock", "durability", "subprocess", "portability", "secrets",
+                   "authority", "tests")
+_LEAD = re.compile(r"^\s*-\s*\[([a-z]+)\]\s*([^\s:]+):(\d+)\s+(\S+)\s+[—-]+\s*(.+?)\s*$")
+
+
+def hunter_ledger_path(root):
+    return os.path.join(root, ".polyctl", "ledger", "hunter.jsonl")
+
+
+def hunter_record(root, event, **fields):
+    from .storage import append_jsonl
+    append_jsonl(hunter_ledger_path(root), scan_record(dict(fields, at=int(time.time()), event=event)))
+
+
+def hunter_rows(root):
+    from .storage import read_jsonl
+    return [row for row in read_jsonl(hunter_ledger_path(root)) if isinstance(row, dict)]
+
+
+def hunter_known(root):
+    """Fingerprints already sent or discarded: a repeat is suppressed, a discard remembered (#45)."""
+    return {row.get("fingerprint") for row in hunter_rows(root) if row.get("event") in ("sent", "discarded")}
+
+
+def _hunt_cursor(state_path, candidates):
+    """(index, line) the next hunt starts at: the file the last one stopped before, and the line of it its next
+    piece begins with. The file is kept by name: a file added or removed above it moves no other into its place,
+    and where it is gone the hunt goes on with the one that follows it (BUG-HUNTER-3)."""
+    try:
+        with open(state_path, encoding=UTF8) as fh:
+            state = json.load(fh)
+        index, path, line = int(state.get("cursor") or 0), state.get("path"), int(state.get("line") or 1)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0, 1
+    if not isinstance(path, str):
+        return index % len(candidates), 1           # a cursor written before BUG-HUNTER-3: a place in the list
+    if path in candidates:
+        return candidates.index(path), max(line, 1)
+    return next((at for at, each in enumerate(candidates) if each > path), 0), 1
+
+
+def _hunt_lines(full, largest):
+    """The lines of one file as a hunt reads them, numbered as an editor numbers them: [] where it cannot be read
+    as text, None where it is larger than `largest` bytes and so no source a hunt goes through (BUG-HUNTER-3)."""
+    try:
+        if os.path.getsize(full) > largest:
+            return None
+        with open(full, encoding=UTF8) as fh:
+            return fh.readlines()
+    except (OSError, ValueError):
+        return []
+
+
+def _hunt_piece(lines, budget):
+    """How many of `lines` one hunt reads of a file larger than its budget: those that fit, ending where a
+    blank line is followed by a line that starts at the margin - a definition, a heading - when the last
+    quarter of them holds such a place, so the next piece opens on a whole one (BUG-HUNTER-3)."""
+    taken = spent = 0
+    for line in lines:
+        spent += len(line.encode(UTF8))
+        if spent > budget:
+            break
+        taken += 1
+    for at in range(taken, taken - taken // 4, -1):
+        if at < len(lines) and not lines[at - 1].strip() and lines[at][:1].strip():
+            return at
+    return taken
+
+
+def hunt_slice(root, cfg, passed_over=None):
+    """The next bounded slice of tracked product files, from a cursor that goes round the tree (#45):
+    [(path, text, first line, last line, lines in the file)] and the place in the list the hunt started at.
+
+    Every line of every file up to `hunter.max_file_kb` is read in some hunt (BUG-HUNTER-3). A file that does
+    not fit what is left of a hunt's budget starts the next one; it was passed over, the cursor already beyond
+    it, and the same files could be missed on every round. A file larger than a whole hunt is read a piece a
+    hunt, cut at a line; it was read to its first `hunter.bytes_per_run` and never further, and polyctl's own
+    largest files are three times that. A line longer than a hunt is cut to it. A file past
+    `hunter.max_file_kb` is no source a hunt goes through: it is passed over, and named in `passed_over` where
+    the caller gives a list. A round that finds nothing it can read ends the hunt, where it went round for ever.
+    """
+    try:
+        listed = [os.fsdecode(p) for p in _git_output(root, "ls-files", "-z").split(b"\0") if p]
+    except RuntimeError:
+        return [], 0
+    candidates = [p for p in listed if not _is_coordination_path(p, cfg) and os.path.isfile(os.path.join(root, p))]
+    if not candidates:
+        return [], 0
+    state_path = os.path.join(root, ".polyctl", "hunter.json")
+    index, line = _hunt_cursor(state_path, candidates)
+    cursor, pieces, spent, passed = index, [], 0, 0
+    budget, most = settings.get(cfg, "hunter.bytes_per_run"), settings.get(cfg, "hunter.files_per_run")
+    largest = settings.get(cfg, "hunter.max_file_kb") * 1024
+    while len(pieces) < most and passed < len(candidates):
+        path = candidates[index % len(candidates)]
+        lines = _hunt_lines(os.path.join(root, path), largest)
+        if lines is None and passed_over is not None:
+            passed_over.append(path)
+        rest = (lines or [])[line - 1:]
+        size = sum(len(each.encode(UTF8)) for each in rest)
+        if not rest or size <= budget - spent:
+            if rest:
+                pieces.append((path, "".join(rest), line, len(lines), len(lines)))
+                spent += size
+            index, line, passed = index + 1, 1, passed + 1
+            continue
+        if pieces:
+            break                                    # it starts the next hunt, whole or by its next piece
+        taken = _hunt_piece(rest, budget)
+        if taken:
+            pieces.append((path, "".join(rest[:taken]), line, line + taken - 1, len(lines)))
+        else:
+            # One line longer than a whole hunt: what of it fits, a character the cut splits dropped.
+            taken = 1
+            pieces.append((path, rest[0].encode(UTF8)[:budget].decode(UTF8, "ignore"), line, line, len(lines)))
+        line += taken
+        if line > len(lines):
+            index, line = index + 1, 1
+        break
+    from .storage import replace_file_durably
+    at = index % len(candidates)
+    replace_file_durably(state_path, (json.dumps({"cursor": at, "path": candidates[at], "line": line}) + "\n")
+                         .encode(UTF8))
+    return pieces, cursor
+
+
+def parse_leads(out):
+    """Leads a hunter wrote as `- [category] path:line symbol — what is wrong`, each with a fingerprint (#45)."""
+    leads = []
+    for line in str(out or "").splitlines():
+        found = _LEAD.match(line)
+        if not found or found.group(1) not in HUNT_CATEGORIES:
+            continue
+        category, path, number, symbol, text = found.groups()
+        fingerprint = hashlib.sha256(f"{path}|{symbol}|{category}".encode(UTF8)).hexdigest()[:16]
+        leads.append({"category": category, "path": path, "line": int(number), "symbol": symbol, "finding": text,
+                      "fingerprint": fingerprint})
+    return leads
+
+
+# ---- the governance survives the disk (#46) ---------------------------------------------
+
+_BACKUP_SKIP = re.compile(r"(\.lock|\.tmp|\.pending|\.bak[^/]*|~)$|(^|/)\.polyctl/reviews/|(^|/)\.polyctl/hunter\.json$")
+
+
+def governance_files(root, cfg):
+    """Every file a project's control plane lives in, relative to the root (#46).
+
+    Config, authority, board, backlog, gates and sources; decisions, parked work and
+    every ledger with its sealed archives; the mailbox; and the review artefacts a
+    grant rests on. Locks, temporary files and config backups are not governance.
+    """
+    out = []
+    for top in (".polyctl", cfg.get("mailbox", "agent-mail")):
+        base = os.path.join(root, top)
+        for directory, subdirs, files in os.walk(base):
+            subdirs[:] = [d for d in subdirs if not os.path.islink(os.path.join(directory, d))]
+            for name in files:
+                rel = os.path.relpath(os.path.join(directory, name), root).replace(os.sep, "/")
+                if not _BACKUP_SKIP.search(rel) and os.path.isfile(os.path.join(root, rel)):
+                    out.append(rel)
+    reviews_dir = cfg.get("reviews", "semantic-review")
+    try:
+        # Every grant's review, a sealed grant's too, read from the archives held to their seal (LEDGER-HISTORY).
+        for name in {row.get("review") for row in authority_history(root)
+                     if isinstance(row, dict) and row.get("granted") is True and row.get("review")}:
+            rel = f"{reviews_dir}/{name}"
+            if os.path.isfile(os.path.join(root, rel)):
+                out.append(rel)
+    except Exception:
+        # A chain that cannot be read cannot say which artefacts its grants rest on, and a backup that kept
+        # none of them was complete without a word: every one is kept instead (GOVERNANCE-BACKUP-2).
+        for directory, subdirs, files in os.walk(os.path.join(root, reviews_dir)):
+            subdirs[:] = [d for d in subdirs if not os.path.islink(os.path.join(directory, d))]
+            for name in files:
+                rel = os.path.relpath(os.path.join(directory, name), root).replace(os.sep, "/")
+                if not _BACKUP_SKIP.search(rel) and os.path.isfile(os.path.join(root, rel)):
+                    out.append(rel)
+    return sorted(set(out))
+
+
+def _manifest(root, files):
+    entries = {}
+    for rel in files:
+        with open(os.path.join(root, rel), "rb") as fh:
+            entries[rel] = "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+    return {"schema": 1, "project": project_key(root), "at": int(time.time()),
+            "head": git_text(root, "rev-parse", "HEAD") or None, "files": entries}
+
+
+def write_backup(root, cfg, destination):
+    """Write the governance to a destination the project names: a directory, `ref`, or `remote:<name>` (#46).
+
+    A directory gets `<project>/<stamp>/` with a manifest of every file's digest. A
+    ref is a commit of the same files under refs/polyctl/backup/latest, made from blob
+    and tree objects without touching the index or the worktree. A remote gets that
+    ref pushed, and only after the host says the repository is private.
+    Returns the manifest with where it went, and it is recorded in the ledger.
+    """
+    files = governance_files(root, cfg)
+    manifest = _manifest(root, files)
+    stamp = datetime.fromtimestamp(manifest["at"]).strftime("%Y%m%d-%H%M%S")
+    if destination.startswith("remote:"):
+        remote = destination.split(":", 1)[1]
+        if remote_is_private(root, remote) is not True:
+            raise RuntimeError(f"not pushing governance to {remote}: the host did not confirm it is private")
+    if destination == "ref" or destination.startswith("remote:"):
+        where = _backup_ref(root, manifest)
+        if destination.startswith("remote:"):
+            _git_output(root, "push", remote, "refs/polyctl/backup/latest:refs/polyctl/backup/latest", timeout=300)
+            where = f"{remote} {where}"
+    else:
+        target = os.path.join(os.path.expanduser(destination), manifest["project"], stamp)
+        from .storage import replace_file_durably
+        for rel in files:
+            with open(os.path.join(root, rel), "rb") as fh:
+                replace_file_durably(os.path.join(target, rel), fh.read())
+        replace_file_durably(os.path.join(target, "manifest.json"),
+                             (json.dumps(manifest, indent=1, sort_keys=True) + "\n").encode(UTF8))
+        where = target
+    manifest["where"] = where
+    from .storage import append_jsonl
+    append_jsonl(os.path.join(root, ".polyctl", "ledger", "backups.jsonl"),
+                 {"at": manifest["at"], "where": where, "files": len(files), "head": manifest["head"]})
+    return manifest
+
+
+def _backup_ref(root, manifest):
+    """A commit holding the governance files and the manifest, made without an index (#46)."""
+    tree = {}
+    for rel in list(manifest["files"]) + ["polyctl-backup-manifest.json"]:
+        data = (json.dumps(manifest, indent=1, sort_keys=True) + "\n").encode(UTF8) if rel == "polyctl-backup-manifest.json" \
+            else open(os.path.join(root, rel), "rb").read()
+        blob = subprocess.run([git_binary(), "hash-object", "-w", "--stdin"], cwd=root, input=data,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout.decode().strip()
+        node = tree
+        parts = rel.split("/")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = blob
+
+    def write(node):
+        lines = []
+        for name in sorted(node):
+            if isinstance(node[name], dict):
+                lines.append(f"040000 tree {write(node[name])}\t{name}")
+            else:
+                lines.append(f"100644 blob {node[name]}\t{name}")
+        return subprocess.run([git_binary(), "mktree"], cwd=root, input=("\n".join(lines) + "\n").encode(UTF8),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout.decode().strip()
+
+    commit = subprocess.run([git_binary(), "-c", "user.name=polyctl", "-c", "user.email=polyctl@localhost", "commit-tree",
+                             write(tree), "-m", f"polyctl backup of {manifest['project']} governance"], cwd=root,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout.decode().strip()
+    _git_output(root, "update-ref", "refs/polyctl/backup/latest", commit)
+    return f"refs/polyctl/backup/latest {commit[:12]}"
+
+
+def remote_is_private(root, remote):
+    """True only when the host says the remote's repository is private; None when it cannot say (#46, #83).
+
+    The remote is judged by the URL `git push` reaches, its pushurl where one is set, and GitHub is asked
+    only about a repository on github.com itself (MAIL-SYNC-3).
+    """
+    try:
+        url = _push_url(root, remote)
+    except RuntimeError:
+        return None
+    return _github_says_private(url)
+
+
+def _backup_path(base, rel):
+    """`rel` under `base`, or None where a manifest's words or a link would leave it (GOVERNANCE-BACKUP-2).
+
+    A manifest is not authenticated: `../x` or an absolute path in it was written wherever it
+    pointed. polyctl writes every path relative, with forward slashes and no `.` or `..` part.
+    """
+    words = str(rel).split("/")
+    if not rel or "\\" in rel or os.path.isabs(rel) or os.path.splitdrive(rel)[0] \
+            or any(word in ("", ".", "..") for word in words):
+        return None
+    path = os.path.join(base, *words)
+    return path if _within(path, base) else None
+
+
+def restore_backup(root, source):
+    """Put the governance back from a backup directory, verifying every file against its manifest (#46).
+
+    Returns (restored, unverified): a file whose bytes do not match the digest it was
+    backed up with is not restored, and is named, and so is a path that would leave the
+    checkout or the backup (GOVERNANCE-BACKUP-2).
+    """
+    with open(os.path.join(source, "manifest.json"), encoding=UTF8) as fh:
+        manifest = json.load(fh)
+    from .storage import replace_file_durably
+    restored, unverified = [], []
+    for rel, digest in sorted(manifest["files"].items()):
+        path, target = _backup_path(source, rel), _backup_path(root, rel)
+        if path is None or target is None:
+            unverified.append(f"{rel}: not a path inside the checkout")
+            continue
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError:
+            unverified.append(f"{rel}: missing from the backup")
+            continue
+        if "sha256:" + hashlib.sha256(data).hexdigest() != digest:
+            unverified.append(f"{rel}: its bytes do not match the manifest")
+            continue
+        replace_file_durably(target, data)
+        restored.append(rel)
+    return restored, unverified
+
+
+RESTORE_CHAIN = "polyctl-restore-row-v1"
+
+
+def backup_manifest_digest(source):
+    """The SHA-256 digest of a backup directory's `manifest.json` bytes (LEDGER-ATTESTED)."""
+    with open(os.path.join(source, "manifest.json"), "rb") as fh:
+        return "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+
+
+def record_restore_attestation(root, by, manifest_digest, ledgers):
+    """Record a person's attestation of a restored backup in `.polyctl/ledger/restores.jsonl` (LEDGER-ATTESTED)."""
+    from .storage import append_chained_in_tree
+    user, interactive = _login_and_terminal()
+    return append_chained_in_tree(
+        root,
+        ".polyctl/ledger/restores.jsonl",
+        {"at": int(time.time()), "by": str(by).strip(), "user": user, "interactive": interactive,
+         "manifest": manifest_digest, "ledgers": {rel: rows for rel, rows, *_ in ledgers}},
+        RESTORE_CHAIN,
+    )
+
+
+def latest_restore_attestation(root):
+    """The newest recorded restore attestation in `.polyctl/ledger/restores.jsonl`, or None (LEDGER-ATTESTED)."""
+    from .storage import read_chained_in_tree
+    rows = [row for row in read_chained_in_tree(root, ".polyctl/ledger/restores.jsonl", RESTORE_CHAIN)
+            if isinstance(row, dict)]
+    return rows[-1] if rows else None
+
+
+def _restored_ledgers(root, restored, *, attest=False):
+    """Validate each restored chained ledger against its seal and archives; when `attest=True`, record this machine's
+    checkpoint for each one that validates, and return `[(rel, rows, digest)]` of the gate ledgers attested (or, when
+    `attest=False`, those that need attestation on this machine) (LEDGER-ATTESTED)."""
+    from .storage import GATE_LEDGERS, LedgerCorruption, _load_seal, attest_restored_ledger, seal_path
+    gate_rels = {rel for _, rel, _, _, _ in GATE_LEDGERS}
+    chains = tuple((rel, chain, legacy) for _, rel, chain, legacy, _ in GATE_LEDGERS) + (
+        (".polyctl/ledger/merges.jsonl", MERGE_CHAIN, False),
+        (".polyctl/ledger/slices.jsonl", SLICE_CHAIN, False),
+        (".polyctl/ledger/mail-store.jsonl", MAIL_STORE_CHAIN, False),
+        (".polyctl/ledger/repairs.jsonl", REPAIR_CHAIN, False),
+        (".polyctl/ledger/restores.jsonl", RESTORE_CHAIN, False),
+    )
+    verified = set(restored)
+    unattested, errors = [], []
+    for rel, chain, legacy in chains:
+        if rel not in verified:
+            continue
+        path = os.path.join(root, *rel.split("/"))
+        if os.path.lexists(seal_path(path)):
+            if f"{rel}.seal.json" not in verified:
+                errors.append(f"{rel}: its seal was not verified from the backup")
+                continue
+            try:
+                seal = _load_seal(path)
+            except Exception as exc:
+                errors.append(str(exc))
+                continue
+            if seal and any(f".polyctl/ledger/sealed/{name}" not in verified for name in (seal.get("archives") or [])):
+                errors.append(f"{rel}: its sealed archives were not verified from the backup")
+                continue
+        try:
+            is_gate = rel in gate_rels
+            rows, digest, already = attest_restored_ledger(path, chain, legacy_prefix=legacy, record=attest)
+            if is_gate and rows > 0 and (attest or not already):
+                unattested.append((rel, rows, digest))
+        except Exception as exc:
+            errors.append(str(exc))
+    if errors:
+        raise LedgerCorruption("; ".join(errors))
+    return unattested
+
+
+
+def backup_age(root):
+    """(seconds since the newest backup, where it went), or None when there is none (#46)."""
+    from .storage import read_jsonl
+    rows = [row for row in read_jsonl(os.path.join(root, ".polyctl", "ledger", "backups.jsonl")) if isinstance(row, dict)]
+    return (time.time() - float(rows[-1]["at"]), rows[-1].get("where")) if rows else None
+
+
+# ---- the harness content seam: borrow, pin, verify (#14, #15) ----------------------------
+
+CONTENT_TEXT = (".md", ".txt", ".json", ".yaml", ".yml")
+# Each kind of content a source keeps, and the key naming an entry of its list in .polyctl/content.json.
+CONTENT_KINDS = (("skills", "skill"), ("steering", "steering"), ("agents", "agent"))
+CONTENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# A tree entry of one of these modes is not a text file, whatever its name says.
+_NOT_TEXT_MODES = {"120000": "a symbolic link", "160000": "a submodule", "100755": "executable"}
+
+
+def content_manifest_path(root):
+    return os.path.join(root, ".polyctl", "content.json")
+
+
+def content_manifest(root):
+    """{kind: [entry]} as .polyctl/content.json records them; a kind it lacks, or holds as no list, is empty."""
+    try:
+        with open(content_manifest_path(root), encoding=UTF8) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        data = {}
+    data = data if isinstance(data, dict) else {}
+    return {kind: [entry for entry in data[kind] if isinstance(entry, dict)] if isinstance(data.get(kind), list)
+            else [] for kind, _ in CONTENT_KINDS}
+
+
+def fetch_pinned(source, pin, paths, workdir):
+    """{path: (mode, blob id)} for each file under `paths` of `source` at commit `pin` (#14).
+
+    Nothing unpinned is ever fetched, and nothing is checked out: a file is read by its
+    blob id when it is wanted (`pinned_blobs`). So its bytes are the commit's whatever this
+    machine converts - Git for Windows checks text out with CRLF by default, and neither
+    the files nor their digests were the commit's (#71) - and a symbolic link is a mode
+    here, never a path polyctl follows to a file of this machine. A path the commit does not
+    hold is absent from the answer.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", str(pin or "")):
+        raise ValueError(f"{pin!r} is not a pin: name a full 40-character commit id, never a branch or a tag")
+    git = git_binary()
+    subprocess.run([git, "init", "-q", workdir], check=True, capture_output=True)
+    subprocess.run([git, "-C", workdir, "fetch", "-q", "--depth", "1", source, pin], check=True, capture_output=True,
+                   timeout=300)
+    fetched = subprocess.run([git, "-C", workdir, "rev-parse", "FETCH_HEAD"], check=True, capture_output=True,
+                             text=True, encoding=UTF8, errors="replace").stdout.strip()
+    if fetched != pin:
+        raise RuntimeError(f"{source} answered {fetched[:12]}, not the pinned {pin[:12]}")
+    if not paths:
+        return {}
+    listing = subprocess.run([git, "-C", workdir, "--literal-pathspecs", "ls-tree", "-r", "-z", pin, "--", *paths],
+                             check=True, capture_output=True, timeout=300).stdout
+    files = {}
+    for record in listing.split(b"\0"):
+        meta, _, path = record.partition(b"\t")
+        fields = meta.decode(UTF8, "replace").split()
+        if path and len(fields) == 3:
+            files[path.decode(UTF8, "surrogateescape")] = (fields[0], fields[2])
+    return files
+
+
+def pinned_blobs(workdir, ids):
+    """{blob id: bytes} for each id, read from the fetched commit by one `git cat-file --batch` (#15)."""
+    wanted = sorted(set(ids))
+    if not wanted:
+        return {}
+    out = subprocess.run([git_binary(), "-C", workdir, "cat-file", "--batch"],
+                         input="".join(f"{oid}\n" for oid in wanted).encode(UTF8), check=True, capture_output=True,
+                         timeout=300).stdout
+    blobs, at = {}, 0
+    for oid in wanted:
+        end = out.find(b"\n", at)
+        header = out[at:end].split() if end >= 0 else []
+        if len(header) != 3 or header[1] != b"blob":
+            raise RuntimeError(f"the pinned commit holds no blob {oid[:12]}")
+        size = int(header[2])
+        blobs[oid] = out[end + 1:end + 1 + size]
+        at = end + 1 + size + 1
+    return blobs
+
+
+def _not_borrowed(path, mode, data=None):
+    """Why a file of a pinned tree is not borrowed, or None when it is text (#14).
+
+    The mode is the commit's, so an executable is one on every platform: Windows keeps
+    no execute bit on disk, and os.access says every file there has one (#71).
+    """
+    if mode in _NOT_TEXT_MODES:
+        return f"{_NOT_TEXT_MODES[mode]}: only text is borrowed"
+    if not path.lower().endswith(CONTENT_TEXT):
+        return "not Markdown, text, JSON or YAML: only text is borrowed"
+    if data is not None and data[:2] == b"#!":
+        return "a script: only text is borrowed"
+    return None
+
+
+def _front_matter(data, field):
+    """What a Markdown file's front matter says for a top-level `field`, or None."""
+    block = re.match(rb"\A---\r?\n(.*?)\r?\n---(?:\r?\n|\Z)", data, re.S)
+    found = block and re.search(rb"^" + re.escape(field.encode(UTF8)) + rb"[ \t]*:[ \t]*['\"]?([^'\"\s#]+)",
+                                block.group(1), re.M)
+    return found.group(1).decode(UTF8, "replace") if found else None
+
+
+def _declared(*blocks):
+    """One {name: text} from each block that is a dict, a later block's names winning."""
+    merged = {}
+    for block in blocks:
+        merged.update(block if isinstance(block, dict) else {})
+    return merged
+
+
+def _kept_files(root):
+    """Files an adapter says a harness or polyctl keeps for itself; borrowed content replaces none (#15).
+
+    A playbook, a coordination file, an MCP registration, settings whose hooks run
+    commands: a borrowed file landing on one would speak for polyctl or run what nobody
+    pinned. A path ending in `/` stands for everything under it.
+    """
+    kept = set()
+    for adapter in list(package_adapters().values()) + [entry["adapter"] for entry in adapter_catalog(root).values()]:
+        adapter = adapter if isinstance(adapter, dict) else {}
+        directives = adapter.get("directives") if isinstance(adapter.get("directives"), dict) else {}
+        named = [_declared(directives.get("playbook")).get("path"), directives.get("coordination"),
+                 directives.get("config"), directives.get("mcp"), _declared(adapter.get("mcp")).get("file")]
+        for field in ("polyctl_files", "rule_files", "steering_files"):
+            named += directives.get(field) if isinstance(directives.get(field), list) else []
+        named += _declared(directives.get("command_hooks")).get("files") or []
+        kept.update(rel for rel in named if isinstance(rel, str) and rel)
+    return kept
+
+
+def _content_refusal(root, harness, target, kept):
+    """Why polyctl must not write `target` for `harness`, or None (#15).
+
+    Borrowed content lands in the harness's own directory, as the package's adapter
+    declares it in `detect.dirs`, and nowhere else. A user's or a project's adapter layer
+    is writable by the agents it describes, so a directory it names elsewhere - the
+    product, polyctl's state, another harness's settings - is refused, as is a symbolic link
+    on the way and a file a harness or polyctl keeps for itself.
+    """
+    homes = [str(d).strip("/") for d in ((package_adapters().get(harness) or {}).get("detect") or {}).get("dirs") or []
+             if str(d).strip("/")]
+    steps = _plain_steps(target)
+    if not steps:
+        return f"{target} is not a path inside the project"
+    if not any(target.startswith(home + "/") for home in homes):
+        return f"{target} is outside {harness}'s own directory ({', '.join(homes) or 'the package declares none'})"
+    # A content import has the same owners on case-sensitive and insensitive volumes (TRIAGE-4-REST).
+    folded = target.casefold()
+    if any(folded == rel.casefold() or (rel.endswith("/") and folded.startswith(rel.casefold())) for rel in kept):
+        return f"{target} is a file a harness or polyctl keeps for itself"
+    real = os.path.realpath(root)
+    if os.path.normcase(os.path.realpath(os.path.join(root, *steps))) != os.path.normcase(os.path.join(real, *steps)):
+        return f"{target} passes through a symbolic link"
+    return None
+
+
+def _content_item(kind, name):
+    return {"kind": kind, "name": name, "files": {}, "skipped": [], "unsupported": [], "notes": []}
+
+
+def _skill_item(name, head, tree, blobs, declared):
+    """A skill's text files for each harness that takes skills, or its SKILL.md as a steering file (#14)."""
+    item, texts = _content_item("skills", name), {}
+    for path, (mode, oid) in sorted(tree.items()):
+        if not path.startswith(head):
+            continue
+        rel = path[len(head):]
+        steps = rel.split("/")
+        if "hooks" in steps[:-1]:
+            hooks = ("/".join(steps[:steps.index("hooks") + 1]) + "/", "hooks are never imported")
+            if hooks not in item["skipped"]:
+                item["skipped"].append(hooks)
+            continue
+        why = _not_borrowed(rel, mode, blobs.get(oid))
+        if why:
+            item["skipped"].append((rel, why))
+        else:
+            texts[rel] = blobs[oid]
+    for harness, (directives, _, _) in declared.items():
+        if directives.get("skills_dir"):
+            item["files"].update({f"{directives['skills_dir']}/{name}/{rel}": (harness, data)
+                                  for rel, data in texts.items()})
+        elif directives.get("steering_dir") and "SKILL.md" in texts:
+            body = re.sub(r"\A---\n.*?\n---\n+", "", texts["SKILL.md"].decode(UTF8, "replace"), flags=re.S)
+            header = str(_declared(directives.get("steering_inclusion")).get("skill_header") or "")
+            item["files"][f"{directives['steering_dir']}/{name}.md"] = (harness, (header + body).encode(UTF8))
+    return item
+
+
+def _steering_item(name, path, tree, blobs, declared):
+    """A steering file, byte for byte and front matter and all, for each harness that reads steering (#15)."""
+    item = _content_item("steering", name)
+    mode, oid = tree[path]
+    why = _not_borrowed(path, mode, blobs.get(oid))
+    if why:
+        item["skipped"].append((f"steering/{name}.md", why))
+        return item
+    for harness, (directives, _, known) in declared.items():
+        if directives.get("steering_dir"):
+            item["files"][f"{directives['steering_dir']}/{name}.md"] = (harness, blobs[oid])
+        elif known:
+            item["notes"].append(f"{harness} reads no steering files")
+    return item
+
+
+def _resource_outside(value):
+    """Whether an agent's resource names a file outside the project's tree: a `file://` path that is absolute,
+    starts at a home (`~`), names a drive, or steps up with `..` (KIRO-CONTENT-2)."""
+    text = str(value)
+    if not text.startswith("file://"):
+        return False
+    path = text[len("file://"):].replace("\\", "/")
+    return path.startswith(("/", "~")) or path[1:2] == ":" or ".." in path.split("/")
+
+
+def _agent_item(name, path, tree, blobs, declared, takes_agents):
+    """An agent definition in each harness's declared format, with no field in it that runs a command (#15).
+
+    A field the package's adapter or a layer over it names in `agent_format.commands` -
+    hooks, servers the harness starts - is taken out and named, so a layer cannot take one
+    back in. The fields that grant trust, and an empty field that loads context, are kept
+    and named: whoever runs the agent should see them before it runs.
+    """
+    item = _content_item("agents", name)
+    for harness, (directives, shipped, known) in declared.items():
+        if harness not in takes_agents:
+            if known:
+                item["notes"].append(f"{harness} reads no agent definitions polyctl can borrow")
+            continue
+        shape, (mode, oid) = _declared(directives.get("agent_format")), tree[path]
+        why = _not_borrowed(path, mode, blobs.get(oid))
+        try:
+            definition = None if why else json.loads(blobs[oid].decode("utf-8-sig"))
+        except ValueError:
+            definition = None
+        if not why and not isinstance(definition, dict):
+            why = "not a JSON object, which an agent definition is"
+        elif not why and definition.get("name", name) != name:
+            why = f"it names itself {definition.get('name')!r}, and an agent is named as its file"
+        if why:
+            if (f"agents/{name}.json", why) not in item["skipped"]:
+                item["skipped"].append((f"agents/{name}.json", why))
+            continue
+        commands = _declared(shape.get("commands"), _declared(shipped.get("agent_format")).get("commands"))
+        taken = [field for field in sorted(commands) if definition.get(field)]
+        for field in taken:
+            definition.pop(field)
+            item["skipped"].append((f"agents/{name}.json {field}", str(commands[field])))
+        # A resource is context the agent loads before it runs: one outside the project's tree loads a file
+        # of this machine the source chose - a key, a credential - so it is taken out and named, and what is
+        # kept is named as a grant is (KIRO-CONTENT-2).
+        context = _declared(shape.get("context"))
+        resources = definition.get(context.get("field")) if context.get("field") else None
+        if isinstance(resources, list) and any(_resource_outside(value) for value in resources):
+            for value in resources:
+                if _resource_outside(value):
+                    item["skipped"].append((f"agents/{name}.json {context['field']} {value}",
+                                            "a file outside the project's tree, which the source chose: never "
+                                            "imported"))
+            definition[context["field"]] = [value for value in resources if not _resource_outside(value)]
+            taken.append(context["field"])
+        # So does a field whose `file://` value the agent loads as text - Kiro's prompt is inline or a file: one outside
+        # the project's tree was kept as written, and loaded a file of this machine the source chose into the agent's
+        # instructions. The package's list and a layer's are read together, so a layer cannot take one back in
+        # (REVIEW-PATH-HIGHS).
+        loads = _declared(shape.get("loads"), _declared(shipped.get("agent_format")).get("loads"))
+        for field in sorted(loads):
+            value = definition.get(field)
+            if isinstance(value, str) and _resource_outside(value):
+                definition.pop(field)
+                item["skipped"].append((f"agents/{name}.json {field} {value}",
+                                        f"{loads[field]}, outside the project's tree, which the source chose: never "
+                                        "imported"))
+                taken.append(field)
+        target = f"{directives['agents_dir']}/{name}.json"
+        item["files"][target] = (harness, (json.dumps(definition, indent=2, ensure_ascii=False) + "\n").encode(UTF8)
+                                 if taken else blobs[oid])
+        for field, meaning in sorted(_declared(shape.get("grants")).items()):
+            value = definition.get(field)
+            if value:
+                shown = value if isinstance(value, list) else sorted(value) if isinstance(value, dict) else [value]
+                item["notes"].append(f"{target} keeps {field} {', '.join(map(str, shown))}: {meaning}")
+        if context.get("field") and not definition.get(context["field"]):
+            item["notes"].append(f"{target} names no {context['field']}: {context.get('empty')}")
+        elif context.get("field") and isinstance(definition.get(context["field"]), list):
+            item["notes"].append(f"{target} keeps {context['field']} "
+                                 f"{', '.join(map(str, definition[context['field']]))}: the context it loads")
+    return item
+
+
+def _unsupported_inclusion(item, declared):
+    """Name each steering file whose inclusion its harness does not honour; the file is written as it is (#15)."""
+    for target, (harness, data) in sorted(item["files"].items()):
+        directives = declared[harness][0]
+        rules = _declared(directives.get("steering_inclusion"))
+        if not (rules.get("field") and directives.get("steering_dir")
+                and target.startswith(f"{directives['steering_dir']}/")):
+            continue
+        mode = _front_matter(data, rules["field"]) or str(rules.get("default") or "")
+        if mode not in (rules.get("honoured") or []):
+            item["unsupported"].append((target, f"{rules['field']}: {mode} - {rules.get('unhonoured')}"))
+
+
+def _content_refusals(root, items):
+    """Every reason a planned write must not be made; one of them stops them all (#15)."""
+    record, kept, refused, writers = content_manifest(root), _kept_files(root), [], {}
+    for item in items:
+        key = dict(CONTENT_KINDS)[item["kind"]]
+        label = f"{key} {item['name']}"
+        for target, (harness, data) in sorted(item["files"].items()):
+            why = _content_refusal(root, harness, target, kept)
+            folded = target.casefold()
+            if not why and folded in writers:
+                why = f"{target} would be written by both {writers[folded]} and {label}"
+            writers.setdefault(folded, label)
+            # A file another entry vendored is that entry's, whatever its bytes: equal bytes left two entries
+            # owning one file, and removing either took it from the other (KIRO-CONTENT-2).
+            owner = next((f"{dict(CONTENT_KINDS)[kind]} {entry.get(dict(CONTENT_KINDS)[kind])}"
+                          for kind, entries in record.items() for entry in entries
+                          if any(target.casefold() == rel.casefold() for rel in (entry.get("files") or {}))
+                          and not (kind == item["kind"] and entry.get(key) == item["name"])), None)
+            if not why and owner:
+                why = f"{target} was vendored as {owner}: remove that first"
+            path = os.path.join(root, *target.split("/"))
+            if not why and os.path.isdir(path):
+                why = f"{target} is a directory"
+            elif not why and os.path.exists(path):
+                with open(path, "rb") as fh:
+                    current = fh.read()
+                # A manifest names an owner, not permission to discard a later hand edit (TRIAGE-4-REST).
+                recorded = [digest for entry in record[item["kind"]] if entry.get(key) == item["name"]
+                            for rel, digest in (entry.get("files") or {}).items()
+                            if target.casefold() == rel.casefold()]
+                digest = "sha256:" + hashlib.sha256(current).hexdigest()
+                if recorded and any(previous != digest for previous in recorded):
+                    why = f"{target} changed since it was vendored: move it aside first"
+                elif current != data and not recorded:
+                    why = f"{target} exists and polyctl did not vendor it as {label}: move it aside first"
+            if why:
+                refused.append(why)
+    return refused
+
+
+def vendor_content(root, source, pin, harnesses, skills=(), steering=(), agents=(), base="", dry_run=False):
+    """Borrow skills, steering files and agent definitions pinned to a commit, text only, into each harness (#14, #15).
+
+    A source keeps `skills/<name>/`, `steering/<name>.md` and `agents/<name>.json` under
+    `base`, its root unless named: a repository that ships one harness's layer keeps it in
+    that harness's own directory. Each harness takes what its adapter declares. Only text
+    is borrowed and hooks never are, and both are named; what a harness does not honour,
+    such as an inclusion only its IDE reads, is written as it is and named unsupported,
+    never faked. Every write is checked before any is made, one refusal writes nothing,
+    and a dry run writes nothing at all. Each written file's digest is recorded in
+    .polyctl/content.json.
+
+    Returns {"items", "hooks", "refused"}: each item {kind, name, files: {target: (harness,
+    bytes)}, skipped: [(path, why)], unsupported: [(target, why)], notes: [text]}, each hook
+    (path, why), and each refusal a sentence.
+    """
+    import tempfile
+    for kind, names in (("skills", skills), ("steering", steering), ("agents", agents)):
+        for name in names:
+            if not CONTENT_NAME.fullmatch(name):
+                raise ValueError(f"{name!r} is not a {dict(CONTENT_KINDS)[kind]} name")
+    base = str(base or "").strip("/")
+    if base and not _plain_steps(base):
+        raise ValueError(f"{base!r} is not a directory inside the source: names joined by `/`, with no `.` or `..`")
+    prefix = f"{base}/" if base else ""
+    declared = {}                   # harness: (its directives, the package's directives for it, has it an adapter)
+    for harness in harnesses:
+        adapter = load_adapter(harness, root)
+        declared[harness] = (_declared(adapter.get("directives")),
+                             _declared((package_adapters().get(harness) or {}).get("directives")), bool(adapter))
+    takes_agents = [harness for harness, (directives, _, _) in declared.items() if directives.get("agents_dir")
+                    and _declared(directives.get("agent_format")).get("extension") == ".json"]
+    wanted = [f"{prefix}skills/{name}" for name in skills] + [f"{prefix}steering/{name}.md" for name in steering]
+    wanted += [f"{prefix}agents/{name}.json" for name in agents] if takes_agents else []
+    wanted += [f"{prefix}hooks"] if steering or agents else []
+    where = f" at {pin[:12]}" + (f" in {base}" if base else "")
+    with tempfile.TemporaryDirectory(prefix="polyctl-content-") as work:
+        tree = fetch_pinned(source, pin, wanted, work)
+        missing = [f"{name} is not a skill{where}" for name in skills
+                   if not any(path.startswith(f"{prefix}skills/{name}/") for path in tree)]
+        missing += [f"{name} is not a steering file{where}" for name in steering
+                    if f"{prefix}steering/{name}.md" not in tree]
+        missing += [f"{name} is not an agent{where}" for name in agents
+                    if takes_agents and f"{prefix}agents/{name}.json" not in tree]
+        if missing:
+            raise ValueError("; ".join(missing))
+        blobs = pinned_blobs(work, [oid for path, (mode, oid) in tree.items()
+                                    if not path.startswith(f"{prefix}hooks/") and not _not_borrowed(path, mode)])
+    items = [_skill_item(name, f"{prefix}skills/{name}/", tree, blobs, declared) for name in skills]
+    items += [_steering_item(name, f"{prefix}steering/{name}.md", tree, blobs, declared) for name in steering]
+    items += [_agent_item(name, f"{prefix}agents/{name}.json", tree, blobs, declared, takes_agents) for name in agents]
+    for item in items:
+        _unsupported_inclusion(item, declared)
+    hooks = []
+    for path in sorted(path for path in tree if path.startswith(f"{prefix}hooks/")):
+        rel, why = path[len(prefix):], ["hooks are never imported"]
+        for harness, (directives, _, _) in declared.items():
+            formats = _declared(directives.get("hook_files"))
+            suffix = max((suffix for suffix in formats if rel.endswith(suffix)), key=len, default=None)
+            if suffix:
+                why.append(f"{harness}: {formats[suffix]}")
+        hooks.append((rel, "; ".join(why)))
+    plan = {"items": items, "hooks": hooks, "refused": _content_refusals(root, items)}
+    if plan["refused"] or dry_run:
+        return plan
+
+    from .storage import replace_file_durably
+    record = content_manifest(root)
+    for item in items:
+        key, digests = dict(CONTENT_KINDS)[item["kind"]], {}
+        for target, (_, data) in sorted(item["files"].items()):
+            replace_file_durably(os.path.join(root, *target.split("/")), data)
+            digests[target] = "sha256:" + hashlib.sha256(data).hexdigest()
+        record[item["kind"]] = [entry for entry in record[item["kind"]] if entry.get(key) != item["name"]]
+        record[item["kind"]].append({key: item["name"], "source": source, "pin": pin, "files": digests,
+                                     "skipped": [f"{path} ({why})" for path, why in item["skipped"]]})
+    replace_file_durably(content_manifest_path(root), (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
+    return plan
+
+
+def verify_content(root):
+    """Vendored files whose bytes no longer match the digest they were vendored with (#14, #15)."""
+    drift = []
+    for kind, entries in content_manifest(root).items():
+        key = dict(CONTENT_KINDS)[kind]
+        for entry in entries:
+            # A skill is named as it always was; the kinds borrowed since say which kind they are.
+            label = f"{'' if kind == 'skills' else key + ' '}{entry.get(key)}@{str(entry.get('pin') or '')[:12]}"
+            for target, digest in sorted((entry.get("files") or {}).items()):
+                try:
+                    with open(os.path.join(root, target), "rb") as fh:
+                        actual = "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+                except OSError:
+                    drift.append(f"{target} ({label}) is missing")
+                    continue
+                if actual != digest:
+                    drift.append(f"{target} ({label}) changed since it was vendored")
+    return drift
+
+
+_UNSAFE_HOOK = re.compile(r"\b(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(ba|z)?sh\b|\brm\s+-rf\s+(/|~|\$HOME)(\s|$)")
+_UNPINNED_RUNNER = ("npx", "bunx", "uvx", "pipx")
+
+
+def agent_config_files(root):
+    """Project files that configure an agent, as every adapter declares them, and AGENTS.md (#76)."""
+    files = []
+
+    def add(rel):
+        rel = str(rel or "")
+        if rel and not rel.startswith("~") and not os.path.isabs(rel) and rel not in files:
+            files.append(rel)
+
+    for _, entry in sorted(adapter_catalog(root).items()):
+        adapter = entry["adapter"]
+        directives = adapter.get("directives") or {}
+        for rel in (directives.get("rule_files") or []) + (directives.get("steering_files") or []) \
+                + ((directives.get("command_hooks") or {}).get("files") or []):
+            add(rel)
+        add((adapter.get("mcp") or {}).get("file"))
+        steering = directives.get("steering_dir")
+        if steering and os.path.isdir(os.path.join(root, *steering.split("/"))):
+            for name in sorted(os.listdir(os.path.join(root, *steering.split("/")))):
+                if name.endswith(".md"):
+                    add(f"{steering}/{name}")
+    add("AGENTS.md")
+    return files
+
+
+def agent_config_findings(root):
+    """AgentShield's check categories over a project's agent configuration, ported natively (#14).
+
+    Secrets in agent files, allow rules that admit everything, permissions with no
+    deny list, hooks that pipe a download into a shell or remove the home directory,
+    and MCP servers run from an unpinned package. Only allow rules are scored, so a
+    deny rule naming `--no-verify` is not a finding, and `env -u VAR` is not read as
+    dumping the environment (the known false positives in docs/upstream.md).
+    Returns [(category, text)].
+    """
+    out = []
+    files = agent_config_files(root)
+    for rel in files:
+        try:
+            with open(os.path.join(root, rel), encoding=UTF8, errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        hits = scan_evidence(text)[1]
+        if hits:
+            out.append(("secrets", f"{rel} holds what looks like a credential: {', '.join(sorted(set(hits)))}"))
+        if not rel.endswith(".json"):
+            continue
+        try:
+            document = json.loads(text)
+        except ValueError:
+            continue
+        permissions = document.get("permissions") if isinstance(document, dict) else None
+        if isinstance(permissions, dict):
+            broad = [rule for rule in permissions.get("allow") or [] if str(rule).strip() in ("*", "Bash", "Bash(*)", "Bash(*:*)")]
+            if broad:
+                out.append(("permissive-allow", f"{rel} allows {', '.join(broad)}: every command, a hook bypass and a push "
+                                                "among them"))
+            if permissions.get("allow") and not permissions.get("deny"):
+                out.append(("missing-deny", f"{rel} allows tools and denies nothing"))
+        hooks = document.get("hooks") if isinstance(document, dict) else None
+        for entries in (hooks.values() if isinstance(hooks, dict) else []):
+            for entry in entries if isinstance(entries, list) else []:
+                for hook in (entry.get("hooks") or []) if isinstance(entry, dict) else []:
+                    command = str((hook or {}).get("command") or "") if isinstance(hook, dict) else ""
+                    if _UNSAFE_HOOK.search(command):
+                        out.append(("hook-safety", f"{rel} runs a hook that pipes a download into a shell or removes "
+                                                   f"a home: {command[:80]}"))
+        servers = document.get("mcpServers") if isinstance(document, dict) else None
+        for name, server in (servers.items() if isinstance(servers, dict) else []):
+            command = os.path.basename(str((server or {}).get("command") or ""))
+            args = [str(arg) for arg in (server or {}).get("args") or []]
+            packages = [arg for arg in args if not arg.startswith("-")]
+            if command in _UNPINNED_RUNNER and packages and not re.search(r".@\d", packages[0]):
+                out.append(("mcp-hygiene", f"{rel} runs MCP server {name} from {command} {packages[0]} with no "
+                                           "version pinned"))
+    return out
+
+
+# ---- asking the codebase a question is a capability, not a copy (#81) --------------------
+
+# The folder of the copy of the working tree that `polyctl ask --codebase` runs its provider in, and names {root}
+# (CODEBASE-COPY).
+CODEBASE_TREE_DIR = "tree"
+
+
+def ask_codebase(root, cfg, question, timeout=300):
+    """Answer a question about the code through a configured provider, never without citations (#81).
+
+    polyctl cannot embed a code-intelligence engine without breaking `dependencies = []`,
+    and should not reimplement one. A provider is a command in `codebase.provider`
+    (argv with {question} and {root}) that prints JSON: {"answer": text, "citations":
+    [{"file": path, "lines": "a-b"}]}. With none configured, or an answer that cites
+    nothing, the question is refused and what would satisfy it is named.
+    Returns {"answer", "citations"} or raises ValueError.
+
+    The provider runs in a copy of the working tree, never in the tree itself (CODEBASE-COPY). It ran in the
+    repository, so a provider that is a harness read the tree's own configuration - the hooks, plugins and MCP servers
+    of .claude/settings.json, opencode.json and the like, files an agent writes - and ran them before any review had
+    seen them. The tree as it stands, uncommitted changes and untracked files in and ignored files out, is written into
+    a tree object through an index of the copy's own and unpacked outside the repository, less what any harness reads
+    from a project, as a review's candidate is (REVIEW-TREE-3); {root} names that copy and the provider runs in it.
+    Citations are read against the copy, and the copy is removed whatever happens: an answer, a refusal, an error or
+    a timeout.
+    """
+    import shutil
+    import tempfile
+    provider = (cfg.get("codebase") or {}).get("provider") or {}
+    argv = provider.get("argv") if isinstance(provider, dict) else None
+    if not argv:
+        raise ValueError("no codebase provider is configured: set codebase.provider.argv to a command that takes "
+                         "{question} and {root} and prints {\"answer\", \"citations\"} as JSON (ctxman is the first "
+                         "provider documented in docs/upstream.md)")
+    # Found before anything is copied: a provider named without a directory is the one PATH holds, never one the
+    # current directory holds, which Windows looks in first (WINDOWS-NO-CWD-EXEC); one named by a path is that file.
+    program = str(argv[0]).replace("{question}", question)
+    if not os.path.dirname(program):
+        found = program_path(program)
+        if found is None:
+            raise ValueError(f"the codebase provider {program} is not on PATH")
+        program = found
+    copy = tempfile.mkdtemp(prefix="polyctl-codebase-")
+    try:
+        if _within(copy, root):
+            raise ValueError(f"the temporary directory {os.path.dirname(copy)} lies inside this repository, where a "
+                             "copy of the tree would be read as the repository itself: set TMPDIR to a directory "
+                             "outside it and ask again")
+        try:
+            snapshot = working_tree_snapshot(root, os.path.join(copy, "index"))
+        except RuntimeError as exc:
+            raise ValueError(f"the working tree could not be copied for the provider ({exc}); a provider runs in a "
+                             "copy of the tree, never in the repository") from exc
+        tree = unpack_tree(root, snapshot, os.path.join(copy, CODEBASE_TREE_DIR))
+        if tree is None:
+            raise ValueError("the working tree could not be written out for the provider; a provider runs in a copy "
+                             "of the tree, never in the repository")
+        rendered = [program] + [str(part).replace("{question}", question).replace("{root}", tree) for part in argv[1:]]
+        code, stdout = _run_codebase_provider(rendered, tree, timeout)
+        try:
+            document = json.loads(stdout)
+        except ValueError as exc:
+            raise ValueError(f"the codebase provider did not answer in JSON (exit {code})") from exc
+        answer = str((document or {}).get("answer") or "").strip() if isinstance(document, dict) else ""
+        citations = [item for item in (document.get("citations") or [])
+                     if isinstance(item, dict) and item.get("file")] if isinstance(document, dict) else []
+        if not answer or not citations:
+            raise ValueError("the provider's answer cites no file and line range; an answer without citations is not "
+                             "an answer polyctl passes on")
+        cited = [_cited_in_copy(tree, item["file"]) for item in citations]
+        missing = [str(item["file"]) for item, place in zip(citations, cited) if place is None]
+        if missing:
+            withheld = sorted({project_config_member(name) for name in missing} - {None}, key=str.casefold)
+            raise ValueError(f"the answer cites files that are not in this repository: {', '.join(missing[:3])}"
+                             + (f". A provider is handed the tree without what a harness reads from a project as its "
+                                f"configuration or instructions ({', '.join(withheld)}); read those in the repository "
+                                "yourself" if withheld else ""))
+        # The provider was told {root} is the copy; the person reads the repository's paths, the copy being gone.
+        for spelling in sorted({tree, os.path.realpath(tree)}, key=len, reverse=True):
+            answer = answer.replace(spelling, root)
+        return {"answer": scan_evidence(answer)[0],
+                "citations": [dict(item, file=place) for item, place in zip(citations, cited)]}
+    finally:
+        shutil.rmtree(copy, ignore_errors=True)
+
+
+def _cited_in_copy(tree, name):
+    """The path a citation names, relative to the copy of the tree, when the copy holds it; else None (CODEBASE-COPY).
+
+    A provider handed {root} may cite a file under it in full, which is read as the path below it. One that climbs out
+    of the copy, or that the copy does not hold, is no file of this repository's: the copy is all the provider had.
+    """
+    name = str(name)
+    full = os.path.join(tree, name)
+    if not name or not _lands_inside(tree, name) or not os.path.exists(full):
+        return None
+    return os.path.relpath(os.path.realpath(full), os.path.realpath(tree)).replace(os.sep, "/")
+
+
+def _run_codebase_provider(argv, cwd, timeout):
+    """(exit code, standard output) of a codebase provider run in `cwd`; ValueError when it does not start, or does not
+    answer within `timeout` (CODEBASE-COPY).
+
+    It leads a process group of its own and is handed no git variable, as a reviewer is (#65): a timeout stops whatever
+    it started, which would otherwise go on reading the copy - and on Windows keep it from being removed - and a git
+    command it runs finds no repository above the copy.
+    """
+    import signal
+    env = {name: value for name, value in os.environ.items() if not name.upper().startswith("GIT_")}
+    env.update(PWD=cwd, GIT_CEILING_DIRECTORIES=os.path.dirname(cwd))
+    group = ({"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)} if os.name == "nt"
+             else {"start_new_session": True})
+    try:
+        proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, encoding=UTF8, errors="replace", **group)
+    except OSError as exc:
+        raise ValueError(f"the codebase provider did not run: {exc}") from exc
+    try:
+        stdout, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        left = kill_turn(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM)) or []
+        try:
+            proc.kill()
+            proc.communicate(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            for stream in (proc.stdout, proc.stderr):
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+        if left:
+            # It said whatever the provider started was stopped, whatever the stop did (WINDOWS-STOP-PROVEN).
+            raise ValueError(f"the codebase provider did not answer within {timeout}s, and nothing was answered: it "
+                             f"was stopped, and {len(left)} process(es) it started still run: {left} - stop them by "
+                             "hand") from None
+        raise ValueError(f"the codebase provider did not answer within {timeout}s: it was stopped, with whatever it "
+                         "started, and nothing was answered") from None
+    return proc.returncode, stdout
+
+
+def safe_slug(text, fallback="note", limit=40):
+    """A file-name part holding only [A-Za-z0-9._-] (#19).
+
+    `polyctl mail send note "polyctl: kiro/* dal …"` kept the "/" and wrote into a directory
+    that did not exist. Separators, wildcards, quotes, whitespace and letters
+    outside ASCII all become a dash; what is left is cut to `limit`.
+    """
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(text or "")).strip("-.")[:limit].strip("-.")
+    return slug or fallback
+
+
+def note(root, cfg, to, title, body, urgent=False):
+    """Write an architect message into the mailbox through the tool.
+
+    So that a woken architect needs no raw Write or Edit to do its job. That
+    matters because the one time it had them, it used them on the orchestrator's
+    own source and built a runaway. The mailbox is the only thing an unattended
+    architect should be able to write, and this is the only door to it.
+    """
+    box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
+    os.makedirs(box, exist_ok=True)
+    slug = safe_slug(title.lower(), language.text(cfg, "mail.untitled-note"))
+    # An urgent note is marked in the project's language; every reader knows both (LANGUAGE-FILES).
+    kind = language.marker(cfg, "urgent-kind") if urgent else "DECISION"
+    impl, arch = mail_names(cfg)
+    to = safe_slug(to or impl, impl)          # the implementer's role by default, whoever holds it (#31)
+    name = f"{time.strftime('%Y%m%d-%H%M')}-{arch}-to-{to}-{kind}-{slug}.md"
+    text = f"# {title}\n\n" + (language.marker(cfg, "urgent") + "\n\n" if urgent else "") + body.rstrip() + "\n"
+    return write_mail(root, cfg, name, text, {"kind": kind.lower(), "from": arch, "to": to})
+
+
+def running_slice(root):
+    """The one board item review accounting treats as current.
+
+    A malformed board may contain several running entries. Preserve the board's
+    established first-entry behavior, but resolve it once so review attribution,
+    start time and re-specification cannot silently select different slices.
+    """
+    items = board(root)["running"]
+    return items[0] if items else None
+
+
+def slice_boundary(item):
+    """The declared review boundary for a parsed board item."""
+    if not item:
+        return ""
+    notes = item.get("notes") or {}
+    return notes.get("acceptance") or notes.get("scope") or item.get("title") or ""
+
+
+# ---- a slice's boundary: a sentence, or a file the row points at (#73, #35) ------------
+
+BOUNDARY_SECTIONS = ("invariant", "scenarios", "paths", "out of scope", "why one slice")
+_BOUNDARY_COMMIT = re.compile(r"[0-9a-fA-F]{7,40}")
+# A declared path the slice creates, marked `(new)` in any language a project may choose (LANGUAGE-FILES).
+_NEW_PATH = re.compile(r"\s*\((?:" + "|".join(re.escape(word) for word in language.words("new-path")) + r")\)$",
+                       re.I)
+_NAMED_FILE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.\w+|[\w-]+\.(?:py|ts|tsx|js|jsx|mjs|cjs|go|rs|java|kt|"
+                         r"rb|cs|swift|c|h|cpp|hpp|sql|sh|ps1|json|ya?ml|toml|md))(?![\w/-])")
+_NAMED_SYMBOL = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{2,})(?:\(\))?`")
+
+
+def boundary_pointer(item):
+    """(path, commit or None) when a board item's boundary is a file: `boundary: docs/slices/B8a.md@1a2b3c4`."""
+    value = (((item or {}).get("notes") or {}).get("boundary") or "").strip()
+    if not value:
+        return None
+    path, _, commit = value.partition("@")
+    return path.strip(), (commit.strip() or None)
+
+
+def boundary_sections(text):
+    """{section: body} for the headed parts of a boundary file (#73)."""
+    sections, current = {}, None
+    for line in text.splitlines():
+        heading = re.match(r"^#{1,4}\s+(.+?)\s*$", line)
+        if heading:
+            name = heading.group(1).strip().lower()
+            current = next((section for section in BOUNDARY_SECTIONS if section in name), None)
+            if current:
+                sections.setdefault(current, "")
+            continue
+        if current:
+            sections[current] += line + "\n"
+    return sections
+
+
+def read_boundary(root, item):
+    """The boundary file a slice points at, read at the commit the pointer names (#73).
+
+    The boundary lived as prose in a table cell, and twice on 2026-09-07/08 the
+    boundary itself was what was wrong, found mid-slice by an implementer that had
+    started, with no diff to show what changed. A file read at a named commit is
+    one source of truth, and when it has changed since, the change travels to the
+    reviewer as a diff. None when the item's boundary is a sentence.
+
+    Returns {"file", "commit", "changed", "sha256", "label", "text", "sections", "problem"}.
+    """
+    pointer = boundary_pointer(item)
+    if not pointer:
+        return None
+    path, commit = pointer
+    out = {"file": path, "commit": commit, "changed": None, "sha256": None, "sections": {}, "problem": None}
+    real_root = os.path.realpath(root)
+    target = os.path.realpath(os.path.join(root, path))
+    if os.path.isabs(path) or not target.startswith(real_root + os.sep):
+        out["problem"] = "it is not a path inside the repository"
+    elif commit and not _BOUNDARY_COMMIT.fullmatch(commit):
+        out["problem"] = f"{commit!r} is not a commit id"
+    else:
+        try:
+            if commit:
+                data = _git_output(root, "show", f"{commit}:{path}")
+            else:
+                with open(target, "rb") as fh:
+                    data = fh.read()
+        except (OSError, RuntimeError) as exc:
+            out["problem"] = str(exc)
+    if out["problem"]:
+        out.update(label=f"{path} (unreadable)",
+                   text=f"the boundary file {path} cannot be read: {out['problem']} - say so as a finding")
+        return out
+    # Keep readable contents for a deferred review, even when no commit makes them authoritative.
+    if not commit:
+        out["problem"] = "it names no commit; use boundary: path@commit"
+    content = data.decode(UTF8, "replace")
+    diff = ""
+    if commit:
+        try:
+            diff = _git_output(root, "diff", commit, "--", path).decode(UTF8, "replace")
+        except RuntimeError as exc:
+            out["problem"] = f"cannot compare the boundary with its commit: {exc}"
+    label = f"{path} at {commit[:12]}" if commit else f"{path} as it stands in the worktree"
+    text = f"the boundary file {label}:\n\n{content}"
+    if diff.strip():
+        label += ", changed since"
+        text += (f"\n\nThe file has changed since {commit[:12]}. The change is part of what you judge: "
+                 f"a boundary that moved mid-slice is a finding unless a decision records it.\n{diff}")
+    if out["problem"]:
+        text += f"\n\n{out['problem']} - say so as a finding"
+    out.update(changed=None if out["problem"] else bool(diff.strip()),
+               sha256="sha256:" + hashlib.sha256(data).hexdigest() if commit else None, label=label,
+               text=text, sections=boundary_sections(content))
+    return out
+
+
+# A boundary's numbered line: each is one of its scenarios to review_sections, and one of its criteria here.
+BOUNDARY_NUMBERED_LINE = re.compile(r"^\s*S?(\d{1,2})[.)]\s+(\S.{6,})$", re.M)
+# A number inside one line - `1.`, `1)` or `(1)` - standing between spaces.
+_INLINE_CRITERION = re.compile(r"(?<!\S)\(?(\d{1,2})[.)](?=\s)")
+# A semicolon outside backticks: the one in `polyctl review --boundary 'a; b'` separates nothing.
+_CRITERIA_SEMICOLON = re.compile(r";(?=(?:[^`]*`[^`]*`)*[^`]*$)")
+# The parts of a boundary file that say what must hold; its paths, out of scope and why-one-slice do not.
+CRITERIA_SECTIONS = ("invariant", "scenarios")
+
+
+def boundary_criteria(boundary, source=None):
+    """[{"id", "text"}] for each criterion an acceptance boundary lists; [] when it lists fewer than two.
+
+    One verdict for a whole boundary let a boundary of five conditions pass with one of
+    them never examined, and nothing on the record said which (CRITERIA-VERDICTS). The
+    criteria are the boundary's numbered lines. A one-line boundary, which a board row's
+    acceptance always is, lists them with inline numbers counting from 1 - `1) … 2) …` -
+    or separated by semicolons. A boundary file (`source`, from read_boundary) lists them
+    in its Invariant and Scenarios sections as polyctl read the file, at the commit its row
+    names; never in the diff of a later change, nor in what the file puts out of scope. A
+    single sentence lists none, and is reviewed as it always was. The criteria are numbered
+    by position, whatever numbers the boundary wrote, so no two share a name.
+    """
+    if source:
+        sections = source.get("sections") or {}
+        text = "\n".join(body for name, body in sections.items() if name in CRITERIA_SECTIONS)
+    else:
+        text = boundary
+    text = str(text or "").strip()
+    items = [body for _, body in BOUNDARY_NUMBERED_LINE.findall(text)]
+    if len(items) < 2 and "\n" not in text:
+        marks = list(_INLINE_CRITERION.finditer(text))
+        if len(marks) >= 2 and [int(mark.group(1)) for mark in marks] == list(range(1, len(marks) + 1)):
+            ends = [mark.start() for mark in marks[1:]] + [len(text)]
+            items = [text[mark.end():end] for mark, end in zip(marks, ends)]
+        else:
+            items = _CRITERIA_SEMICOLON.split(text)
+    items = [item.strip().rstrip(";,").strip() for item in items]
+    items = [item for item in items if item]
+    return [{"id": number, "text": item} for number, item in enumerate(items, 1)] if len(items) >= 2 else []
+
+
+def declared_paths(item, boundary=None):
+    """[(path, new)] a slice declares: its boundary file's Paths section, or its row's `paths:` note."""
+    if boundary and boundary.get("sections", {}).get("paths"):
+        raw = [line.strip().lstrip("-*").strip() for line in boundary["sections"]["paths"].splitlines()]
+    else:
+        raw = (((item or {}).get("notes") or {}).get("paths") or "").split(",")
+    out = []
+    for entry in raw:
+        entry = entry.strip().strip("`").strip()
+        new = bool(_NEW_PATH.search(entry))
+        path = _NEW_PATH.sub("", entry).strip().strip("`").strip()
+        if path:
+            out.append((path, new))
+    return out
+
+
+def _symbol_owners(root, symbol):
+    """Tracked files that define a symbol, by a definition keyword in front of its name."""
+    pattern = rf"(def|class|function|interface|type|struct|enum|trait|fn|func|const|let|var)[[:space:]]+{symbol}"
+    try:
+        listed = _git_output(root, "grep", "-l", "-z", "-w", "-E", pattern, timeout=20)
+    except RuntimeError:
+        return []
+    return [os.fsdecode(path) for path in listed.split(b"\0") if path]
+
+
+def boundary_conflicts(root, item):
+    """What a slice's declared paths cannot hold, found when it is registered (#35).
+
+    2026-09-07: B8a named eight paths while its own acceptance could only be met
+    by touching a ninth; the implementer found out mid-slice and lost three hours
+    waiting on a decision. Advisory prose matching, so it names and never blocks:
+    a declared path that neither exists nor is marked `(new)`, a file the
+    acceptance names outside the declared paths, and the file defining a symbol
+    the acceptance names in backticks when that file is outside them. An item
+    that declares no paths has nothing to check.
+    """
+    source = read_boundary(root, item)
+    if source and source["problem"]:
+        return [f"its boundary file {source['file']} cannot be read: {source['problem']}"]
+    declared = declared_paths(item, source)
+    if not declared:
+        return []
+
+    def inside(path):
+        return any(path == d or path.startswith(d.rstrip("/") + "/") for d, _ in declared)
+
+    out = [f"{path} is declared but does not exist; write `(new)` after it if the slice creates it"
+           for path, new in declared if not new and not os.path.exists(os.path.join(root, path))]
+    if source:
+        text = "\n".join(body for name, body in source["sections"].items()
+                         if name not in ("paths", "out of scope", "why one slice")) \
+            or source["text"]
+    else:
+        text = slice_boundary(item)
+    tracked = None
+    for named in sorted(set(_NAMED_FILE.findall(text))):
+        if inside(named) or any(d.endswith("/" + named) for d, _ in declared):
+            continue
+        if "/" in named:
+            if os.path.exists(os.path.join(root, named)):
+                out.append(f"the acceptance names {named}, outside the declared paths")
+            continue
+        if tracked is None:
+            try:
+                tracked = [os.fsdecode(p) for p in _git_output(root, "ls-files", "-z").split(b"\0") if p]
+            except RuntimeError:
+                tracked = []
+        owners = [p for p in tracked if os.path.basename(p) == named]
+        if owners and not any(inside(p) for p in owners):
+            out.append(f"the acceptance names {named} ({', '.join(owners[:3])}), outside the declared paths")
+    for symbol in sorted(set(_NAMED_SYMBOL.findall(text)))[:10]:
+        owners = _symbol_owners(root, symbol)
+        if owners and not any(inside(p) for p in owners):
+            out.append(f"the acceptance names `{symbol}`, defined in {', '.join(owners[:3])}, "
+                       "outside the declared paths")
+    return out
+
+
+def boundary_advice(root, cfg, item):
+    """Everything worth saying about one item's boundary before it is worked (#35, #73)."""
+    notes = (item or {}).get("notes") or {}
+    out = boundary_conflicts(root, item)
+    if notes.get("boundary") and notes.get("acceptance"):
+        out.append("it has both a boundary file and an acceptance sentence; one source of truth, so keep the file")
+    limit = settings.get(cfg, "boundary.inline_max_chars")
+    sentence = notes.get("acceptance") or ""
+    if not notes.get("boundary") and len(sentence) > limit:
+        out.append(f"its acceptance is {len(sentence)} characters; above boundary.inline_max_chars ({limit}) it "
+                   "belongs in a file the row points at with `boundary: path@commit`")
+    return out
+
+
+DECISION_CHAIN = "polyctl-decision-row-v1"
+
+
+def decisions_path(root):
+    return os.path.join(root, ".polyctl", "ledger", "decisions.jsonl")
+
+
+def decision_rows(root):
+    """Architect decisions in the order `polyctl decide` recorded them (#65).
+
+    Rows written before the ledger was chained are read as its legacy prefix. A
+    row added by hand after a chained one breaks the chain and the read raises:
+    a re-specification nobody recorded must not reset a round budget.
+    """
+    from .storage import read_chained_jsonl
+    return [row for row in read_chained_jsonl(decisions_path(root), DECISION_CHAIN, legacy_prefix=True)
+            if isinstance(row, dict)]
+
+
+def respecified_at(root, item=None):
+    """When the architect last re-specified the current slice (`polyctl decide --scope <id>`).
+
+    None when the decision ledger cannot be trusted: the budget then stands.
+    """
+    item = item or running_slice(root)
+    item_id = ((item or {}).get("id") or (item or {}).get("key") or "").strip()
+    if not item_id:
+        return None
+    try:
+        rows = decision_rows(root)
+    except Exception:
+        return None
+    last = 0
+    for r in rows:
+        if r.get("by") == "architect" and (r.get("scope") or "").strip() == item_id:
+            try:
+                last = max(last, int(r.get("at") or 0))
+            except (TypeError, ValueError):
+                continue
+    return last or None
+
+
+def _recorded_review_slice(root, reviews_dir, row):
+    """The slice of a review recorded before ledger rows carried it, from its unchanged file."""
+    try:
+        with open(os.path.join(root, reviews_dir, str(row.get("artefact"))), "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    if "sha256:" + hashlib.sha256(data).hexdigest() != row.get("sha256"):
+        return None
+    evidence = review_evidence(data.decode(UTF8, "replace"))
+    return (evidence or {}).get("slice") if isinstance(evidence, dict) else None
+
+
+def rounds(root, reviews_dir, item=None):
+    """Completed prospective review rounds spent on the current slice (#65), or on board item `item`.
+
+    A round is a review that produced a verdict, read from the chained review
+    ledger in the order polyctl recorded it. Deleting, emptying or back-dating a review
+    file changes nothing, and neither does editing the board's `since:`, which an
+    implementer can reach. Only index-candidate reviews of the running board
+    item's exact ID count - HEAD and candidate bytes are not slice identity. The
+    count runs back to the newest approval that could authorise, or to the
+    architect's newest recorded re-specification of the item. A fallback's
+    approval after a rejection of the same candidate authorises nothing, so it
+    ends nothing: the rejection still counts. UNAVAILABLE and INVALID are not
+    rounds; nobody completed a review.
+
+    Unrecorded files count only rejections older than the ledger's first row;
+    an unrecorded approval ends no round count (TRIAGE-1-MEDIUM). `polyctl slice status`
+    counts the same way for any slice it is asked about (SLICE-LIFECYCLE).
+    """
+    current = item if item is not None else running_slice(root)
+    slice_id = ((current or {}).get("id") or (current or {}).get("key") or "").strip()
+    if not slice_id:
+        return 0
+    respec = respecified_at(root, current) or 0
+
+    from .storage import read_chained_jsonl
+    try:
+        rows = read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+    except Exception:
+        rows = []                       # an unreadable ledger is reported elsewhere; files still count
+    events, recorded, rejected = [], set(), set()
+    for order, row in enumerate(rows):
+        if not isinstance(row, dict) or row.get("kind") != "index-candidate":
+            continue
+        recorded.add(row.get("artefact"))
+        verdict, candidate = row.get("verdict"), row.get("candidate")
+        if verdict not in ("APPROVED", "NEEDS_CHANGES"):
+            continue
+        row_slice = row["slice"] if "slice" in row else _recorded_review_slice(root, reviews_dir, row)
+        mine = (row_slice or "").strip() == slice_id
+        try:
+            at = int(row.get("at") or 0)
+        except (TypeError, ValueError):
+            at = 0
+        if verdict == "NEEDS_CHANGES":
+            if candidate:
+                rejected.add(candidate)
+            if mine:
+                events.append((1, order, at, "round"))
+        elif mine and row.get("authorizable") is True \
+                and not (row.get("fallback") and candidate in rejected):
+            events.append((1, order, at, "approved"))
+
+    for order, (f, v) in enumerate(reviews(root, reviews_dir, limit=None)):
+        if f in recorded or v != "NEEDS_CHANGES":
+            continue
+        path = os.path.join(root, reviews_dir, f)
+        try:
+            at = int(os.path.getmtime(path))
+            body = open(path, errors="replace", encoding=UTF8).read(100_000)
+        except OSError:
+            continue
+        evidence = review_evidence(body)
+        if not evidence or evidence.get("kind") != "index-candidate" \
+                or (evidence.get("slice") or "").strip() != slice_id \
+                or evidence.get("review_status") in ("unavailable", "invalid"):
+            continue
+        if rows and at >= int(rows[0].get("at") or 0):
+            continue
+        events.append((0, -order, at, "round"))
+
+    n = 0
+    for _, _, at, what in sorted(events, reverse=True):
+        if what == "approved":
+            break
+        if at < respec:
+            continue
+        n += 1
+    return n
+
+
+def latest_slice_review(root, reviews_dir, slice_id):
+    """The newest review of a slice that reached a verdict, and what its file still says (SLICE-LIFECYCLE).
+
+    None when no review that reached a verdict names the slice. Otherwise {"artefact", "at", "kind", "verdict",
+    "counts", "findings", "problem", "recorded"}: the verdict is the ledger's, and the counts and the findings are
+    read from the artefact only while it holds the bytes its row recorded, since a review file is in the tree an
+    implementer writes; `problem` says why they could not be read. A retrospective review (`kind` commit-range)
+    counts too: a catch-up that asked for changes after the slice landed left findings open all the same.
+
+    A review written before the review ledger has no row, and `rounds` reads its file as it always was: a slice
+    that began before the ledger has reviews only there, and an upgraded project said it had none. Where no row
+    names the slice, the newest such file that does is its newest review, read as it stands - nothing records
+    its bytes - and `recorded` is False (SLICE-LIFECYCLE-2).
+    """
+    from .storage import read_chained_jsonl
+    newest, recorded = None, set()
+    for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN):
+        if not isinstance(row, dict):
+            continue
+        recorded.add(row.get("artefact"))
+        if row.get("verdict") not in ("APPROVED", "NEEDS_CHANGES"):
+            continue
+        row_slice = row["slice"] if "slice" in row else _recorded_review_slice(root, reviews_dir, row)
+        if (row_slice or "").strip() == slice_id:
+            newest = row
+    if newest is None:
+        return _unrecorded_slice_review(root, reviews_dir, slice_id, recorded)
+    out = {"artefact": newest.get("artefact"), "at": newest.get("at"), "kind": newest.get("kind"),
+           "verdict": newest.get("verdict"), "counts": None, "findings": [], "problem": None, "recorded": True}
+    try:
+        with open(os.path.join(root, reviews_dir, str(newest.get("artefact"))), "rb") as fh:
+            data = fh.read()
+    except OSError:
+        out["problem"] = "its file is not in the review directory: archived or removed"
+        return out
+    if "sha256:" + hashlib.sha256(data).hexdigest() != newest.get("sha256"):
+        out["problem"] = "its file is not the bytes the review ledger recorded"
+        return out
+    return _review_findings(out, data.decode(UTF8, "replace"))
+
+
+def _review_findings(out, body):
+    """`out` with the counts and the finding lines a review's text holds."""
+    counts = (review_evidence(body) or {}).get("counts")
+    out["counts"] = counts if isinstance(counts, dict) else None
+    out["findings"] = [f"[{found.group(1)}] {found.group(2).strip()}"
+                       for found in (_FINDING_LINE.match(line) for line in body.splitlines()) if found]
+    return out
+
+
+def _unrecorded_slice_review(root, reviews_dir, slice_id, recorded):
+    """The newest review file of a slice the review ledger has no row for, read as `rounds` reads one; or None.
+
+    Newest by when the file was written, as `rounds` orders them, and only a review that reached a verdict and is
+    not an attempt that never took place (SLICE-LIFECYCLE-2).
+    """
+    for name, verdict in reviews(root, reviews_dir, limit=None):
+        if name in recorded or verdict not in ("APPROVED", "NEEDS_CHANGES"):
+            continue
+        path = os.path.join(root, reviews_dir, name)
+        try:
+            at = int(os.path.getmtime(path))
+            body = open(path, errors="replace", encoding=UTF8).read(100_000)
+        except OSError:
+            continue
+        evidence = review_evidence(body)
+        if not evidence or (evidence.get("slice") or "").strip() != slice_id \
+                or evidence.get("review_status") in ("unavailable", "invalid"):
+            continue
+        return _review_findings({"artefact": name, "at": at, "kind": evidence.get("kind"), "verdict": verdict,
+                                 "counts": None, "findings": [], "problem": None, "recorded": False}, body)
+    return None
+
+
+def mailbox(root, mail_dir):
+    d = os.path.join(root, mail_dir)
+    files = [f for f in sorted(os.listdir(d)) if f != "README.md" and f.endswith(".md")] if os.path.isdir(d) else []
+    if mail_store_mode(root) != "append-only":
+        return files
+    # The queue is derived from the store: a view file removed unhandled still counts (#80).
+    try:
+        rows = mail_store_rows(root)
+    except Exception:
+        return files
+    stored = {row.get("id") for row in rows if row.get("event") == "message"}
+    handled = {row.get("id") for row in rows if row.get("event") == "handled"}
+    return sorted((stored - handled) | {name for name in files if name not in stored})
+
+
+REMOTE_PREFIX = "refs/remotes/origin/"
+
+
+def _default_remote_branch(root):
+    """The remote default branch to measure a checkout against, as a full ref, or None.
+
+    origin/HEAD can still name a branch the remote has since deleted, so a candidate
+    is used only when it resolves to a commit.
+    """
+    candidates = []
+    try:
+        ref = _git_output(root, "symbolic-ref", "--quiet",
+                          "refs/remotes/origin/HEAD").decode(UTF8, "replace").strip()
+        if ref.startswith(REMOTE_PREFIX):
+            candidates.append(ref)
+    except RuntimeError:
+        pass
+    for candidate in (*candidates, REMOTE_PREFIX + "main", REMOTE_PREFIX + "master"):
+        try:
+            _git_output(root, "rev-parse", "--verify", "--quiet", candidate + "^{commit}")
+            return candidate
+        except RuntimeError:
+            continue
+    return None
+
+
+def git_state(root):
+    """Where this checkout stands, not only what it holds.
+
+    An ahead count alone reads as current on a checkout that is weeks behind. On
+    2026-09-14 `polyctl status` printed "0 commits unpushed" for a branch 77 commits
+    behind main and already merged into it, and two backlog rows were written from
+    measurements taken in that checkout. So measure against the remote default
+    branch, report behind as well as ahead, say when the branch is already merged,
+    and say "?" when there is nothing to compare against instead of "0".
+
+    "ahead" stays a string for existing readers; "behind" is an int or None.
+    """
+    ref = _default_remote_branch(root)
+    ahead = behind = None
+    if ref:
+        try:
+            counts = _git_output(root, "rev-list", "--left-right", "--count",
+                                 f"{ref}...HEAD").decode(UTF8, "replace").split()
+            if len(counts) == 2 and all(c.isdigit() for c in counts):
+                behind, ahead = int(counts[0]), int(counts[1])
+        except RuntimeError:
+            pass
+    merged = False
+    if ahead == 0 and behind:
+        # The default branch itself, checked out behind its remote, needs a pull; it
+        # is not a merged branch. A detached head inside the base counts as merged.
+        try:
+            head = _git_output(root, "symbolic-ref", "--quiet", "HEAD").decode(UTF8, "replace").strip()
+        except RuntimeError:
+            head = ""
+        merged = head != "refs/heads/" + ref[len(REMOTE_PREFIX):]
+    known = ahead is not None
+    return {
+        "log": _git_text(root, "log", "--oneline", "-4").split("\n"),
+        "dirty": [l for l in _git_text(root, "status", "--short").split("\n") if l.strip()],
+        "ahead": str(ahead) if known else "?",
+        "behind": behind,
+        "base": ref[len("refs/remotes/"):] if known else None,
+        "merged": merged,
+    }
+
+
+# ---- OTLP/JSON trace export of the project's ledger (EXPORT-OTLP) -----------------------
+
+_OTLP_COMMIT_CHAIN = "polyctl-commit-row-v1"
+_OTLP_STEP_RANK = {"verification": 0, "review": 1, "grant": 2, "commit": 3}
+_OTLP_TRAILER_ACTOR = re.compile(r"^([A-Za-z0-9_.-]+)(?:\s*\(([A-Za-z0-9_.-]+)\))?$")
+_OTLP_BOOL_KEYS = frozenset({
+    "polyctl.authorizable",
+    "polyctl.granted",
+    "polyctl.export.attested_only",
+    "polyctl.export.partial",
+})
+_OTLP_INT_KEYS = frozenset({
+    "polyctl.gates.count",
+    "polyctl.gates.passed_count",
+    "polyctl.gates.failed_count",
+    "polyctl.tests.pass_count",
+    "polyctl.tests.fail_count",
+    "polyctl.reviewers.count",
+    "polyctl.candidate.changed_count",
+    "polyctl.reasons.count",
+})
+_OTLP_LEDGER_NAMES = frozenset({
+    "verifications.jsonl",
+    "reviews.jsonl",
+    "authority.jsonl",
+    "waivers.jsonl",
+    "slices.jsonl",
+})
+_OTLP_VOCAB_ALLOWLIST = {
+    "service.name": frozenset({"polyctl"}),
+    "polyctl.step": frozenset({"verification", "review", "grant", "commit"}),
+    "polyctl.verification.profile": frozenset({"quick", "fast", "full", "ci", "default"}),
+    "polyctl.review.kind": frozenset({"index-candidate", "commit-range"}),
+    "polyctl.review.tier": frozenset({
+        "independent", "same-family", "person", "full", "single", "strict", "lite",
+    }),
+    "polyctl.outcome": frozenset({
+        "PASS", "FAIL", "APPROVED", "NEEDS_CHANGES", "UNAVAILABLE", "INVALID",
+        "GRANTED", "REFUSED", "LANDED",
+    }),
+}
+_OTLP_PATTERN_ALLOWLIST = {
+    "service.version": re.compile(r"^\d+\.\d+\.\d+(?:[-+._][0-9A-Za-z._-]+)?$"),
+    "polyctl.candidate": re.compile(r"^sha256:[0-9a-f]{64}$"),
+    "polyctl.commit.sha": re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$"),
+    "polyctl.commit.tree": re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$"),
+    "polyctl.verification.id": re.compile(r"^V-(?:\d+|\d{8}-\d{6}-[0-9a-f]{8})$"),
+    "polyctl.waiver.id": re.compile(r"^W-\d+(?:-\d+)?$"),
+    "polyctl.review.id": re.compile(r"^\d{4}-?\d{2}-?\d{2}-\d{6}-(?:[0-9a-f]{7,40}|R-\d+)(?:-\d+)?\.md$"),
+    "polyctl.implementer.actor": re.compile(r"^sha256:[0-9a-f]{16}$"),
+    "polyctl.reviewer.actor": re.compile(r"^sha256:[0-9a-f]{16}$"),
+}
+_OTLP_SLICE_ID = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$")
+_OTLP_PURE_HEX = re.compile(r"^[0-9A-F]{16,}$")
+_OTLP_PROFILE_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+_OTLP_HEX_LOWER = re.compile(r"^[0-9a-f]{16,}$")
+_OTLP_SHORT_SHA = re.compile(r"^[0-9a-f]{7,64}$")
+
+
+def _otlp_hex_id(seed, chars):
+    """Lowercase hex id of `chars` nybbles derived from `seed`, never all zeros."""
+    digest = hashlib.sha256(seed.encode(UTF8)).hexdigest()[:chars]
+    return digest if any(ch != "0" for ch in digest) else ("0" * (chars - 1) + "1")
+
+
+def _otlp_unix_nano(value):
+    """A ledger timestamp as integer unix nanoseconds, or 0 when absent."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return max(0, value) * 1_000_000_000
+    seconds = _epoch(value)
+    if seconds is None or seconds < 0:
+        return 0
+    return int(round(seconds * 1_000_000_000))
+
+
+def _otlp_declared_profiles(root):
+    """Profile names declared in `.polyctl/gates.json` plus the standard built-in profile names."""
+    allowed = set(_OTLP_VOCAB_ALLOWLIST["polyctl.verification.profile"])
+    if not root:
+        return frozenset(allowed)
+    try:
+        with open(os.path.join(root, ".polyctl", "gates.json"), encoding=UTF8) as fh:
+            spec = json.load(fh)
+    except (OSError, ValueError):
+        return frozenset(allowed)
+    profiles = spec.get("profiles") if isinstance(spec, dict) else None
+    if isinstance(profiles, dict):
+        for name in profiles:
+            if isinstance(name, str) and _OTLP_PROFILE_NAME.fullmatch(name) and not _OTLP_HEX_LOWER.fullmatch(name):
+                allowed.add(name)
+    return frozenset(allowed)
+
+
+def _otlp_changed_count(cand):
+    """Count of changed paths on a candidate record (`changed_paths`, `changed_count`, or `changed`)."""
+    if not isinstance(cand, dict):
+        return 0
+    if isinstance(cand.get("changed_paths"), list):
+        return len(cand["changed_paths"])
+    if isinstance(cand.get("changed_count"), int) and not isinstance(cand.get("changed_count"), bool):
+        return max(0, int(cand["changed_count"]))
+    if isinstance(cand.get("changed"), list):
+        return len(cand["changed"])
+    return 0
+
+
+def _otlp_adapter_catalog(cfg=None):
+    """`(declared_families, adapter_name_to_family)` from shipped adapter declarations."""
+    adapters = package_adapters()
+    declared = set()
+    by_name = {}
+    for aid, spec in adapters.items():
+        if not isinstance(spec, dict):
+            continue
+        fam = str(spec.get("family") or "").strip().lower()
+        if not fam:
+            continue
+        declared.add(fam)
+        by_name[str(aid).strip().lower()] = fam
+        actor_name = str(spec.get("actor_name") or "").strip().lower()
+        if actor_name:
+            by_name[actor_name] = fam
+        for binary in adapter_binaries(spec):
+            if isinstance(binary, str) and binary.strip():
+                by_name[binary.strip().lower()] = fam
+    if isinstance(cfg, dict):
+        blocks = [cfg.get("implementer"), cfg.get("reviewer")]
+        reviewers = cfg.get("reviewers")
+        if isinstance(reviewers, list):
+            blocks.extend(reviewers)
+        elif isinstance(reviewers, dict):
+            blocks.extend(reviewers.values())
+        actors = cfg.get("actors")
+        if isinstance(actors, dict):
+            for actor_key, actor_block in actors.items():
+                if isinstance(actor_block, dict):
+                    blocks.append(dict(actor_block, actor=actor_block.get("actor") or actor_key))
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            ident = block_adapter(block)
+            spec = adapters.get(ident) if ident else None
+            fam = str((spec or {}).get("family") or "").strip().lower()
+            if not fam:
+                continue
+            for key in ("id", "name", "actor", "binding"):
+                val = block.get(key)
+                if isinstance(val, str) and val.strip():
+                    by_name[val.strip().lower()] = fam
+    return frozenset(declared), by_name
+
+
+def _otlp_allow_string(key, value, declared_families=None, declared_profiles=None):
+    """Return `value` if and only if `(key, value)` belongs to the OTLP attribute allowlist."""
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if key == "polyctl.verification.profile":
+        profiles = declared_profiles if declared_profiles is not None else _OTLP_VOCAB_ALLOWLIST[key]
+        return text if text in profiles else None
+    if key == "polyctl.export.unattested_ledgers":
+        parts = [part.strip() for part in text.split(",") if part.strip()]
+        if parts and all(part in _OTLP_LEDGER_NAMES for part in parts):
+            return ",".join(parts)
+        return None
+    if key in _OTLP_VOCAB_ALLOWLIST:
+        return text if text in _OTLP_VOCAB_ALLOWLIST[key] else None
+    if key in ("polyctl.implementer.family", "polyctl.reviewer.family"):
+        families = declared_families if declared_families is not None else _otlp_adapter_catalog()[0]
+        low = text.lower()
+        return low if (low in families or low == "unknown") else None
+    if key == "polyctl.slice":
+        if len(text) <= 32 and _OTLP_SLICE_ID.fullmatch(text) and not _OTLP_PURE_HEX.fullmatch(text):
+            return text
+        return None
+    pattern = _OTLP_PATTERN_ALLOWLIST.get(key)
+    if pattern is not None:
+        return text if pattern.fullmatch(text) else None
+    return None
+
+
+def _otlp_attributes(pairs, declared_families=None, declared_profiles=None):
+    """OTLP/JSON KeyValue list from allowlisted `(key, value)` pairs."""
+    out, seen = [], set()
+    for key, value in pairs:
+        if not key or key in seen or value is None:
+            continue
+        if key in _OTLP_BOOL_KEYS:
+            if not isinstance(value, bool):
+                continue
+            encoded = {"boolValue": value}
+        elif key in _OTLP_INT_KEYS:
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                continue
+            encoded = {"intValue": str(value)}
+        else:
+            allowed = _otlp_allow_string(
+                key, value, declared_families=declared_families, declared_profiles=declared_profiles
+            )
+            if allowed is None:
+                continue
+            encoded = {"stringValue": allowed}
+        seen.add(key)
+        out.append({"key": key, "value": encoded})
+    return out
+
+
+def _otlp_actor_pairs(prefix, value, identity=None, catalog=None):
+    """`[(prefix.actor, sha256_id), (prefix.family, family)]` from an actor dict, route id or trailer."""
+    declared_families, by_name = catalog if catalog is not None else _otlp_adapter_catalog()
+    raw_actor = None
+    stated_family = None
+    candidates = []
+
+    if isinstance(value, dict):
+        for field in ("actor", "binding", "id", "name"):
+            cand = value.get(field)
+            if isinstance(cand, str) and cand.strip():
+                raw_actor = cand.strip()
+                break
+        if isinstance(value.get("family"), str) and value["family"].strip():
+            stated_family = value["family"].strip()
+        for field in ("adapter", "tool", "actor", "binding", "id", "name"):
+            cand = value.get(field)
+            if isinstance(cand, str) and cand.strip():
+                candidates.append(cand.strip())
+    elif isinstance(value, str) and value.strip():
+        text = value.strip()
+        match = _OTLP_TRAILER_ACTOR.match(text)
+        if match:
+            raw_actor = match.group(1)
+            stated_family = match.group(2)
+        else:
+            raw_actor = text
+        if raw_actor:
+            candidates.append(raw_actor)
+
+    if isinstance(identity, dict):
+        if not raw_actor:
+            for field in ("actor", "binding", "id", "name"):
+                cand = identity.get(field)
+                if isinstance(cand, str) and cand.strip():
+                    raw_actor = cand.strip()
+                    break
+        if not stated_family and isinstance(identity.get("family"), str) and identity["family"].strip():
+            stated_family = identity["family"].strip()
+        for field in ("adapter", "tool", "actor", "binding", "id", "name"):
+            cand = identity.get(field)
+            if isinstance(cand, str) and cand.strip():
+                candidates.append(cand.strip())
+
+    if not raw_actor and not stated_family and not candidates:
+        return []
+
+    resolved_family = None
+    for cand in candidates:
+        if "/" in cand or "\\" in cand:
+            continue
+        low = cand.lower()
+        if low in by_name:
+            resolved_family = by_name[low]
+            break
+        stem = low.split("-reviewer", 1)[0]
+        if stem and stem in by_name:
+            resolved_family = by_name[stem]
+            break
+    if resolved_family is None and isinstance(stated_family, str):
+        low_fam = stated_family.strip().lower()
+        if low_fam in declared_families:
+            resolved_family = low_fam
+    family = resolved_family if resolved_family in declared_families else "unknown"
+
+    pairs = []
+    if raw_actor:
+        actor_hash = "sha256:" + _otlp_hex_id(f"polyctl-otlp-actor-v1:{raw_actor}", 16)
+        pairs.append((f"{prefix}.actor", actor_hash))
+    pairs.append((f"{prefix}.family", family))
+    return pairs
+
+
+def _otlp_commit_trailers(commit):
+    """`{short_name: first_value}` of a landed commit's `Polyctl-` trailers."""
+    raw = commit.get("trailers")
+    if isinstance(raw, list):
+        carried = _polyctl_trailers(raw)
+        return {key[len(TRAILER_PREFIX):].lower(): values[0] for key, values in carried.items() if values}
+    if isinstance(raw, dict):
+        return {str(key).lower(): str(val) for key, val in raw.items() if val is not None}
+    return {}
+
+
+def _otlp_resolve_grant(row, maps):
+    """Resolve a grant row's candidate, slice, review, verification, waiver and tree links once."""
+    cand = row.get("candidate") if isinstance(row.get("candidate"), dict) else {}
+    itree = _otlp_allow_string("polyctl.commit.tree", cand.get("index_tree") or row.get("tree"))
+    vid = _otlp_allow_string("polyctl.verification.id", row.get("verification"))
+    artefact = _otlp_allow_string("polyctl.review.id", os.path.basename(str(row.get("review") or "")))
+    wid = _otlp_allow_string("polyctl.waiver.id", row.get("waiver"))
+    cdigest = (
+        _otlp_allow_string("polyctl.candidate", cand.get("digest"))
+        or maps["verification_to_candidate"].get(vid)
+        or maps["review_to_candidate"].get(artefact)
+        or maps["waiver_to_candidate"].get(wid)
+        or maps["tree_to_candidate"].get(itree)
+    )
+    review_row = maps["review_by_artefact"].get(artefact) or (
+        maps["review_by_candidate"].get(cdigest) if not wid else None
+    )
+    if artefact is None and review_row is not None:
+        artefact = _otlp_allow_string("polyctl.review.id", os.path.basename(str(review_row.get("artefact") or "")))
+    move_only = row.get("move_only") if isinstance(row.get("move_only"), dict) else {}
+    gslice = _otlp_allow_string("polyctl.slice", row.get("slice") or move_only.get("slice"))
+    slice_id = (
+        gslice
+        or maps["review_to_slice"].get(artefact)
+        or maps["waiver_to_slice"].get(wid)
+        or maps["verification_to_slice"].get(vid)
+        or maps["candidate_to_slice"].get(cdigest)
+        or maps["tree_to_slice"].get(itree)
+    )
+    return {
+        "cand": cand,
+        "itree": itree,
+        "vid": vid,
+        "artefact": artefact,
+        "wid": wid,
+        "cdigest": cdigest,
+        "slice_id": slice_id,
+        "review_row": review_row,
+    }
+
+
+def _otlp_resolve_commit(commit, maps):
+    """Resolve a landed commit's grant, candidate, slice, review, verification and waiver links once."""
+    csha = _otlp_allow_string("polyctl.commit.sha", commit.get("sha"))
+    ctree = _otlp_allow_string("polyctl.commit.tree", commit.get("tree"))
+    trailers = _otlp_commit_trailers(commit)
+    has_polyctl_trailer = any(trailers.get(k) for k in ("grant", "tree", "verification", "review", "waiver"))
+    grant_token = str(trailers.get("grant") or "").strip()
+    grant_row = maps["token_to_grant"].get(grant_token) or maps["tree_to_grant"].get(ctree)
+    gcand = (
+        grant_row.get("candidate")
+        if isinstance(grant_row, dict) and isinstance(grant_row.get("candidate"), dict)
+        else {}
+    )
+    vid = _otlp_allow_string(
+        "polyctl.verification.id", trailers.get("verification") or (grant_row or {}).get("verification")
+    )
+    artefact = _otlp_allow_string(
+        "polyctl.review.id",
+        os.path.basename(str(trailers.get("review") or (grant_row or {}).get("review") or "")),
+    )
+    wid = _otlp_allow_string("polyctl.waiver.id", trailers.get("waiver") or (grant_row or {}).get("waiver"))
+    cdigest = (
+        _otlp_allow_string("polyctl.candidate", gcand.get("digest"))
+        or maps["verification_to_candidate"].get(vid)
+        or maps["review_to_candidate"].get(artefact)
+        or maps["waiver_to_candidate"].get(wid)
+        or maps["tree_to_candidate"].get(ctree)
+    )
+    review_row = (
+        maps["review_by_artefact"].get(artefact)
+        or (maps["review_by_candidate"].get(cdigest) if not wid else None)
+        or maps["review_by_commit"].get(csha)
+    )
+    if artefact is None and review_row is not None:
+        artefact = _otlp_allow_string("polyctl.review.id", os.path.basename(str(review_row.get("artefact") or "")))
+    gmove = (grant_row or {}).get("move_only") if isinstance((grant_row or {}).get("move_only"), dict) else {}
+    slice_id = (
+        maps["commit_to_slice"].get(csha)
+        or _otlp_allow_string("polyctl.slice", (grant_row or {}).get("slice") or gmove.get("slice"))
+        or maps["review_to_slice"].get(artefact)
+        or maps["waiver_to_slice"].get(wid)
+        or maps["verification_to_slice"].get(vid)
+        or maps["candidate_to_slice"].get(cdigest)
+        or maps["tree_to_slice"].get(ctree)
+    )
+    relevant = bool(
+        has_polyctl_trailer
+        or grant_row is not None
+        or csha in maps["commit_to_slice"]
+        or ctree in maps["tree_to_candidate"]
+        or ctree in maps["tree_to_slice"]
+    )
+    return {
+        "csha": csha,
+        "ctree": ctree,
+        "trailers": trailers,
+        "grant_token": grant_token or None,
+        "grant_row": grant_row,
+        "vid": vid,
+        "artefact": artefact,
+        "wid": wid,
+        "cdigest": cdigest,
+        "slice_id": slice_id,
+        "review_row": review_row,
+        "relevant": relevant,
+    }
+
+
+def export_otlp(root, cfg=None, *, attested=False):
+    """The project's ledger as one OTLP/JSON ExportTraceServiceRequest (EXPORT-OTLP).
+
+    Strictly read-only: reads snapshot history without creating `.lock` files or settling
+    pending seals, and never writes to the project or `~/.polyctl`. By default (`attested=False`),
+    refuses with `LedgerCorruption` when any ledger has rows or a seal not covered by this
+    machine's checkpoint store; with `attested=True`, exports only the checkpoint-attested
+    prefix and states so in `resource.attributes`.
+    """
+    from . import __version__
+    from .storage import LedgerCorruption, _read_chained_history_snapshot, chained_row_digest
+
+    ledger_specs = (
+        ("verifications", os.path.join(root, ".polyctl", "ledger", "verifications.jsonl"), VERIFICATION_CHAIN, True),
+        ("reviews", review_ledger_path(root), REVIEW_CHAIN, False),
+        ("grants", os.path.join(root, ".polyctl", "ledger", "authority.jsonl"), AUTHORITY_CHAIN, False),
+        ("waivers", waivers_path(root), WAIVER_CHAIN, True),
+        ("slice_rows", slice_ledger_path(root), SLICE_CHAIN, False),
+    )
+    loaded = {}
+    unattested_list = []
+    for name, path, chain, legacy in ledger_specs:
+        raw_rows, unattested = _read_chained_history_snapshot(
+            path, chain, legacy_prefix=legacy, attested=True
+        )
+        loaded[name] = [row for row in raw_rows if isinstance(row, dict)]
+        if unattested is not None:
+            unattested_list.append(unattested)
+    if unattested_list and not attested:
+        raise LedgerCorruption("; ".join(item["message"] for item in unattested_list))
+
+    verifications = loaded["verifications"]
+    reviews = loaded["reviews"]
+    grants = loaded["grants"]
+    waivers = loaded["waivers"]
+    slice_rows = loaded["slice_rows"]
+    voided_ordinals = {row["voids"]: row.get("slice") for row in slice_rows if isinstance(row.get("voids"), int)}
+    slice_rows = [
+        row for row in slice_rows
+        if "voids" not in row and not (
+            row.get("ordinal") in voided_ordinals and voided_ordinals[row.get("ordinal")] == row.get("slice")
+        )
+    ]
+    commits = [row for row in landed_commits(root, "HEAD") if isinstance(row, dict)]
+
+    if cfg is None:
+        cfg = project_config_document(root).get("config")
+    catalog = _otlp_adapter_catalog(cfg)
+    declared_families = catalog[0]
+    declared_profiles = _otlp_declared_profiles(root)
+
+    maps = {
+        "candidate_to_slice": {},
+        "tree_to_candidate": {},
+        "tree_to_slice": {},
+        "verification_to_slice": {},
+        "verification_to_candidate": {},
+        "review_to_slice": {},
+        "review_to_candidate": {},
+        "review_by_artefact": {},
+        "review_by_candidate": {},
+        "review_by_commit": {},
+        "grant_by_review": {},
+        "grant_by_candidate": {},
+        "waiver_to_slice": {},
+        "waiver_to_candidate": {},
+        "token_to_grant": {},
+        "tree_to_grant": {},
+        "commit_to_slice": {},
+    }
+
+    commit_shas = [
+        csha for csha in (_otlp_allow_string("polyctl.commit.sha", c.get("sha")) for c in commits) if csha
+    ]
+    for row in slice_rows:
+        notes = row.get("notes") if isinstance(row.get("notes"), dict) else {}
+        raw_commit = str(row.get("commit") or notes.get("commit") or "").strip().lower()
+        sslice = _otlp_allow_string("polyctl.slice", row.get("slice"))
+        if not (raw_commit and sslice and _OTLP_SHORT_SHA.fullmatch(raw_commit)):
+            continue
+        csha = _otlp_allow_string("polyctl.commit.sha", raw_commit)
+        if csha:
+            maps["commit_to_slice"][csha] = sslice
+        else:
+            matches = [full for full in commit_shas if full.startswith(raw_commit)]
+            if len(matches) == 1:
+                maps["commit_to_slice"][matches[0]] = sslice
+
+    for row in verifications:
+        vid = _otlp_allow_string("polyctl.verification.id", row.get("id"))
+        cand = row.get("candidate") if isinstance(row.get("candidate"), dict) else {}
+        cdigest = _otlp_allow_string("polyctl.candidate", cand.get("digest"))
+        itree = _otlp_allow_string("polyctl.commit.tree", cand.get("index_tree"))
+        vslice = _otlp_allow_string("polyctl.slice", row.get("slice"))
+        if vid and cdigest:
+            maps["verification_to_candidate"][vid] = cdigest
+        if itree and cdigest:
+            maps["tree_to_candidate"][itree] = cdigest
+        if vslice and cdigest:
+            maps["candidate_to_slice"][cdigest] = vslice
+        if vslice and vid:
+            maps["verification_to_slice"][vid] = vslice
+        if vslice and itree:
+            maps["tree_to_slice"][itree] = vslice
+
+    for row in reviews:
+        artefact = _otlp_allow_string("polyctl.review.id", os.path.basename(str(row.get("artefact") or "")))
+        rslice = _otlp_allow_string("polyctl.slice", row.get("slice"))
+        cdigest = _otlp_allow_string("polyctl.candidate", row.get("candidate"))
+        if artefact:
+            maps["review_by_artefact"][artefact] = row
+        if cdigest:
+            maps["review_by_candidate"][cdigest] = row
+        if artefact and cdigest:
+            maps["review_to_candidate"][artefact] = cdigest
+        if artefact and rslice:
+            maps["review_to_slice"][artefact] = rslice
+        if cdigest and rslice:
+            maps["candidate_to_slice"][cdigest] = rslice
+        for rcommit in (row.get("commits") if isinstance(row.get("commits"), list) else []):
+            csha = _otlp_allow_string("polyctl.commit.sha", rcommit)
+            if csha:
+                maps["review_by_commit"][csha] = row
+                if rslice:
+                    maps["commit_to_slice"].setdefault(csha, rslice)
+
+    for row in waivers:
+        if row.get("event") != "waived":
+            continue
+        wid = _otlp_allow_string("polyctl.waiver.id", row.get("id"))
+        wslice = _otlp_allow_string("polyctl.slice", row.get("slice"))
+        cdigest = _otlp_allow_string("polyctl.candidate", row.get("candidate"))
+        if wid and cdigest:
+            maps["waiver_to_candidate"][wid] = cdigest
+        if wid and wslice:
+            maps["waiver_to_slice"][wid] = wslice
+        if cdigest and wslice:
+            maps["candidate_to_slice"][cdigest] = wslice
+
+    def _propagate_grants():
+        for row in grants:
+            token = str(row.get("token") or "").strip()
+            if token:
+                maps["token_to_grant"][token] = row
+            info = _otlp_resolve_grant(row, maps)
+            itree = info["itree"]
+            vid = info["vid"]
+            artefact = info["artefact"]
+            wid = info["wid"]
+            resolved_cand = info["cdigest"]
+            resolved_slice = info["slice_id"]
+            if itree and row.get("granted") is True:
+                maps["tree_to_grant"][itree] = row
+            if artefact:
+                maps["grant_by_review"][artefact] = row
+            if resolved_cand:
+                maps["grant_by_candidate"][resolved_cand] = row
+            if resolved_cand and resolved_slice:
+                maps["candidate_to_slice"][resolved_cand] = resolved_slice
+            if itree and resolved_cand:
+                maps["tree_to_candidate"][itree] = resolved_cand
+            if itree and resolved_slice:
+                maps["tree_to_slice"][itree] = resolved_slice
+            if vid and resolved_slice:
+                maps["verification_to_slice"][vid] = resolved_slice
+            if vid and resolved_cand:
+                maps["verification_to_candidate"][vid] = resolved_cand
+            if artefact and resolved_slice:
+                maps["review_to_slice"][artefact] = resolved_slice
+            if artefact and resolved_cand:
+                maps["review_to_candidate"][artefact] = resolved_cand
+            if wid and resolved_slice:
+                maps["waiver_to_slice"][wid] = resolved_slice
+            if wid and resolved_cand:
+                maps["waiver_to_candidate"][wid] = resolved_cand
+
+    _propagate_grants()
+
+    for commit in commits:
+        info = _otlp_resolve_commit(commit, maps)
+        ctree = info["ctree"]
+        vid = info["vid"]
+        artefact = info["artefact"]
+        wid = info["wid"]
+        cdigest = info["cdigest"]
+        cslice = info["slice_id"]
+        if cdigest and cslice:
+            maps["candidate_to_slice"][cdigest] = cslice
+        if ctree and cslice:
+            maps["tree_to_slice"][ctree] = cslice
+        if ctree and cdigest:
+            maps["tree_to_candidate"][ctree] = cdigest
+        if vid and cslice:
+            maps["verification_to_slice"][vid] = cslice
+        if artefact and cslice:
+            maps["review_to_slice"][artefact] = cslice
+        if wid and cslice:
+            maps["waiver_to_slice"][wid] = cslice
+
+    _propagate_grants()
+
+    steps = []
+    for row in verifications:
+        record_digest = chained_row_digest(row, VERIFICATION_CHAIN)
+        vid = _otlp_allow_string("polyctl.verification.id", row.get("id"))
+        cand = row.get("candidate") if isinstance(row.get("candidate"), dict) else {}
+        cdigest = _otlp_allow_string("polyctl.candidate", cand.get("digest")) or maps["verification_to_candidate"].get(vid)
+        itree = _otlp_allow_string("polyctl.commit.tree", cand.get("index_tree"))
+        slice_id = (
+            _otlp_allow_string("polyctl.slice", row.get("slice"))
+            or maps["verification_to_slice"].get(vid)
+            or maps["candidate_to_slice"].get(cdigest)
+            or maps["tree_to_slice"].get(itree)
+        )
+        gates = [g for g in (row.get("gates") or []) if isinstance(g, dict)]
+        passed_gates = sum(
+            1 for g in gates
+            if (g.get("passed") is True if isinstance(g.get("passed"), bool) else g.get("outcome") == "PASS")
+        )
+        failed_gates = len(gates) - passed_gates
+        pass_tests = 0
+        fail_tests = 0
+        for g in gates:
+            counts = g.get("counts") if isinstance(g.get("counts"), dict) else {}
+            p_val = counts.get("pass") if "pass" in counts else g.get("pass_count")
+            f_val = counts.get("fail") if "fail" in counts else g.get("fail_count")
+            if isinstance(p_val, int) and not isinstance(p_val, bool):
+                pass_tests += int(p_val)
+            if isinstance(f_val, int) and not isinstance(f_val, bool):
+                fail_tests += int(f_val)
+        duration_ns = int(round(sum(
+            float(g["seconds"]) for g in gates
+            if isinstance(g.get("seconds"), (int, float)) and not isinstance(g.get("seconds"), bool)
+            and float(g["seconds"]) > 0
+        ) * 1_000_000_000))
+        start_ns = _otlp_unix_nano(row.get("at"))
+        end_ns = start_ns + duration_ns if duration_ns > 0 else start_ns
+        changed_count = _otlp_changed_count(cand)
+        if isinstance(row.get("passed"), bool):
+            outcome = "PASS" if row["passed"] else "FAIL"
+        else:
+            outcome = _otlp_allow_string("polyctl.outcome", row.get("outcome")) or "FAIL"
+        steps.append({
+            "step": "verification",
+            "record_digest": record_digest,
+            "span_id": _otlp_hex_id(f"polyctl-otlp-span-v1:verification:{record_digest}", 16),
+            "slice": slice_id,
+            "candidate": cdigest,
+            "start_ns": start_ns,
+            "end_ns": end_ns,
+            "status_code": 1 if outcome == "PASS" else 2,
+            "ref_id": vid,
+            "links": {},
+            "pairs": [
+                ("polyctl.step", "verification"),
+                ("polyctl.slice", slice_id),
+                ("polyctl.candidate", cdigest),
+                ("polyctl.verification.id", vid),
+                ("polyctl.verification.profile", row.get("profile")),
+                ("polyctl.outcome", outcome),
+                ("polyctl.commit.tree", itree),
+                ("polyctl.gates.count", len(gates)),
+                ("polyctl.gates.passed_count", passed_gates),
+                ("polyctl.gates.failed_count", failed_gates),
+                ("polyctl.tests.pass_count", pass_tests),
+                ("polyctl.tests.fail_count", fail_tests),
+                ("polyctl.candidate.changed_count", changed_count),
+            ],
+        })
+
+    for row in reviews:
+        record_digest = chained_row_digest(row, REVIEW_CHAIN)
+        artefact = _otlp_allow_string("polyctl.review.id", os.path.basename(str(row.get("artefact") or "")))
+        cdigest = _otlp_allow_string("polyctl.candidate", row.get("candidate")) or maps["review_to_candidate"].get(artefact)
+        slice_id = (
+            _otlp_allow_string("polyctl.slice", row.get("slice"))
+            or maps["review_to_slice"].get(artefact)
+            or maps["candidate_to_slice"].get(cdigest)
+        )
+        linked_grant = maps["grant_by_review"].get(artefact) or maps["grant_by_candidate"].get(cdigest) or {}
+        verdict = _otlp_allow_string("polyctl.outcome", row.get("verdict")) or "INVALID"
+        start_ns = _otlp_unix_nano(row.get("at"))
+        reviewers_list = row.get("reviewers") if isinstance(row.get("reviewers"), list) else None
+        pairs = [
+            ("polyctl.step", "review"),
+            ("polyctl.slice", slice_id),
+            ("polyctl.candidate", cdigest),
+            ("polyctl.review.id", artefact),
+            ("polyctl.review.kind", row.get("kind")),
+            ("polyctl.review.tier", row.get("tier")),
+            ("polyctl.outcome", verdict),
+            ("polyctl.authorizable", row.get("authorizable") if isinstance(row.get("authorizable"), bool) else None),
+            ("polyctl.reviewers.count", len(reviewers_list) if reviewers_list is not None else None),
+        ]
+        pairs.extend(_otlp_actor_pairs(
+            "polyctl.implementer",
+            row.get("implementer")
+            or linked_grant.get("implementer")
+            or (linked_grant.get("role_bindings") or {}).get("implementer"),
+            identity=(
+                row.get("implementer_identity")
+                or row.get("author")
+                or linked_grant.get("implementer_identity")
+                or linked_grant.get("author")
+            ),
+            catalog=catalog,
+        ))
+        pairs.extend(_otlp_actor_pairs(
+            "polyctl.reviewer",
+            row.get("reviewer") or linked_grant.get("reviewer"),
+            identity=row.get("reviewer_identity") or linked_grant.get("reviewer_identity"),
+            catalog=catalog,
+        ))
+        steps.append({
+            "step": "review",
+            "record_digest": record_digest,
+            "span_id": _otlp_hex_id(f"polyctl-otlp-span-v1:review:{record_digest}", 16),
+            "slice": slice_id,
+            "candidate": cdigest,
+            "start_ns": start_ns,
+            "end_ns": start_ns,
+            "status_code": 1 if verdict == "APPROVED" else 2,
+            "ref_id": artefact,
+            "links": {"candidate": cdigest},
+            "pairs": pairs,
+        })
+
+    for row in grants:
+        record_digest = chained_row_digest(row, AUTHORITY_CHAIN)
+        info = _otlp_resolve_grant(row, maps)
+        cand = info["cand"]
+        itree = info["itree"]
+        vid = info["vid"]
+        artefact = info["artefact"]
+        wid = info["wid"]
+        cdigest = info["cdigest"]
+        slice_id = info["slice_id"]
+        review_row = info["review_row"] or {}
+        granted = bool(row.get("granted") is True)
+        start_ns = _otlp_unix_nano(row.get("at"))
+        changed_count = _otlp_changed_count(cand)
+        reasons = row.get("reasons") if isinstance(row.get("reasons"), list) else []
+        pairs = [
+            ("polyctl.step", "grant"),
+            ("polyctl.slice", slice_id),
+            ("polyctl.candidate", cdigest),
+            ("polyctl.verification.id", vid),
+            ("polyctl.review.id", artefact),
+            ("polyctl.waiver.id", wid),
+            ("polyctl.review.tier", row.get("tier") or review_row.get("tier")),
+            ("polyctl.outcome", "GRANTED" if granted else "REFUSED"),
+            ("polyctl.granted", granted),
+            ("polyctl.commit.tree", itree),
+            ("polyctl.candidate.changed_count", changed_count),
+            ("polyctl.reasons.count", len(reasons)),
+        ]
+        pairs.extend(_otlp_actor_pairs(
+            "polyctl.implementer",
+            row.get("implementer") or (row.get("role_bindings") or {}).get("implementer"),
+            identity=(
+                row.get("implementer_identity")
+                or row.get("author")
+                or review_row.get("implementer_identity")
+                or review_row.get("author")
+            ),
+            catalog=catalog,
+        ))
+        pairs.extend(_otlp_actor_pairs(
+            "polyctl.reviewer",
+            row.get("reviewer") or review_row.get("reviewer"),
+            identity=row.get("reviewer_identity") or review_row.get("reviewer_identity"),
+            catalog=catalog,
+        ))
+        steps.append({
+            "step": "grant",
+            "record_digest": record_digest,
+            "span_id": _otlp_hex_id(f"polyctl-otlp-span-v1:grant:{record_digest}", 16),
+            "slice": slice_id,
+            "candidate": cdigest,
+            "start_ns": start_ns,
+            "end_ns": start_ns,
+            "status_code": 1 if granted else 2,
+            "ref_id": record_digest,
+            "grant_token": str(row.get("token") or "").strip() or None,
+            "grant_tree": itree if granted else None,
+            "links": {"review": artefact, "verification": vid, "candidate": cdigest},
+            "pairs": pairs,
+        })
+
+    for commit in commits:
+        info = _otlp_resolve_commit(commit, maps)
+        if not info["relevant"]:
+            continue
+        csha = info["csha"]
+        ctree = info["ctree"]
+        trailers = info["trailers"]
+        grant_row = info["grant_row"] or {}
+        review_row = info["review_row"] or {}
+        vid = info["vid"]
+        artefact = info["artefact"]
+        wid = info["wid"]
+        cdigest = info["cdigest"]
+        slice_id = info["slice_id"]
+        record_digest = chained_row_digest(
+            {"sha": commit.get("sha"), "tree": commit.get("tree"), "at": commit.get("at")},
+            _OTLP_COMMIT_CHAIN,
+        )
+        start_ns = _otlp_unix_nano(commit.get("at"))
+        pairs = [
+            ("polyctl.step", "commit"),
+            ("polyctl.slice", slice_id),
+            ("polyctl.candidate", cdigest),
+            ("polyctl.commit.sha", csha),
+            ("polyctl.commit.tree", ctree),
+            ("polyctl.verification.id", vid),
+            ("polyctl.review.id", artefact),
+            ("polyctl.waiver.id", wid),
+            ("polyctl.outcome", "LANDED"),
+        ]
+        pairs.extend(_otlp_actor_pairs(
+            "polyctl.implementer",
+            trailers.get("author")
+            or grant_row.get("implementer")
+            or (grant_row.get("role_bindings") or {}).get("implementer"),
+            identity=(
+                grant_row.get("implementer_identity")
+                or grant_row.get("author")
+                or review_row.get("implementer_identity")
+                or review_row.get("author")
+            ),
+            catalog=catalog,
+        ))
+        pairs.extend(_otlp_actor_pairs(
+            "polyctl.reviewer",
+            trailers.get("reviewer") or grant_row.get("reviewer") or review_row.get("reviewer"),
+            identity=grant_row.get("reviewer_identity") or review_row.get("reviewer_identity"),
+            catalog=catalog,
+        ))
+        steps.append({
+            "step": "commit",
+            "record_digest": record_digest,
+            "span_id": _otlp_hex_id(f"polyctl-otlp-span-v1:commit:{record_digest}", 16),
+            "slice": slice_id,
+            "candidate": cdigest,
+            "start_ns": start_ns,
+            "end_ns": start_ns,
+            "status_code": 1,
+            "ref_id": csha,
+            "links": {
+                "grant_token": info["grant_token"],
+                "grant_tree": ctree,
+                "review": artefact,
+                "verification": vid,
+            },
+            "pairs": pairs,
+        })
+
+    grouped, group_order = {}, []
+    for item in steps:
+        if item["slice"]:
+            key = f"slice:{item['slice']}"
+        elif item["candidate"]:
+            key = f"candidate:{item['candidate']}"
+        else:
+            key = f"step:{item['record_digest']}"
+        if key not in grouped:
+            grouped[key] = []
+            group_order.append(key)
+        grouped[key].append(item)
+
+    spans = []
+    for key in group_order:
+        group = sorted(
+            grouped[key],
+            key=lambda item: (item["start_ns"], _OTLP_STEP_RANK.get(item["step"], 9), item["record_digest"]),
+        )
+        trace_slice = next((item["slice"] for item in reversed(group) if item["slice"]), None)
+        trace_candidate = next((item["candidate"] for item in reversed(group) if item["candidate"]), None)
+        trace_seed = "|".join(
+            [f"polyctl-otlp-trace-v1:{key}:{trace_candidate or ''}"]
+            + sorted(item["record_digest"] for item in group)
+        )
+        trace_id = _otlp_hex_id(trace_seed, 32)
+
+        verification_spans = {}
+        review_spans = {}
+        grant_by_token = {}
+        grant_by_tree = {}
+        root_span_id = group[0]["span_id"]
+
+        for index, item in enumerate(group):
+            parent_span_id = None
+            if index > 0:
+                links = item.get("links") or {}
+                if item["step"] == "commit":
+                    parent_span_id = (
+                        grant_by_token.get(links.get("grant_token"))
+                        or grant_by_tree.get(links.get("grant_tree"))
+                        or review_spans.get(links.get("review"))
+                        or verification_spans.get(links.get("verification"))
+                        or group[index - 1]["span_id"]
+                    )
+                elif item["step"] == "grant":
+                    parent_span_id = (
+                        review_spans.get(links.get("review"))
+                        or verification_spans.get(links.get("verification"))
+                        or group[index - 1]["span_id"]
+                    )
+                elif item["step"] == "review":
+                    parent_span_id = verification_spans.get(links.get("candidate")) or root_span_id
+                else:
+                    parent_span_id = group[index - 1]["span_id"]
+                if parent_span_id == item["span_id"]:
+                    parent_span_id = root_span_id if root_span_id != item["span_id"] else None
+
+            if item["step"] == "verification":
+                if item.get("ref_id"):
+                    verification_spans[item["ref_id"]] = item["span_id"]
+                if item.get("candidate"):
+                    verification_spans[item["candidate"]] = item["span_id"]
+            elif item["step"] == "review" and item.get("ref_id"):
+                review_spans[item["ref_id"]] = item["span_id"]
+            elif item["step"] == "grant":
+                if item.get("grant_token"):
+                    grant_by_token[item["grant_token"]] = item["span_id"]
+                if item.get("grant_tree"):
+                    grant_by_tree[item["grant_tree"]] = item["span_id"]
+
+            enriched_pairs = []
+            for attr_key, attr_val in item["pairs"]:
+                if attr_key == "polyctl.slice" and attr_val is None:
+                    attr_val = trace_slice
+                elif attr_key == "polyctl.candidate" and attr_val is None:
+                    attr_val = trace_candidate
+                enriched_pairs.append((attr_key, attr_val))
+
+            span = {
+                "traceId": trace_id,
+                "spanId": item["span_id"],
+                "name": item["step"],
+                "kind": 1,
+                "startTimeUnixNano": str(item["start_ns"]),
+                "endTimeUnixNano": str(item["end_ns"]),
+                "attributes": _otlp_attributes(
+                    enriched_pairs, declared_families=declared_families, declared_profiles=declared_profiles
+                ),
+                "status": {"code": item["status_code"]},
+            }
+            if parent_span_id:
+                span["parentSpanId"] = parent_span_id
+            spans.append(span)
+
+    resource_pairs = [
+        ("service.name", "polyctl"),
+        ("service.version", __version__),
+    ]
+    if attested:
+        resource_pairs.append(("polyctl.export.attested_only", True))
+        resource_pairs.append(("polyctl.export.partial", bool(unattested_list)))
+        if unattested_list:
+            resource_pairs.append((
+                "polyctl.export.unattested_ledgers",
+                ",".join(item["ledger"] for item in unattested_list),
+            ))
+
+    return {
+        "resourceSpans": [
+            {
+                "resource": {
+                    "attributes": _otlp_attributes(
+                        resource_pairs, declared_families=declared_families, declared_profiles=declared_profiles
+                    ),
+                },
+                "scopeSpans": [
+                    {
+                        "scope": {
+                            "name": "polyctl",
+                            "version": __version__,
+                        },
+                        "spans": spans,
+                    }
+                ],
+            }
+        ]
+    }

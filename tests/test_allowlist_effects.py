@@ -1,7 +1,7 @@
 """Landing review: parseable options must also have classified effects."""
 import pytest
 
-from ao import allowlist as AL, lib as A
+from polyctl import allowlist as AL, lib as A
 
 
 def problems(command, role="architect"):
@@ -10,21 +10,21 @@ def problems(command, role="architect"):
 
 @pytest.mark.parametrize("command", [
     "env -C src rm agent-mail/x", "env --chdir=.. rm -rf agent-mail",
-    "sudo -D src tee .ao/board.md", "env -Csrc rm agent-mail/x",
+    "sudo -D src tee .polyctl/board.md", "env -Csrc rm agent-mail/x",
     "env -iCsrc rm agent-mail/x", "env --ch=src rm agent-mail/x",
-    "genv --chdir src cp agent-mail/a agent-mail/b", "sudo --chdir=src tee .ao/board.md",
+    "genv --chdir src cp agent-mail/a agent-mail/b", "sudo --chdir=src tee .polyctl/board.md",
     "sudo -nDsrc rm agent-mail/x", "sudo --chd src rm agent-mail/x",
     "sudo -i rm agent-mail/x", "sudo --login rm agent-mail/x",
     "sudo -R src rm agent-mail/x", "sudo --chroot=src rm agent-mail/x",
     "git -C src status", "git -C .. diff --output=agent-mail/x",
     "git -C . -C src status", "git --work-tree=src status", "git --git-dir=other status",
-    "ao -C src status", "ao --root=src status", "ao --roo src status",
+    "polyctl -C src status", "polyctl --root=src status", "polyctl --roo src status",
     "npm --prefix=src test", "npm --prefix src test", "npm -C src test",
     "npm --workspace=src test", "npm --workspaces test",
     "uv --directory=src sync", "uv --project src sync",
     "make -C src", "gmake --directory=src", "tar -C src -xf archive",
     "nice env -C src rm agent-mail/x", "rtk git -C src status",
-    "ao lock -- env -C src tee .ao/board.md",
+    "polyctl lock -- env -C src tee .polyctl/board.md",
 ])
 def test_directory_selection_never_reuses_repository_relative_paths(command):
     assert problems(command)
@@ -92,7 +92,7 @@ def test_wrapper_and_tool_writes_survive_unwrapping_and_are_role_specific(comman
 @pytest.mark.parametrize("program", ["cp", "mv"])
 @pytest.mark.parametrize("option", ["-b", "--backup=numbered", "-S.bak", "--suffix=.bak"])
 def test_backup_options_can_write_beside_an_exact_coordination_file(program, option):
-    command = f"{program} {option} agent-mail/a .ao/board.md"
+    command = f"{program} {option} agent-mail/a .polyctl/board.md"
     assert problems(command)
     assert not problems(command, "implementer")
 
@@ -111,7 +111,7 @@ def test_output_option_values_and_similar_spellings_are_not_other_options():
     assert not problems("git diff -C HEAD", "implementer")  # copy detection
     assert not problems("git archive HEAD --output=--exec", "implementer")
     assert not problems("git -C . status")
-    assert not problems("ao -C . status")
+    assert not problems("polyctl -C . status")
 
 
 @pytest.mark.parametrize("kind, name", [
@@ -181,7 +181,7 @@ def test_program_and_file_selection_through_git_global_or_archive_options_is_nam
 @pytest.mark.parametrize("command", [
     "git archive*", "git stash*", "git show*", "git diff-files*", "git diff-index*",
     "git diff-tree*", "git range-diff*", "git whatchanged*", "git diff*", "git status*",
-    "ao st*", "ls -n*", "git status src/file*", "nice git status*",
+    "polyctl st*", "ls -n*", "git status src/file*", "nice git status*",
 ])
 def test_attached_wildcards_are_unknown_commands(command):
     rule = f"Bash({command})"
@@ -193,7 +193,7 @@ def test_attached_wildcards_are_unknown_commands(command):
 
 @pytest.mark.parametrize("program", ["xargs", "gxargs"])
 @pytest.mark.parametrize("arguments", [
-    "-I tatus git status", "-I tatus_x git status*", "-I dd git add", "-I atus ao status",
+    "-I tatus git status", "-I tatus_x git status*", "-I dd git add", "-I atus polyctl status",
     "-I token git status", "-Itoken git status", "-i git status", "-itoken git status",
     "--replace git status", "--replace=token git status", "--rep=token git status",
     "-J token git status", "-Jtoken git status", "-rItoken git status",
@@ -210,7 +210,7 @@ def test_every_xargs_replacement_mode_is_unknown_even_without_a_match(program, a
 
 @pytest.mark.parametrize("command, changed", [
     ("nice git status", ["nice", "git", "unclassified"]),
-    ("nice ao status", ["nice", "ao", "unclassified"]),
+    ("nice polyctl status", ["nice", "polyctl", "unclassified"]),
     ("nice ls -a", ["nice", "ls", "--unclassified"]),
 ])
 def test_validation_uses_the_words_left_by_a_wrapper(monkeypatch, command, changed):
@@ -222,9 +222,9 @@ def test_validation_uses_the_words_left_by_a_wrapper(monkeypatch, command, chang
 
 @pytest.mark.parametrize("program", ["xargs", "gxargs"])
 @pytest.mark.parametrize("command, named", [
-    ("git status", False), ("git add", False), ("ao push status", False),
+    ("git status", False), ("git add", False), ("polyctl push status", False),
     ("git archive", True), ("git config --get user.name", True),
-    ("ao features", True), ("ao push", True), ("git", True), ("ls --unclassified", True),
+    ("polyctl features", True), ("polyctl push", True), ("git", True), ("ls --unclassified", True),
 ])
 def test_xargs_without_replacement_is_judged_as_appending_arguments(program, command, named):
     rule = f"Bash({program} -n1 {command})"
@@ -233,18 +233,18 @@ def test_xargs_without_replacement_is_judged_as_appending_arguments(program, com
 
 
 @pytest.mark.parametrize("command", [
-    "ao -Csrc=. status", "ao -C/tmp/other=. verify:*",
-    "ao -Csrc=. lock -- git status", "nice ao -Csrc=. status",
-    "ao -Csrc status", "ao -C=x status", "ao -C. status", "ao -C=. status",
-    "ao --root=x status", "ao --root=. status", "ao --root . status",
-    "ao --roo=. status", "ao --roo . status", "ao -C src=. status",
-    "ao -C . -Csrc=. status", "ao -C . --root=. status",
-    "ao -C ./ status", "ao -C .. status", "ao -C =. status",
-    "ao backup --to .", "ao backup --to=. ", "ao backup --to=src=.",
-    "ao content verify --from .", "ao content verify --from=src=.",
-    "ao content verify --fro=.",
+    "polyctl -Csrc=. status", "polyctl -C/tmp/other=. verify:*",
+    "polyctl -Csrc=. lock -- git status", "nice polyctl -Csrc=. status",
+    "polyctl -Csrc status", "polyctl -C=x status", "polyctl -C. status", "polyctl -C=. status",
+    "polyctl --root=x status", "polyctl --root=. status", "polyctl --root . status",
+    "polyctl --roo=. status", "polyctl --roo . status", "polyctl -C src=. status",
+    "polyctl -C . -Csrc=. status", "polyctl -C . --root=. status",
+    "polyctl -C ./ status", "polyctl -C .. status", "polyctl -C =. status",
+    "polyctl backup --to .", "polyctl backup --to=. ", "polyctl backup --to=src=.",
+    "polyctl content verify --from .", "polyctl content verify --from=src=.",
+    "polyctl content verify --fro=.",
 ])
-def test_ao_directory_options_only_admit_the_separate_C_dot_pair(command):
+def test_polyctl_directory_options_only_admit_the_separate_C_dot_pair(command):
     rule = f"Bash({command})"
     assert problems(command, "implementer")
     assert problems(command, "architect")
@@ -256,16 +256,16 @@ def test_ao_directory_options_only_admit_the_separate_C_dot_pair(command):
     ("-Csrc=.", "src=."), ("-C/tmp/other=.", "/tmp/other=."),
     ("-C=.", "."), ("--root=src=.", "src=."),
 ])
-def test_ao_argparse_preserves_equals_inside_an_attached_root(argument, root):
-    from ao import cli
+def test_polyctl_argparse_preserves_equals_inside_an_attached_root(argument, root):
+    from polyctl import cli
     assert cli.build_parser().parse_args([argument, "status"]).root == root
 
 
 @pytest.mark.parametrize("command", [
-    "ao -C . status", "ao -C . -C . verify:*", "nice ao -C . lock -- git status",
-    "ao features on review --by=Alice=.", "ao note text --to=Alice=.",
+    "polyctl -C . status", "polyctl -C . -C . verify:*", "nice polyctl -C . lock -- git status",
+    "polyctl features on review --by=Alice=.", "polyctl note text --to=Alice=.",
 ])
-def test_ao_literal_root_noop_and_non_directory_values_keep_their_meaning(command):
+def test_polyctl_literal_root_noop_and_non_directory_values_keep_their_meaning(command):
     assert not problems(command, "implementer")
     assert not problems(command, "architect")
 
@@ -296,9 +296,9 @@ def test_equals_cannot_disguise_another_tools_directory_or_output_path(command):
     assert problems(command, "architect")
 
 
-@pytest.mark.parametrize("command", ["ao backup:*", "ao content verify:*", "xargs ao backup",
-                                     "nice ao content verify *"])
-def test_ao_prefix_cannot_append_a_directory_option(command):
+@pytest.mark.parametrize("command", ["polyctl backup:*", "polyctl content verify:*", "xargs polyctl backup",
+                                     "nice polyctl content verify *"])
+def test_polyctl_prefix_cannot_append_a_directory_option(command):
     assert problems(command, "implementer")
     assert problems(command, "architect")
     assert AL.normalized_rule(f"Bash({command})") == "Bash(*)"

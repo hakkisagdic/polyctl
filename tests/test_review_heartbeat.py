@@ -1,7 +1,7 @@
 import re
 import sys
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 
 def _unregistered(monkeypatch):

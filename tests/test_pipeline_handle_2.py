@@ -2,18 +2,18 @@
 
 anomalies() wrote a returned review's wait over its own `age` - the transcript's - so every check after
 that loop read the wrong number whenever a review had come back. A review record with no id stopped
-`ao status` and the anomalies. And a review that ended with no verdict was told to be handled as one
+`polyctl status` and the anomalies. And a review that ended with no verdict was told to be handled as one
 that came back.
 """
 import json
 import os
 import time
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 
 def _review(root, name, **state):
-    directory = os.path.join(root, ".ao", "reviews")
+    directory = os.path.join(root, ".polyctl", "reviews")
     os.makedirs(directory, exist_ok=True)
     with open(os.path.join(directory, f"{name}.json"), "w", encoding="utf-8") as fh:
         json.dump(state, fh)

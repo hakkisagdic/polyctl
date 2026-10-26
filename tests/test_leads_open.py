@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import a2a_mcp, cli, lib as A, mcp, storage
+from polyctl import a2a_mcp, cli, lib as A, mcp, storage
 
 
 TAINTED = "text\x1b]0;forged\x07\nforged row\u202e"
@@ -83,12 +83,12 @@ def test_reviews_escape_record_fields(project, monkeypatch, capsys):
 def test_mail_ack_refuses_a_glob_with_another_readers_mail(project, monkeypatch, capsys, store, role):
     root = project["root"]
     cfg = dict(project, mail={"store": store})
-    Path(root, ".ao", "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    Path(root, ".polyctl", "config.json").write_text(json.dumps(cfg), encoding="utf-8")
     names = ["20261012-0900-fable-to-kiro-DECISION-go.md",
              "20261012-0901-kiro-to-fable-REPORT-done.md"]
     for name in names:
         A.write_mail(root, cfg, name, "# Read this\n", {"kind": "note"})
-    monkeypatch.setenv("AO_ROLE", role)
+    monkeypatch.setenv("POLYCTL_ROLE", role)
     args = SimpleNamespace(action="ack", type="*.md", body=None)
 
     assert cli.cmd_mail(cfg, args) == 1
@@ -101,14 +101,14 @@ def test_mail_ack_refuses_a_glob_with_another_readers_mail(project, monkeypatch,
     if role in ("implementer", "architect"):
         args.type = names[0 if role == "implementer" else 1]
         assert cli.cmd_mail(cfg, args) in (None, 0)
-    monkeypatch.delenv("AO_ROLE")
+    monkeypatch.delenv("POLYCTL_ROLE")
     args.type = "*.md"
     assert cli.cmd_mail(cfg, args) in (None, 0)
     assert A.mailbox(root, cfg["mailbox"]) == []
 
 
 def _serve(module, project, monkeypatch, capsys, lines):
-    monkeypatch.setattr(sys, "argv", ["ao", "-C", project["root"]])
+    monkeypatch.setattr(sys, "argv", ["polyctl", "-C", project["root"]])
     monkeypatch.setattr(sys, "stdin", io.StringIO("\n".join(lines) + "\n"))
     if module is a2a_mcp:
         monkeypatch.setattr(module, "ROOT", None)
@@ -167,12 +167,12 @@ def test_person_review_does_not_offer_an_expanding_windows_command(monkeypatch, 
                             SimpleNamespace(paths=[word] if field == "paths" else None,
                                             commits=word if field == "commits" else None))
     out = capsys.readouterr().out
-    assert "ao person-review --by" not in out
+    assert "polyctl person-review --by" not in out
     assert "cannot safely quote" in out
 
 
 def test_lane_records_names_a_parser_limit_as_unreadable(project, monkeypatch):
-    directory = Path(project["root"], ".ao", "lanes")
+    directory = Path(project["root"], ".polyctl", "lanes")
     directory.mkdir()
     (directory / "deep.json").write_text("parser-limit", encoding="utf-8")
     (directory / "ok.json").write_text('{"state":"finished"}', encoding="utf-8")
@@ -194,7 +194,7 @@ def test_hook_uninstall_preserves_a_replacement(project, monkeypatch, capsys, du
     path = Path(root, ".git", "hooks", "pre-commit")
     path.write_bytes(cli._render_local_hook("pre-commit", "."))
     path.chmod(0o755)
-    inv = cli._ao_hook_inventory(root)
+    inv = cli._polyctl_hook_inventory(root)
     foreign = b"#!/bin/sh\n# another tool's hook\nexit 0\n"
     if during == "before reread":
         path.write_bytes(foreign)

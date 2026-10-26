@@ -1,0 +1,229 @@
+{
+  "id": "claude-code",
+  "name": "Claude Code",
+  "project_config": [".claude", ".mcp.json", "CLAUDE.md", "CLAUDE.local.md"],
+  "worktree_dirs": [".claude/worktrees"],
+  "worktree_dirs_note": "Claude Code keeps the worktrees it makes here and reads no configuration from them: a session started in one reads that worktree's own. polyctl skips a worktree of the repository only here (HARNESS-CONFIG).",
+  "verified": "full",
+  "actor_name": "claude",
+  "family": "anthropic",
+  "notes": "Works as implementer and as architect. When used as the architect it is the process running the orchestrator, so only send/resume matter.",
+  "send": {
+    "argv": [
+      "claude",
+      "-p",
+      "{prompt}"
+    ],
+    "cwd_matters": true,
+    "stdin": { "replaces": ["{prompt}"], "with": [],
+               "note": "Verified from the headless documentation (code.claude.com/docs/en/headless), read 2026-09-17: non-interactive mode reads stdin, its review example pipes a diff to `claude -p` with no prompt argument, and piped stdin is capped at 10MB. `claude --help` (2.1.261) lists the prompt as an optional argument." }
+  },
+  "resume": {
+    "argv": [
+      "claude",
+      "--resume",
+      "{session}",
+      "-p",
+      "{prompt}",
+      "--permission-mode",
+      "dontAsk",
+      "--allowedTools",
+      "Read,Grep,Glob,Write,Edit,mcp__polyctl__polyctl_inbox,mcp__polyctl__polyctl_ack,mcp__polyctl__polyctl_report,mcp__polyctl__polyctl_ask,mcp__polyctl__polyctl_decisions,mcp__polyctl__polyctl_propose,mcp__polyctl__polyctl_status,mcp__polyctl__polyctl_board,mcp__polyctl__polyctl_next,mcp__polyctl__polyctl_notices,mcp__polyctl__polyctl_fanout,mcp__polyctl__polyctl_watchdog,Bash(polyctl status:*),Bash(polyctl board:*),Bash(polyctl next:*),Bash(polyctl slice start:*),Bash(polyctl slice block:*),Bash(polyctl slice status:*),Bash(polyctl slices:*),Bash(polyctl writers),Bash(polyctl verify:*),Bash(polyctl review:*),Bash(polyctl commit-ok:*),Bash(polyctl commit -m:*),Bash(polyctl commit -F:*),Bash(polyctl mail:*),Bash(polyctl ask:*),Bash(polyctl decisions:*),Bash(polyctl propose:*),Bash(polyctl doctor),Bash(polyctl watchdog explain:*),Bash(polyctl since:*),Bash(polyctl digest:*),Bash(polyctl fanout ok:*),Bash(polyctl fanout record:*),Bash(polyctl tail:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+    ],
+    "continue_last": [
+      "claude",
+      "--continue",
+      "-p",
+      "{prompt}",
+      "--permission-mode",
+      "dontAsk"
+    ],
+    "stdin": { "replaces": ["{prompt}"], "with": [],
+               "note": "Verified as for send: -p with --resume is the non-interactive mode the headless documentation says reads stdin." },
+    "note": "Scoped rather than --dangerously-skip-permissions. The implementer is trusted with the tree — it must write code and run gates — but not with push, gh, or arbitrary shell; authority is withheld by polyctl, and the allowlist keeps the blast radius to the repo. The grant names every polyctl command and polyctl MCP tool the playbook's loop and the nudge tell the implementer to use (tests/test_grants_pinned.py), except `polyctl lock`, which runs any command: declared gates take the same lock through `polyctl verify`. The mode is pinned, as options.pin says: a -p run given no --permission-mode starts in permissions.defaultMode from the person's settings, and `claude -p --resume` in the mode a new -p run would, so an acceptEdits, auto or bypassPermissions default widened every nudge (code.claude.com/docs/en/permission-modes, 'Which mode a session starts in', and /docs/en/sessions, 'Permission mode on resume', read 2026-09-17)."
+  },
+  "options": {
+    "trust_none": ["--tools", "Read,Grep,Glob", "--permission-mode", "dontAsk", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"],
+    "trust_none_note": "Only reading, whatever the person's settings hold: --tools leaves Read, Grep and Glob the only tools there are, so no allow rule in a settings file can hand a reviewer Edit or Bash; --allowedTools lets them read outside the reviewer's own directory; dontAsk denies anything else rather than asking; --strict-mcp-config starts no MCP server (#24).",
+    "pin": {
+      "implementer": ["--permission-mode", "dontAsk"],
+      "architect": ["--permission-mode", "dontAsk"],
+      "reviewer": ["--permission-mode", "dontAsk", "--tools", "Read,Grep,Glob"],
+      "note": "What a turn polyctl starts in each role carries, the bug hunter's as a reviewer's; a configured command that names none of it (a block composed before it was pinned) has it appended when the turn starts. Verified from code.claude.com/docs/en/cli-reference, read 2026-09-17: --permission-mode overrides defaultMode from settings files and takes default, acceptEdits, plan, auto, dontAsk or bypassPermissions (manual for default from 2.1.200); --tools restricts which tools are available at all, from 2.1.247. From /docs/en/permission-modes and /docs/en/headless: dontAsk, the mode given for locked-down scripts, denies every call that would otherwise prompt and still runs reads, the read-only command set and allow rules, including a person's own in their settings; deny rules hold in every mode; plan is no reviewer's mode, since where auto mode is available the classifier approves shell commands during planning. The Agent SDK passes --tools comma-joined, as --allowedTools (github.com/anthropics/claude-agent-sdk-python, _internal/transport/subprocess_cli.py)."
+    },
+    "mcp_isolation": { "required": ["--strict-mcp-config"], "forbidden": ["--mcp-config"],
+                       "why": "an allow list gates permissions, not which MCP servers start (#24)" },
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "output_json": [
+      "--output-format",
+      "stream-json"
+    ],
+    "allowed_tools": [
+      "--allowedTools",
+      "{tools}"
+    ],
+    "trust_all": [
+      "--dangerously-skip-permissions"
+    ],
+    "implementer_tools": "Read,Grep,Glob,Write,Edit,mcp__polyctl__polyctl_inbox,mcp__polyctl__polyctl_ack,mcp__polyctl__polyctl_report,mcp__polyctl__polyctl_ask,mcp__polyctl__polyctl_decisions,mcp__polyctl__polyctl_propose,mcp__polyctl__polyctl_status,mcp__polyctl__polyctl_board,mcp__polyctl__polyctl_next,mcp__polyctl__polyctl_notices,mcp__polyctl__polyctl_fanout,mcp__polyctl__polyctl_watchdog,Bash(polyctl status:*),Bash(polyctl board:*),Bash(polyctl next:*),Bash(polyctl slice start:*),Bash(polyctl slice block:*),Bash(polyctl slice status:*),Bash(polyctl slices:*),Bash(polyctl writers),Bash(polyctl verify:*),Bash(polyctl review:*),Bash(polyctl commit-ok:*),Bash(polyctl commit -m:*),Bash(polyctl commit -F:*),Bash(polyctl mail:*),Bash(polyctl ask:*),Bash(polyctl decisions:*),Bash(polyctl propose:*),Bash(polyctl doctor),Bash(polyctl watchdog explain:*),Bash(polyctl since:*),Bash(polyctl digest:*),Bash(polyctl fanout ok:*),Bash(polyctl fanout record:*),Bash(polyctl tail:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(ls:*),Bash(cat:*),Bash(grep:*)",
+    "architect_tools": "Read,Grep,Glob,Edit(/.polyctl/backlog.md),Edit(/.polyctl/board.md),Edit(/.polyctl/inbox/**),Bash(polyctl status:*),Bash(polyctl board:*),Bash(polyctl next:*),Bash(polyctl slice:*),Bash(polyctl slices:*),Bash(polyctl mail:*),Bash(polyctl decide:*),Bash(polyctl decisions:*),Bash(polyctl propose:*),Bash(polyctl proposals:*),Bash(polyctl note:*),Bash(polyctl answer:*),Bash(polyctl source import),Bash(polyctl review:*),Bash(polyctl catchup),Bash(polyctl catchup --plan),Bash(polyctl doctor),Bash(polyctl doctor --check),Bash(polyctl writers),Bash(polyctl since:*),Bash(polyctl digest:*),Bash(polyctl notices:*),Bash(polyctl alarms),Bash(polyctl alarms list:*),Bash(polyctl cost:*),Bash(polyctl credits:*),Bash(polyctl tail:*),Bash(polyctl watchdog status:*),Bash(polyctl watchdog explain:*),Bash(polyctl watchdog trace:*),Bash(git status:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(grep:*),Bash(ps:*),Bash(lsof:*)",
+    "architect_tools_note": "The architect's wake: `polyctl init` composes it from resume with this grant in place of the implementer's. It reads, edits the three coordination files a wake writes and nothing else, and runs the polyctl commands the playbook's routine and the wake and refill prompts name, with the read-only instruments. A rule given on the command line as Edit(/path) is anchored at the working directory, and an Edit rule covers every built-in tool that edits, Write included (code.claude.com/docs/en/permissions, 'Read and Edit', read 2026-09-17). No rule admits a write elsewhere: a * stands for any text, spaces included, so `Bash(rm agent-mail/*)` admitted `rm agent-mail/x src/app.py`, and git log, diff and show take --output=<file>; `polyctl mail ack` removes handled mail, and the read-only forms of git run with no rule in every mode."
+  },
+  "transcript": {
+    "kind": "jsonl",
+    "path": "~/.claude/projects/{escaped_cwd}/{session}.jsonl",
+    "escaped_cwd": "absolute cwd with '/' replaced by '-'",
+    "record": {
+      "time": "timestamp",
+      "kind": "type",
+      "text_keys": [
+        "message.content",
+        "content",
+        "text",
+        "message"
+      ]
+    },
+    "messages": { "prompt": ["user"], "reply": ["assistant"], "blocks": "message.content[]", "match": { "type": "text" },
+                  "not_words": [{ "isMeta": true }, { "isCompactSummary": true }, { "origin.kind": "task-notification" }],
+                  "harness_replies": [{ "message.model": "<synthetic>" }] },
+    "turn": { "end": ["result"],
+              "end_when": { "type": "assistant", "field": "message.stop_reason",
+                            "values": ["end_turn", "stop_sequence", "refusal"] },
+              "conversation": ["user", "assistant"] },
+    "tool_call": { "type": "assistant", "blocks": "message.content[]", "match": { "type": "tool_use" },
+                   "name": "name", "args": "input", "id": "id", "path_keys": ["file_path", "notebook_path"],
+                   "write_words": ["write", "edit"] },
+    "subagents": {
+      "dir": "{session}/subagents",
+      "transcripts": [
+        { "path": "agent-{id}.jsonl", "named_by": "toolUseResult.agentId" },
+        { "path": "workflows/{id}/agent-*.jsonl", "named_by": "toolUseResult.runId" }
+      ],
+      "sidecar": { "path": "{name}.meta.json", "call": "toolUseId" },
+      "note": "A subagent writes its records to a transcript of its own under the session's directory: subagents/agent-<id>.jsonl for an agent a call starts, subagents/workflows/<run>/agent-<id>.jsonl for the agents a workflow run starts, each with a sidecar agent-<id>.meta.json. The result of the call that started an agent names it at toolUseResult.agentId, whether the agent ran to its end or went on in the background, and a workflow's result names its run at toolUseResult.runId; the sidecar of an agent a call started names the call at toolUseId, the only link for an agent another subagent started, whose call's result carries no toolUseResult. Its records are user, assistant and attachment records like the session's, but it writes a response's records as it streams them, each with the output tokens so far, so a response costs its highest record. No response is in both a subagent's transcript and its session's, nor in two subagents'; the usage and totalTokens a call's result carries sit on a user record, are not the subagent's spend, and are not read. The agents of a workflow run carry the prompt id current when the run started them, a later turn's for 961 of 3,268, so a prompt id does not join them. Verified on 2.1 session stores: every one of 3,563 subagent transcripts beside a session transcript is joined. A subagent at work is its implementer at work while the session's own transcript is quiet: in the 59 stores at rest that delegate, 77,402 of 257,598 subagent records were written with the session transcript silent for six minutes or more, and 143,529 while the session's turn read as ended. The session writes a record of each subagent it takes back: every one of the 444 closed turns a subagent wrote in ended at a record of the session, 251 at a task notification written 0.1 s after the last subagent write at the median, and no subagent transcript at rest was written after its session transcript, so one written after it is still working. A subagent's own records do not say it finished: its last record closes its turn in 194 of the 239 agents a call started and 430 of the 2,677 a workflow run started, whose 2,187 more end on the result of their StructuredOutput call."
+    },
+    "note": "No record starts a turn, so a prompt opens one. The session store writes no closing record (`result` closes a turn only in --output-format stream-json output): the response that ends a turn says so in message.stop_reason, which every record of that response carries. end_turn ends one, and so does stop_sequence, which marks a reply the harness writes itself (an API error, for one) and after which the store holds the next prompt or nothing, and so does refusal, after which the store held the next prompt; tool_use means the harness runs the calls and asks again, and after max_tokens it asks again too: another response of the same turn followed every one. A Stop hook runs after an end_turn response and writes nothing when it starts: its system record, stop_hook_summary, comes when it ends and not after every end_turn, and no hook went on with the turn, so the turn has ended at the response and the summary is bookkeeping. A tool call is a tool_use block in an assistant record's message.content, and its result a tool_result block in the user record that follows, which holds nothing else; the words of a prompt or a reply are its text blocks, or its content when that is a string. A user record holding isMeta true - a note the harness writes: a local command's caveat, a skill's instructions, another session's message - or isCompactSummary true, the summary of a compacted conversation, or origin.kind task-notification, a background task's end, is no one speaking. Every kind but user and assistant - titles, prompt queues, hook summaries, attachments, file history, and whatever kind a release adds - may follow a turn's end. Verified on 2.1 session stores. A record that holds no one's words still asks the model to answer: a task notification or a note after a turn's end opens the next turn, as a prompt does. Of the 5,035 turns the 419 stores at rest hold, 1,477 open at a task notification and 512 at a note, 295 of them another session's message (origin.kind peer), and 1,378 and 371 of those charge a response's tokens. A reply the harness writes itself holds message.model <synthetic> and no usage: all 515 in the sessions of those stores and all 180 in their subagents' transcripts, 693 of them ending at stop_sequence and 2 at refusal, 510 an error the service or the account returned (isApiErrorMessage: a usage limit, an API error, a failed authentication) and 185 the words No response requested. 328 of the 5,035 turns hold no reply but these and charge nothing - 180 an error after a person's prompt (96), a notification (79) or a note (5), and 148 No response requested after a note (133) or a notification (15) - so the model answered none of them; 187 more hold one beside the model's own response.",
+    "tail_bytes": 900000
+  },
+  "telemetry": {
+    "context": {
+      "from": "none",
+      "note": "No record carries a context percentage or the model's window: a response's usage says how many tokens it sent, not of how many, and a compaction record carries token counts only. A percentage would rest on a guessed window, so none is read."
+    },
+    "cost": {
+      "from": "transcript",
+      "type": "assistant",
+      "response": "message.id",
+      "fields": [
+        "message.usage.input_tokens",
+        "message.usage.cache_creation_input_tokens",
+        "message.usage.cache_read_input_tokens",
+        "message.usage.output_tokens"
+      ],
+      "unit": "token",
+      "model": "message.model",
+      "tokens": {
+        "input": "message.usage.input_tokens",
+        "cache_write_5m": ["message.usage.cache_creation.ephemeral_5m_input_tokens",
+                           "message.usage.cache_creation_input_tokens"],
+        "cache_write_1h": "message.usage.cache_creation.ephemeral_1h_input_tokens",
+        "cache_read": "message.usage.cache_read_input_tokens",
+        "output": "message.usage.output_tokens"
+      },
+      "priced_when": [
+        {"field": "message.usage.speed", "values": ["standard", null]},
+        {"field": "message.usage.service_tier", "values": ["standard", null]},
+        {"field": "message.usage.inference_geo", "values": ["global", "not_available", null]}
+      ],
+      "counted": "Every token a response read or wrote, once per response: input_tokens (input after the last cache breakpoint), cache_creation_input_tokens (input written to the prompt cache), cache_read_input_tokens (input read from it) and output_tokens (thinking included).",
+      "not_counted": "server_tool_use (web search and fetch requests: counts of requests, not tokens); output_tokens_details and cache_creation (breakdowns already inside output_tokens and cache_creation_input_tokens); iterations (a per-iteration breakdown that repeats the total). The count weighs every token alike: a cache read is priced far below an input token and is most of a long session's tokens, so a turn's count follows its context size times its responses more closely than its price. `polyctl cost --usd` prices each kind at its own rate instead (`tokens`).",
+      "pricing": "How `polyctl cost --usd` reads a response for the price table: by the model at message.model, and by kind under the per-response reading, each kind at its own rate. usage.cache_creation breaks the cache writes down by how long the cache lives, five minutes or an hour, and an hour's write costs 1.6 times a five-minute one; a record without the breakdown is read as five-minute writes, the default duration. Measured on the 87,798 usage records of the 400 transcripts written last in the thirty days to 2026-09-26: every record carries the breakdown, 44,347 wrote to a one-hour cache and 43,158 to a five-minute one, and 8 hold a one-hour write that their total leaves out, priced as the breakdown says. A response at another speed (fast mode), service tier or inference geography than priced_when lists is not at the table's list prices and is reported unknown. Every record measured held speed standard or no speed, service_tier standard and inference_geo not_available, but for the replies the harness writes itself (model <synthetic>), which hold neither field and carry no tokens.",
+      "note": "One response is written as one record per content block, each repeating the response's usage, so a response is read once, by message.id, under the per-response reading (billing.fallback.reading); adding the records up counted about twice its tokens. A subagent's transcript writes each record with the output tokens so far, so a response costs the most its records reached. A store also writes a response again, turns after the first, and a resumed session's transcript can hold another's responses, so a response is read once in a reading rather than once in a turn.",
+      "verified": true
+    },
+    "failure": {
+      "from": "transcript",
+      "type": "user",
+      "blocks": "message.content[]",
+      "match": { "type": "tool_result" },
+      "field": "is_error",
+      "failed_when": true,
+      "text": "content",
+      "verified": true,
+      "note": "The harness's own verdict, one tool result per user record: is_error is true on a failed result of any tool, and a result that succeeded carries false or no is_error at all.",
+      "ends": {
+        "records": [
+          { "type": "user", "match": { "origin.kind": "task-notification" }, "field": "message.content" },
+          { "type": "attachment", "match": { "attachment.commandMode": "task-notification" }, "field": "attachment.prompt" }
+        ],
+        "status": ["<status>", "</status>"],
+        "failed_when": ["failed", "stopped"],
+        "id": ["<task-id>", "</task-id>"],
+        "text": ["<summary>", "</summary>"],
+        "note": "A task run in the background - a shell command, a monitor, a subagent, a workflow - ends after the call that started it returned, and the harness tells the session in a notification: a user record holding origin.kind task-notification when no turn runs, which opens the next turn, or an attachment record holding attachment.commandMode task-notification queued into the turn that runs. queue-operation records repeat its text while it waits, and are not read. Its text is one <task-notification> holding a <task-id> for each task it names, a <status> and a <summary>. In the 419 stores at rest the sessions hold 1,517 such user records and 1,771 such attachments, none holding two notifications; 1,010 carry no status, a monitor's or a workflow's progress event, and the others tell an end: 2,000 completed, 183 failed, 90 stopped and 5 killed. A failed end is a command that exited non-zero (116), an agent that terminated early or stalled (41), and a monitor's script (10), an MCP task (10) or a workflow's script (6) that failed. A stopped end is work a session's previous process ended before it finished, told when the session resumed: tasks it found no completion record for (64), background commands of the previous session (23), agents that did not finish before it ended (3). A killed end is a task stopped on purpose: by the person in 3, and 2 background commands. So failed and stopped are failures and killed is not. The call that started a task returned when the task began: 228 of the 273 failed and stopped ends name their call, and none of those calls has a failed result. An end is at times told twice, 9 of the 2,269 in those stores, so it is read once, by its task ids."
+      }
+    }
+  },
+  "billing": {
+    "fallback": {
+      "reading": "per-response",
+      "note": "How the panel and polyctl cost add this harness's usage records up. No transcripts are declared, so the offline credit estimate reads none of them: the harness bills no credit account that estimate stands in for, and a token is not a credit."
+    }
+  },
+  "sessions": {
+    "kind": "escaped-cwd",
+    "dir": "~/.claude/projects",
+    "transcript": "{session}.jsonl",
+    "cwd": "cwd",
+    "note": "A directory's name is its working directory with every character that is not a letter or a digit made a dash (code.claude.com/docs/en/sessions, read 2026-09-17), so it cannot be read back into a path: `cwd` names the record field holding the working directory, and a directory is placed by a value there that escapes to its name. user, assistant, attachment and system records carry it. A session moved with /cd is kept under the directory it moved to while its first records name the old one, so the newest records are read first. Verified on a 2.1 store: every one of 167 directories was placed from the last or the first 64 KB of one of its three newest transcripts, 158 of them by the last record that carries the field."
+  },
+  "busy": {
+    "mtime_file": "{session}.jsonl",
+    "idle_seconds": 240,
+    "note": "No status file; rely on write age alone."
+  },
+  "detect": {
+    "dirs": [".claude"],
+    "files": [".mcp.json", "CLAUDE.md"],
+    "binaries": ["claude"],
+    "processes": ["claude", "claude-code"],
+    "headless": ["-p", "--print"],
+    "install_dirs": ["~/.claude/local"],
+    "update": ["claude", "update"]
+  },
+  "directives": {
+    "steering_files": [
+      "CLAUDE.md",
+      ".claude/CLAUDE.md",
+      "~/.claude/CLAUDE.md"
+    ],
+    "steering_format": "markdown, always included",
+    "hooks": ".claude/settings.json (hooks key)",
+    "command_hooks": { "format": "pre-tool-use", "shell_tool": "Bash", "project_dir_env": "CLAUDE_PROJECT_DIR",
+                       "files": ["~/.claude/settings.json", ".claude/settings.json", ".claude/settings.local.json"] },
+    "skills_dir": ".claude/skills",
+    "playbook": { "path": ".claude/skills/polyctl/SKILL.md", "header": "frontmatter" },
+    "rule_files": ["CLAUDE.md"],
+    "polyctl_files": [".claude/skills/polyctl/"]
+  },
+  "mcp": { "file": ".mcp.json", "remove_when_empty": true },
+  "quota": {
+    "provider": "claude",
+    "stops": [
+      { "words": "hit your session limit[^\\n]*", "hours": 5 },
+      { "words": "hit your weekly limit[^\\n]*", "hours": 168 },
+      { "words": "reached your [^\\n]{1,60}? limit\\.[^\\n]*", "hours": 168 },
+      { "words": "usage limit reached\\|(?P<epoch>\\d{9,11})", "hours": 5 }
+    ],
+    "resets_at": "quotaLimits.resetsAt",
+    "stops_note": "The words a turn ends on when a usage limit stops it: the reply the harness writes in the model's place (message.model <synthetic>, error rate_limit, apiErrorStatus 429), and what a headless run prints as it exits. Verified on 2.1 session stores: all 428 replies holding error rate_limit, in 59 stores and their subagents' transcripts, are one of three forms, and none of the 357 other replies the harness wrote in the model's place is: the session limit (hit your session limit · resets <time> (<zone>)), the weekly limit (hit your weekly limit · resets <time>, or resets <month> <day> at <time>), and a model's own allowance (reached your <model> limit. Run /usage-credits to continue or switch models with /model.), which names no reset. From 2.1.235 the reply records the limit beside its words, in quotaLimits: rateLimitType five_hour or seven_day, and resetsAt, the reset in epoch seconds, which 283 of them hold. On each of those 283 the reset the words name, read against the reply's own time within its limit's hours, is resetsAt: 210 session limits, 62 weekly limits that name their day, and 11 that name only the clock and were due 2 to 10 hours later, past a five-hour window. Older releases wrote the limit as usage limit reached|<epoch>, the reset after the bar."
+  },
+  "models": {
+    "default": "claude-sonnet-5",
+    "review": "claude-opus-5",
+    "_note": "polyctl init --profile and the reviewer default read these; change here when Anthropic ships new ids"
+  }
+}

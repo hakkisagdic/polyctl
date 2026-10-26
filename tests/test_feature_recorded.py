@@ -1,16 +1,16 @@
 """Review is switched off only by a person, on the record (FEATURE-RECORDED).
 
-`ao features off review` wrote `.ao/config.json` and nothing else, and `ao commit-ok` read the switch from there - a
+`polyctl features off review` wrote `.polyctl/config.json` and nothing else, and `polyctl commit-ok` read the switch from there - a
 file the implementer can write. An implementer that wrote `"features": {"review": false}`, or ran the command itself,
 was granted on verification alone, and its unreviewed commit landed with a grant that bound its tree, so neither
-`ao doctor` nor the watchdog flagged it. A switch that weakens a guarantee is now off only where a person's record in
+`polyctl doctor` nor the watchdog flagged it. A switch that weakens a guarantee is now off only where a person's record in
 the opt-in ledger says so too, as a recorded setting is; the config alone turns it off nowhere, and says so.
 """
 import json
 import os
 from types import SimpleNamespace
 
-from ao import cli, features as F, lib as A
+from polyctl import cli, features as F, lib as A
 from tests.test_attacks import _commit_ok, _stage, _verified
 
 
@@ -34,7 +34,7 @@ def test_review_turned_off_in_the_config_alone_stays_required(project, capsys):
     code, out = _commit_ok(cfg, capsys)
 
     assert F.enabled(cfg, "review") is True and F.unrecorded(cfg) == ["review"]
-    assert code != 0 and "review is off in .ao/config.json with no person's record" in out
+    assert code != 0 and "review is off in .polyctl/config.json with no person's record" in out
 
 
 def test_a_person_turns_review_off_on_the_record(project, capsys):
@@ -79,7 +79,7 @@ def test_doctor_names_a_switch_off_with_no_record(project):
 
     problems = dict(cli.doctor_problems(cfg))
 
-    assert "ao features off review --by <name>" in problems["unrecorded-switch:review"]
+    assert "polyctl features off review --by <name>" in problems["unrecorded-switch:review"]
     assert "unrecorded-switch:inventory_review" in problems
 
 
@@ -89,12 +89,12 @@ def test_a_config_that_names_no_root_is_held_to_review():
 
 
 def test_no_grant_an_agent_holds_may_switch_review_off():
-    """FEATURE-RECORDED-3: `--by` refuses an agent's or a role's name, but a grant that admitted `ao features` let an
-    agent write a person's name there; the grants audit names it as it names `ao waive`."""
-    from ao import allowlist as AL
+    """FEATURE-RECORDED-3: `--by` refuses an agent's or a role's name, but a grant that admitted `polyctl features` let an
+    agent write a person's name there; the grants audit names it as it names `polyctl waive`."""
+    from polyctl import allowlist as AL
 
-    found = AL.problems(["claude", "-p", "{prompt}", "--allowedTools", "Read,Bash(ao features:*)"], {})
+    found = AL.problems(["claude", "-p", "{prompt}", "--allowedTools", "Read,Bash(polyctl features:*)"], {})
 
-    assert ("switches review off", "ao features off review --by p", "Bash(ao features:*)") in found
-    assert ("switches the inventory review off", "ao features off inventory_review --by p", "Bash(ao features:*)") \
+    assert ("switches review off", "polyctl features off review --by p", "Bash(polyctl features:*)") in found
+    assert ("switches the inventory review off", "polyctl features off inventory_review --by p", "Bash(polyctl features:*)") \
         in found

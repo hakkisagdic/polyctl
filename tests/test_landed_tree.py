@@ -3,7 +3,7 @@ import stat
 import subprocess
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_commit_authority import _allow_commit_prerequisites
 from tests.conftest import review_off
 
@@ -40,7 +40,7 @@ def _rev(root, *args):
 
 
 def test_a_hook_that_would_stage_after_the_check_does_not_run_and_the_granted_tree_lands(project, monkeypatch, capsys):
-    """Git wrote the tree after the hook returned, so a hook that staged a path landed it (#64): ao commit writes the
+    """Git wrote the tree after the hook returned, so a hook that staged a path landed it (#64): polyctl commit writes the
     granted tree itself and runs no hook (LEADS-GATE)."""
     root = project["root"]
     cfg = _granted_candidate(project, monkeypatch)

@@ -6,20 +6,20 @@ node_modules/
 # Python bytecode is never source
 __pycache__/
 *.pyc
-# ledger lock sidecars (ao storage)
-.ao/ledger/*.lock
+# ledger lock sidecars (polyctl storage)
+.polyctl/ledger/*.lock
 
-# agent-orchestrator: mail is transient; the ledger and reviews are not
+# polyctl: mail is transient; the ledger and reviews are not
 agent-mail/*.md
 !agent-mail/README.md
-.ao/inbox/
-.ao/hold
+.polyctl/inbox/
+.polyctl/hold
 
-# This repository is public, and its own .ao/ state is per-checkout development
-# state: .ao/config.json carries absolute home paths, a session id and reviewer
-# argv. .ao-project stays tracked; the state it points at stays on the machine.
+# This repository is public, and its own .polyctl/ state is per-checkout development
+# state: .polyctl/config.json carries absolute home paths, a session id and reviewer
+# argv. .polyctl-project stays tracked; the state it points at stays on the machine.
 # (Product repositories are different: their ledgers and reviews are evidence.)
-.ao/
+.polyctl/
 .claude/
 .kiro/
 .codex/

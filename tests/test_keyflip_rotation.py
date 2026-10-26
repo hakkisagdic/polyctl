@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from ao import lib as A, settings as S
+from polyctl import lib as A, settings as S
 from tests.scenarios import World
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="the fake keyflip is a POSIX shell script")
@@ -33,7 +33,7 @@ def _windows(monkeypatch, *percents):
         "resets_s": 7200, "raw": "claude"})
 
 
-def test_with_rotation_off_ao_neither_reads_nor_rotates(project, monkeypatch):
+def test_with_rotation_off_polyctl_neither_reads_nor_rotates(project, monkeypatch):
     monkeypatch.setattr(A, "provider_window", lambda name="claude": pytest.fail("read a window with rotation off"))
 
     assert A.rotate_if_exhausted(project, ["claude", "-p", "x"], "reviewer")["ok"] is True

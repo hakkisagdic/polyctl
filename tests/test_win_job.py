@@ -6,8 +6,8 @@ nobody. A job object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE ends every process 
 all they start, when the last handle closes. The reviewer starts with CREATE_SUSPENDED, is assigned
 to the job and resumed before it runs a single instruction, and the job is closed in the same `finally`
 that stops a group elsewhere; a job Windows refuses stops the suspended process and refuses the run.
-On by default (`windows_job` in `ao features`), and turned off only on a person's record with
-`ao features off windows_job --by <name>`.
+On by default (`windows_job` in `polyctl features`), and turned off only on a person's record with
+`polyctl features off windows_job --by <name>`.
 """
 import ctypes
 import json
@@ -21,8 +21,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import acp, allowlist, cli, features as F, procs
-from ao import settings as S
+from polyctl import acp, allowlist, cli, features as F, procs
+from polyctl import settings as S
 
 
 class _JobKernel32:
@@ -258,7 +258,7 @@ def test_a_reviewer_whose_job_windows_refuses_is_refused_and_says_so(project, mo
     job, why = cli._reviewer_job(4242, project["root"])
     assert job is None and "AssignProcessToJobObject for 4242 failed" in why
     said = capsys.readouterr().out
-    assert "could not be held in a Windows job" in said and "ao features off windows_job --by <name>" in said
+    assert "could not be held in a Windows job" in said and "polyctl features off windows_job --by <name>" in said
 
 
 def test_the_job_is_on_by_default_and_turns_off_only_on_a_persons_record(project, monkeypatch):
@@ -267,12 +267,12 @@ def test_the_job_is_on_by_default_and_turns_off_only_on_a_persons_record(project
     assert "windows_job" in F.RECORDED and F.FEATURES["windows_job"][1] is True
     assert F.enabled(cli.A.load_config(root), "windows_job") is True
 
-    # No agent grant may admit `ao features off windows_job`.
-    for rule in ("Bash(ao features:*)", "Bash(ao:*)"):
+    # No agent grant may admit `polyctl features off windows_job`.
+    for rule in ("Bash(polyctl features:*)", "Bash(polyctl:*)"):
         found = allowlist.problems(["claude", "-p", "{prompt}", "--allowedTools", f"Read,{rule}"], {})
-        assert ("switches the Windows reviewer job off", "ao features off windows_job --by p", rule) in found
+        assert ("switches the Windows reviewer job off", "polyctl features off windows_job --by p", rule) in found
 
-    # Editing `.ao/config.json` alone — either via features.windows_job or a leftover review.windows_job key —
+    # Editing `.polyctl/config.json` alone — either via features.windows_job or a leftover review.windows_job key —
     # leaves the Windows job active because there is no person's opt-in record in the ledger.
     F.set_switch(root, "windows_job", False)
     cfg = cli.A.load_config(root)
@@ -286,7 +286,7 @@ def test_the_job_is_on_by_default_and_turns_off_only_on_a_persons_record(project
     monkeypatch.setattr(procs, "hold_in_job", lambda pid: (asked.append(pid) or held, None))
     assert cli._reviewer_job(4242, root) == (held, None) and asked == [4242]
 
-    # A person's recorded `ao features off windows_job --by Ada` turns it off; non-Windows never holds a job.
+    # A person's recorded `polyctl features off windows_job --by Ada` turns it off; non-Windows never holds a job.
     cli.A.record_opt_in(root, "features.windows_job", False, "Ada")
     assert F.unrecorded(cli.A.load_config(root)) == []
     assert F.enabled(cli.A.load_config(root), "windows_job") is False
@@ -320,7 +320,7 @@ def _fake_popen(monkeypatch, on_communicate):
 
 def test_a_windows_reviewer_and_probe_start_suspended_and_resume_only_once_in_the_job(project, monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
-    # Even if `.ao/config.json` has an unrecorded `windows_job: false`, the reviewer and probe stay in the job.
+    # Even if `.polyctl/config.json` has an unrecorded `windows_job: false`, the reviewer and probe stay in the job.
     F.set_switch(project["root"], "windows_job", False)
     fake = _JobKernel32()
     monkeypatch.setattr(procs, "_job_kernel32", lambda: fake)

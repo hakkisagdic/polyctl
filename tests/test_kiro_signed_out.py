@@ -3,7 +3,7 @@
 Measured on kiro-cli 2.27.1 on 2026-10-07: with its sign-in expired, a review printed `Opening browser... | Press (^)
 + C to cancel` and waited ten minutes for a browser nobody would open, then ended on `error: OAuth error: Auth portal
 timed out` and exit 1, and the review was UNAVAILABLE with no word of why; two catch-up reviews in a row spent twenty
-minutes so. Kiro's adapter names what it prints then, and ao reads it at each heartbeat, stops the reviewer, and says
+minutes so. Kiro's adapter names what it prints then, and polyctl reads it at each heartbeat, stops the reviewer, and says
 a person signs in with `kiro-cli login`.
 """
 import os
@@ -11,12 +11,12 @@ import time
 
 import pytest
 
-from ao import cli
+from polyctl import cli
 from tests.standin import program
 
 
 def _kiro(tmp_path, script):
-    """A stand-in kiro-cli: ao knows it by its name. A program on Windows too (WINDOWS-LANE-PARITY)."""
+    """A stand-in kiro-cli: polyctl knows it by its name. A program on Windows too (WINDOWS-LANE-PARITY)."""
     return [program(tmp_path, "kiro-cli", f"import sys, time\n{script}"), "chat", "--no-interactive", "review this",
             "--trust-tools="]
 

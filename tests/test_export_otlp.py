@@ -1,4 +1,4 @@
-"""Tests for `ao export otlp [--attested] [--out FILE]` (EXPORT-OTLP)."""
+"""Tests for `polyctl export otlp [--attested] [--out FILE]` (EXPORT-OTLP)."""
 import contextlib
 import copy
 from datetime import datetime
@@ -11,11 +11,11 @@ import subprocess
 
 import pytest
 
-from ao import __version__
-from ao import cli
-from ao import lib as A
-from ao import matrix as M
-from ao.storage import LedgerCorruption
+from polyctl import __version__
+from polyctl import cli
+from polyctl import lib as A
+from polyctl import matrix as M
+from polyctl.storage import LedgerCorruption
 
 GIT = A.git_binary()
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
@@ -23,38 +23,38 @@ HEX16 = re.compile(r"^[0-9a-f]{16}$")
 DIGITS = re.compile(r"^\d+$")
 
 ALLOWED_SPAN_ATTRIBUTES = frozenset({
-    "ao.step",
-    "ao.slice",
-    "ao.candidate",
-    "ao.verification.id",
-    "ao.verification.profile",
-    "ao.review.id",
-    "ao.review.kind",
-    "ao.review.tier",
-    "ao.waiver.id",
-    "ao.commit.sha",
-    "ao.commit.tree",
-    "ao.outcome",
-    "ao.authorizable",
-    "ao.granted",
-    "ao.implementer.actor",
-    "ao.implementer.family",
-    "ao.reviewer.actor",
-    "ao.reviewer.family",
-    "ao.gates.count",
-    "ao.gates.passed_count",
-    "ao.gates.failed_count",
-    "ao.tests.pass_count",
-    "ao.tests.fail_count",
-    "ao.reviewers.count",
-    "ao.candidate.changed_count",
-    "ao.reasons.count",
+    "polyctl.step",
+    "polyctl.slice",
+    "polyctl.candidate",
+    "polyctl.verification.id",
+    "polyctl.verification.profile",
+    "polyctl.review.id",
+    "polyctl.review.kind",
+    "polyctl.review.tier",
+    "polyctl.waiver.id",
+    "polyctl.commit.sha",
+    "polyctl.commit.tree",
+    "polyctl.outcome",
+    "polyctl.authorizable",
+    "polyctl.granted",
+    "polyctl.implementer.actor",
+    "polyctl.implementer.family",
+    "polyctl.reviewer.actor",
+    "polyctl.reviewer.family",
+    "polyctl.gates.count",
+    "polyctl.gates.passed_count",
+    "polyctl.gates.failed_count",
+    "polyctl.tests.pass_count",
+    "polyctl.tests.fail_count",
+    "polyctl.reviewers.count",
+    "polyctl.candidate.changed_count",
+    "polyctl.reasons.count",
 })
 
 
 @contextlib.contextmanager
 def _at_epoch(epoch):
-    """Run ao's writers at a fixed unix timestamp."""
+    """Run polyctl's writers at a fixed unix timestamp."""
     real_time = A.time.time
     A.time.time = lambda: epoch
     try:
@@ -184,10 +184,10 @@ def _attr_map(attributes):
 
 
 def _seed_two_slices(project):
-    """Populate two slices using ao's own writers (`record_verification`, `write_review_artefact`, `record_authority`)."""
+    """Populate two slices using polyctl's own writers (`record_verification`, `write_review_artefact`, `record_authority`)."""
     root = project["root"]
     cfg = _strict_matrix_config(project)
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         fh.write(json.dumps({k: v for k, v in cfg.items() if k != "root"}) + "\n")
     gates_spec = {
         "gates": {
@@ -200,13 +200,13 @@ def _seed_two_slices(project):
             "smoke": ["pytest"],
         },
     }
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         fh.write(json.dumps(gates_spec) + "\n")
     resolution = M.resolve(cfg)
     codex_identity = resolution["reviewers"][0]["identity"]
 
     # SLICE-A: stage two files and measure the real index candidate.
-    # Leave .ao/board.md without a running slice during verify so SLICE-A's grant and verification
+    # Leave .polyctl/board.md without a running slice during verify so SLICE-A's grant and verification
     # must resolve their slice via `review_to_slice`.
     with open(os.path.join(root, "app.py"), "w", encoding="utf-8") as fh:
         fh.write("print('DIFF_LINE_NEVER_EXPORT')\n")
@@ -223,7 +223,7 @@ def _seed_two_slices(project):
         "schema": 2,
         "profile": "full",
         "gates_digest": A.gate_definitions_digest(root, "full"),
-        "by": "ao verify",
+        "by": "polyctl verify",
         "passed": True,
         "gates": [
             {"name": "pytest", "passed": True, "seconds": 1.5, "counts": {"pass": 12, "fail": 0}},
@@ -291,7 +291,7 @@ def _seed_two_slices(project):
     # Second slice: put SLICE-B under `## running` on the board so `record_verification` sets `slice="SLICE-B"`,
     # leave `slice=None` on the review, and record a refused grant via `record_authority` without `review` or
     # `reviewer` (exact `cmd_commit_ok` refusal shape) so the grant resolves `SLICE-B` via `verification_to_slice`.
-    with open(os.path.join(root, ".ao", "board.md"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "board.md"), "w", encoding="utf-8") as fh:
         fh.write(
             "# Board\n\n## running\n- [SLICE-B] Slice B\n\n"
             "## blocked\n\n## queued\n\n## inbox\n\n## verified\n\n## done\n"
@@ -308,7 +308,7 @@ def _seed_two_slices(project):
         "schema": 2,
         "profile": "smoke",
         "gates_digest": A.gate_definitions_digest(root, "smoke"),
-        "by": "ao verify",
+        "by": "polyctl verify",
         "passed": False,
         "gates": [
             {"name": "pytest", "passed": False, "seconds": 0.25, "counts": {"pass": 4, "fail": 2}},
@@ -388,12 +388,12 @@ def test_otlp_shape_and_slice_traces(project, capsys):
     res_spans = doc["resourceSpans"][0]
     assert set(res_spans.keys()) == {"resource", "scopeSpans"}
     res_attrs = _attr_map(res_spans["resource"]["attributes"])
-    assert res_attrs["service.name"] == "ao"
+    assert res_attrs["service.name"] == "polyctl"
     assert res_attrs["service.version"] == __version__
 
     assert isinstance(res_spans["scopeSpans"], list) and len(res_spans["scopeSpans"]) == 1
     scope_spans = res_spans["scopeSpans"][0]
-    assert scope_spans["scope"] == {"name": "ao", "version": __version__}
+    assert scope_spans["scope"] == {"name": "polyctl", "version": __version__}
     spans = scope_spans["spans"]
     assert len(spans) == 7
 
@@ -420,8 +420,8 @@ def test_otlp_shape_and_slice_traces(project, capsys):
 
         attrs = _attr_map(span["attributes"])
         assert set(attrs.keys()) <= ALLOWED_SPAN_ATTRIBUTES
-        assert attrs["ao.step"] == span["name"]
-        by_slice.setdefault(attrs["ao.slice"], []).append((span, attrs))
+        assert attrs["polyctl.step"] == span["name"]
+        by_slice.setdefault(attrs["polyctl.slice"], []).append((span, attrs))
 
     assert set(by_slice.keys()) == {"SLICE-A", "SLICE-B"}
     slice_a = by_slice["SLICE-A"]
@@ -454,43 +454,43 @@ def test_otlp_shape_and_slice_traces(project, capsys):
     # Status codes and attributes for SLICE-A and SLICE-B.
     assert [s["status"]["code"] for s, _ in slice_a] == [1, 1, 1, 1]
     assert [s["status"]["code"] for s, _ in slice_b] == [2, 2, 2]
-    assert slice_a[0][1]["ao.outcome"] == "PASS"
-    assert slice_a[0][1]["ao.verification.profile"] == "full"
-    assert slice_a[0][1]["ao.gates.count"] == 2
-    assert slice_a[0][1]["ao.gates.passed_count"] == 2
-    assert slice_a[0][1]["ao.gates.failed_count"] == 0
-    assert slice_a[0][1]["ao.tests.pass_count"] == 12
-    assert slice_a[0][1]["ao.tests.fail_count"] == 0
-    assert slice_a[0][1]["ao.candidate.changed_count"] == 2
-    assert slice_a[1][1]["ao.review.tier"] == "independent"
-    assert slice_a[1][1]["ao.implementer.family"] == "anthropic"
-    assert slice_a[1][1]["ao.reviewer.family"] == "openai"
-    assert slice_a[2][1]["ao.granted"] is True
-    assert slice_a[2][1]["ao.review.tier"] == "independent"
-    assert slice_a[2][1]["ao.candidate.changed_count"] == 2
-    assert slice_a[2][1]["ao.implementer.family"] == "anthropic"
-    assert slice_a[2][1]["ao.reviewer.family"] == "openai"
-    assert slice_a[3][1]["ao.commit.sha"] == seeded["commit_sha"]
-    assert slice_a[3][1]["ao.commit.tree"] == seeded["tree_a"]
-    assert slice_a[3][1]["ao.implementer.family"] == "anthropic"
-    assert slice_a[3][1]["ao.reviewer.family"] == "openai"
-    assert slice_a[3][1]["ao.implementer.actor"] == slice_a[2][1]["ao.implementer.actor"]
-    assert slice_a[3][1]["ao.reviewer.actor"] == slice_a[2][1]["ao.reviewer.actor"]
+    assert slice_a[0][1]["polyctl.outcome"] == "PASS"
+    assert slice_a[0][1]["polyctl.verification.profile"] == "full"
+    assert slice_a[0][1]["polyctl.gates.count"] == 2
+    assert slice_a[0][1]["polyctl.gates.passed_count"] == 2
+    assert slice_a[0][1]["polyctl.gates.failed_count"] == 0
+    assert slice_a[0][1]["polyctl.tests.pass_count"] == 12
+    assert slice_a[0][1]["polyctl.tests.fail_count"] == 0
+    assert slice_a[0][1]["polyctl.candidate.changed_count"] == 2
+    assert slice_a[1][1]["polyctl.review.tier"] == "independent"
+    assert slice_a[1][1]["polyctl.implementer.family"] == "anthropic"
+    assert slice_a[1][1]["polyctl.reviewer.family"] == "openai"
+    assert slice_a[2][1]["polyctl.granted"] is True
+    assert slice_a[2][1]["polyctl.review.tier"] == "independent"
+    assert slice_a[2][1]["polyctl.candidate.changed_count"] == 2
+    assert slice_a[2][1]["polyctl.implementer.family"] == "anthropic"
+    assert slice_a[2][1]["polyctl.reviewer.family"] == "openai"
+    assert slice_a[3][1]["polyctl.commit.sha"] == seeded["commit_sha"]
+    assert slice_a[3][1]["polyctl.commit.tree"] == seeded["tree_a"]
+    assert slice_a[3][1]["polyctl.implementer.family"] == "anthropic"
+    assert slice_a[3][1]["polyctl.reviewer.family"] == "openai"
+    assert slice_a[3][1]["polyctl.implementer.actor"] == slice_a[2][1]["polyctl.implementer.actor"]
+    assert slice_a[3][1]["polyctl.reviewer.actor"] == slice_a[2][1]["polyctl.reviewer.actor"]
 
-    assert slice_b[0][1]["ao.outcome"] == "FAIL"
-    assert slice_b[0][1]["ao.verification.profile"] == "smoke"
-    assert slice_b[0][1]["ao.gates.passed_count"] == 0
-    assert slice_b[0][1]["ao.gates.failed_count"] == 1
-    assert slice_b[0][1]["ao.tests.pass_count"] == 4
-    assert slice_b[0][1]["ao.tests.fail_count"] == 2
-    assert slice_b[0][1]["ao.candidate.changed_count"] == 1
-    assert slice_b[2][1]["ao.granted"] is False
-    assert slice_b[2][1]["ao.review.id"] == "20231114-222320-R-002.md"
-    assert slice_b[2][1]["ao.review.tier"] == "independent"
-    assert slice_b[2][1]["ao.candidate.changed_count"] == 1
-    assert slice_b[2][1]["ao.implementer.family"] == "anthropic"
-    assert slice_b[2][1]["ao.reviewer.family"] == "google"
-    assert slice_b[2][1]["ao.reasons.count"] == 2
+    assert slice_b[0][1]["polyctl.outcome"] == "FAIL"
+    assert slice_b[0][1]["polyctl.verification.profile"] == "smoke"
+    assert slice_b[0][1]["polyctl.gates.passed_count"] == 0
+    assert slice_b[0][1]["polyctl.gates.failed_count"] == 1
+    assert slice_b[0][1]["polyctl.tests.pass_count"] == 4
+    assert slice_b[0][1]["polyctl.tests.fail_count"] == 2
+    assert slice_b[0][1]["polyctl.candidate.changed_count"] == 1
+    assert slice_b[2][1]["polyctl.granted"] is False
+    assert slice_b[2][1]["polyctl.review.id"] == "20231114-222320-R-002.md"
+    assert slice_b[2][1]["polyctl.review.tier"] == "independent"
+    assert slice_b[2][1]["polyctl.candidate.changed_count"] == 1
+    assert slice_b[2][1]["polyctl.implementer.family"] == "anthropic"
+    assert slice_b[2][1]["polyctl.reviewer.family"] == "google"
+    assert slice_b[2][1]["polyctl.reasons.count"] == 2
 
 
 def test_otlp_resolves_slice_via_tree_and_waived_grant_author(project, monkeypatch):
@@ -498,7 +498,7 @@ def test_otlp_resolves_slice_via_tree_and_waived_grant_author(project, monkeypat
     root = project["root"]
     cfg = copy.deepcopy(project)
     cfg["implementer"] = {"adapter": "claude-code", "session": "s1", "name": "claude"}
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         fh.write(json.dumps({k: v for k, v in cfg.items() if k != "root"}) + "\n")
     monkeypatch.setattr(A, "invoking_role", lambda: "implementer")
 
@@ -580,10 +580,10 @@ def test_otlp_resolves_slice_via_tree_and_waived_grant_author(project, monkeypat
     assert len(trace_ids) == 1
     for span in spans:
         attrs = _attr_map(span["attributes"])
-        assert attrs["ao.slice"] == "SLICE-C"
-        if attrs["ao.step"] in ("grant", "commit"):
-            assert attrs["ao.implementer.family"] == "anthropic"
-            assert attrs["ao.implementer.actor"].startswith("sha256:")
+        assert attrs["polyctl.slice"] == "SLICE-C"
+        if attrs["polyctl.step"] in ("grant", "commit"):
+            assert attrs["polyctl.implementer.family"] == "anthropic"
+            assert attrs["polyctl.implementer.actor"].startswith("sha256:")
 
 
 def test_otlp_deterministic_ids_and_out_file(project, tmp_path, capsys):
@@ -605,31 +605,31 @@ def test_otlp_deterministic_ids_and_out_file(project, tmp_path, capsys):
 def test_otlp_strictly_read_only(project, tmp_path, capsys):
     _seed_two_slices(project)
     root = project["root"]
-    home_ao = os.path.join(A.HOME, ".ao")
-    os.makedirs(home_ao, exist_ok=True)
-    with open(os.path.join(home_ao, "state.json"), "w", encoding="utf-8") as fh:
+    home_polyctl = os.path.join(A.HOME, ".polyctl")
+    os.makedirs(home_polyctl, exist_ok=True)
+    with open(os.path.join(home_polyctl, "state.json"), "w", encoding="utf-8") as fh:
         fh.write('{"kept": true}\n')
 
     # Configure session: "auto" so load_config would record a session if not read-only.
-    cfg_path = os.path.join(root, ".ao", "config.json")
+    cfg_path = os.path.join(root, ".polyctl", "config.json")
     cfg = json.loads(open(cfg_path, encoding="utf-8").read())
     cfg["implementer"] = {"adapter": "claude", "session": "auto", "name": "claude"}
     with open(cfg_path, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(cfg) + "\n")
 
     before_project = _tree_digest(root)
-    before_home_ao = _tree_digest(home_ao)
+    before_home_polyctl = _tree_digest(home_polyctl)
 
     assert cli.main(["-C", root, "export", "otlp"]) == 0
     _ = capsys.readouterr().out
     assert _tree_digest(root) == before_project
-    assert _tree_digest(home_ao) == before_home_ao
+    assert _tree_digest(home_polyctl) == before_home_polyctl
 
     out_file = tmp_path / "outside-out.json"
     assert cli.main(["-C", root, "export", "otlp", "--out", str(out_file)]) == 0
     assert out_file.is_file()
     assert _tree_digest(root) == before_project
-    assert _tree_digest(home_ao) == before_home_ao
+    assert _tree_digest(home_polyctl) == before_home_polyctl
 
 
 def test_otlp_excludes_private_fields(project, capsys):
@@ -767,8 +767,8 @@ def test_otlp_hashes_actor_identities_and_allowlists_adapter_families(project, c
     for span in spans:
         attrs = _attr_map(span["attributes"])
         for role in ("implementer", "reviewer"):
-            actor_key = f"ao.{role}.actor"
-            family_key = f"ao.{role}.family"
+            actor_key = f"polyctl.{role}.actor"
+            family_key = f"polyctl.{role}.family"
             if actor_key in attrs:
                 assert actor_hash_re.fullmatch(attrs[actor_key]), (
                     f"{actor_key} must be sha256:<16-hex>, got {attrs[actor_key]!r}"
@@ -777,16 +777,16 @@ def test_otlp_hashes_actor_identities_and_allowlists_adapter_families(project, c
                 assert attrs[family_key] in allowed_families, (
                     f"{family_key} must be declared adapter family or 'unknown', got {attrs[family_key]!r}"
                 )
-        if attrs.get("ao.review.id") == "20231114-222640-R-004.md" and attrs["ao.step"] == "review":
-            claude_hashes.add(attrs["ao.implementer.actor"])
-            cred_hashes.add(attrs["ao.reviewer.actor"])
-            assert attrs["ao.implementer.family"] == "anthropic"
-            assert attrs["ao.reviewer.family"] == "unknown"
-        if attrs.get("ao.review.id") == "20231114-222640-R-004.md" and attrs["ao.step"] == "grant":
-            claude_hashes.add(attrs["ao.implementer.actor"])
-            cred_hashes.add(attrs["ao.reviewer.actor"])
-            assert attrs["ao.implementer.family"] == "anthropic"
-            assert attrs["ao.reviewer.family"] == "unknown"
+        if attrs.get("polyctl.review.id") == "20231114-222640-R-004.md" and attrs["polyctl.step"] == "review":
+            claude_hashes.add(attrs["polyctl.implementer.actor"])
+            cred_hashes.add(attrs["polyctl.reviewer.actor"])
+            assert attrs["polyctl.implementer.family"] == "anthropic"
+            assert attrs["polyctl.reviewer.family"] == "unknown"
+        if attrs.get("polyctl.review.id") == "20231114-222640-R-004.md" and attrs["polyctl.step"] == "grant":
+            claude_hashes.add(attrs["polyctl.implementer.actor"])
+            cred_hashes.add(attrs["polyctl.reviewer.actor"])
+            assert attrs["polyctl.implementer.family"] == "anthropic"
+            assert attrs["polyctl.reviewer.family"] == "unknown"
 
     assert len(claude_hashes) == 1
     assert len(cred_hashes) == 1
@@ -801,9 +801,9 @@ def test_otlp_refuses_unattested_ledgers_without_flag_and_exports_attested_with_
     _seed_two_slices(project)
     root = project["root"]
 
-    # Point AO_LEDGER_CHECKPOINTS at an empty store (simulating a moved project or reset checkpoint store).
+    # Point POLYCTL_LEDGER_CHECKPOINTS at an empty store (simulating a moved project or reset checkpoint store).
     empty_store = tmp_path / "reset-checkpoints.json"
-    monkeypatch.setenv("AO_LEDGER_CHECKPOINTS", str(empty_store))
+    monkeypatch.setenv("POLYCTL_LEDGER_CHECKPOINTS", str(empty_store))
 
     rc = cli.main(["-C", root, "export", "otlp"])
     assert rc != 0
@@ -820,9 +820,9 @@ def test_otlp_refuses_unattested_ledgers_without_flag_and_exports_attested_with_
     captured = capsys.readouterr()
     doc = json.loads(captured.out)
     res_attrs = _attr_map(doc["resourceSpans"][0]["resource"]["attributes"])
-    assert res_attrs["ao.export.attested_only"] is True
-    assert res_attrs["ao.export.partial"] is True
-    assert set(res_attrs["ao.export.unattested_ledgers"].split(",")) == {
+    assert res_attrs["polyctl.export.attested_only"] is True
+    assert res_attrs["polyctl.export.partial"] is True
+    assert set(res_attrs["polyctl.export.unattested_ledgers"].split(",")) == {
         "verifications.jsonl", "reviews.jsonl", "authority.jsonl",
     }
     spans = doc["resourceSpans"][0]["scopeSpans"][0]["spans"]
@@ -830,7 +830,7 @@ def test_otlp_refuses_unattested_ledgers_without_flag_and_exports_attested_with_
 
 
 def test_otlp_snapshot_excludes_uncommitted_row_that_rolls_back(project, monkeypatch):
-    import ao.storage as storage
+    import polyctl.storage as storage
 
     seeded = _seed_two_slices(project)
     root = project["root"]
@@ -877,9 +877,9 @@ def test_otlp_snapshot_excludes_uncommitted_row_that_rolls_back(project, monkeyp
     assert mid_rows == baseline_reviews
     assert mid_export["resourceSpans"][0]["scopeSpans"] == baseline_export["resourceSpans"][0]["scopeSpans"]
     mid_res_attrs = _attr_map(mid_export["resourceSpans"][0]["resource"]["attributes"])
-    assert mid_res_attrs["ao.export.attested_only"] is True
-    assert mid_res_attrs["ao.export.partial"] is True
-    assert mid_res_attrs["ao.export.unattested_ledgers"] == "reviews.jsonl"
+    assert mid_res_attrs["polyctl.export.attested_only"] is True
+    assert mid_res_attrs["polyctl.export.partial"] is True
+    assert mid_res_attrs["polyctl.export.unattested_ledgers"] == "reviews.jsonl"
     assert A.export_otlp(root) == baseline_export
 
     # Also verify a brand-new ledger whose first row rolls back before checkpointing.
@@ -894,7 +894,7 @@ def test_otlp_snapshot_excludes_uncommitted_row_that_rolls_back(project, monkeyp
     assert mid_snapshots[0][0] == []
     assert mid_snapshots[0][1]["resourceSpans"][0]["scopeSpans"] == baseline_export["resourceSpans"][0]["scopeSpans"]
     slice_res_attrs = _attr_map(mid_snapshots[0][1]["resourceSpans"][0]["resource"]["attributes"])
-    assert slice_res_attrs["ao.export.attested_only"] is True
-    assert slice_res_attrs["ao.export.partial"] is True
-    assert slice_res_attrs["ao.export.unattested_ledgers"] == "slices.jsonl"
+    assert slice_res_attrs["polyctl.export.attested_only"] is True
+    assert slice_res_attrs["polyctl.export.partial"] is True
+    assert slice_res_attrs["polyctl.export.unattested_ledgers"] == "slices.jsonl"
     assert A.export_otlp(root) == baseline_export

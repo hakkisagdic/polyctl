@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-from ao import cli, language, lib as A, ntfy, telegram, watchdog as W
+from polyctl import cli, language, lib as A, ntfy, telegram, watchdog as W
 
 
 class _NtfyRecorder:
@@ -62,7 +62,7 @@ def ntfy_server():
 
 @pytest.fixture(autouse=True)
 def _isolate_ntfy_conf(tmp_path, monkeypatch):
-    conf = tmp_path / "ntfy-home" / ".ao" / "ntfy.json"
+    conf = tmp_path / "ntfy-home" / ".polyctl" / "ntfy.json"
     monkeypatch.setattr(ntfy, "CONF", str(conf))
     return conf
 

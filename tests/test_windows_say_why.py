@@ -1,8 +1,8 @@
-"""What ao cannot hold on Windows it holds another way there, or says so (WINDOWS-SAY-WHY).
+"""What polyctl cannot hold on Windows it holds another way there, or says so (WINDOWS-SAY-WHY).
 
 Several guarantees were made with what Windows does not have, and on Windows they quietly did not hold.
 The flag that opens a subagent's file without following a link was 0 there, and a link was followed. A
-file ao keeps private was given mode 0600, which Windows ignores, and ao said "(0600)". An ended turn's
+file polyctl keeps private was given mode 0600, which Windows ignores, and polyctl said "(0600)". An ended turn's
 leftovers are found by their process group, which Windows has none of, so none was ever found, and
 nothing said none could be. The reviewer stall check reads a process group's CPU, and on Windows it never
 fired. schtasks writes in the OEM code page and was read as UTF-8. A grant of `py`, `powershell` or `cmd`
@@ -12,8 +12,8 @@ launchctl, on every platform.
 Where the platform has no O_NOFOLLOW the path is now looked at before it is opened - a link is refused -
 and the file opened must be the one looked at. schtasks is read in the OEM code page. The grant audit asks
 `py -c`, `powershell -Command`, `cmd /c` and their kin as it asks `python -c`. The hints name each
-platform's own scheduler. What cannot be held is said where it bears - `ao writers`, a reviewer's wait,
-the setup of a channel and the file it saved - and all of it in `ao doctor`. Windows is made here on every
+platform's own scheduler. What cannot be held is said where it bears - `polyctl writers`, a reviewer's wait,
+the setup of a channel and the file it saved - and all of it in `polyctl doctor`. Windows is made here on every
 platform.
 """
 import json
@@ -25,7 +25,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import allowlist as AL, cli, email, language, lib as A, procs, telegram
+from polyctl import allowlist as AL, cli, email, language, lib as A, procs, telegram
 from tests.scenarios import World
 
 # What a Turkish Windows's schtasks says of a task it cannot find, in its own words.
@@ -96,7 +96,7 @@ def test_what_schtasks_says_is_read_in_the_oem_code_page(tmp_path, monkeypatch):
                                                                                   stderr=said.pop(0)))
     monkeypatch.setattr(procs, "oem_encoding", lambda: "cp857")       # a Turkish Windows
 
-    answers = [_as_windows(monkeypatch, lambda: cli._schtasks("/Query", "/TN", "ao-watchdog-proj")) for _ in "12"]
+    answers = [_as_windows(monkeypatch, lambda: cli._schtasks("/Query", "/TN", "polyctl-watchdog-proj")) for _ in "12"]
 
     assert answers == [(REFUSAL, 1), (REFUSAL, 1)]
 
@@ -138,17 +138,17 @@ def test_the_doctor_and_a_sibling_watchdog_name_it(project, monkeypatch, tmp_pat
     monkeypatch.setattr(A, "heartbeat_age", lambda root: 3600)
 
     assert dict(cli.doctor_problems(project))["watchdog-dead"] == ("watchdog silent for 60m — Task Scheduler / "
-                                                                  "ao watchdog status")
+                                                                  "polyctl watchdog status")
 
     world = World(project, monkeypatch, tmp_path)
-    sibling = os.path.join(A.HOME, ".ao", "heartbeat-other")
+    sibling = os.path.join(A.HOME, ".polyctl", "heartbeat-other")
     os.makedirs(os.path.dirname(sibling), exist_ok=True)
     with open(sibling, "w", encoding="utf-8") as fh:
         fh.write("1")
     os.utime(sibling, (time.time() - 1200, time.time() - 1200))
     world.cycle()
     assert [message for title, message, _, _ in world.notices if title == "other: watchdog silent"] == [
-        "no heartbeat for 20m — its watchdog is not running; Task Scheduler / ao watchdog status"]
+        "no heartbeat for 20m — its watchdog is not running; Task Scheduler / polyctl watchdog status"]
 
 
 # ---- what cannot be held, said where it bears ----------------------------------------------------------------
@@ -182,7 +182,7 @@ class _OsOf:
 
 
 def test_a_cycle_on_windows_records_the_orphans_it_could_not_look_for_as_unknown(project, monkeypatch, tmp_path):
-    from ao import watchdog as W
+    from polyctl import watchdog as W
     world = World(project, monkeypatch, tmp_path)
     world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(700)
 
@@ -207,7 +207,7 @@ def test_a_reviewer_waited_on_on_windows_is_told_the_stall_check_does_not_apply(
         assert _plain(capsys) == ""                                           # elsewhere it applies
 
 
-def test_a_file_ao_keeps_private_is_said_to_be_as_private_as_its_folder_on_windows(project, tmp_path, monkeypatch,
+def test_a_file_polyctl_keeps_private_is_said_to_be_as_private_as_its_folder_on_windows(project, tmp_path, monkeypatch,
                                                                                    capsys):
     A.project_key(project["root"])                     # registered first, as every test that locks under "nt"
     monkeypatch.setattr(email, "CONF", str(tmp_path / "email.json"))
@@ -221,8 +221,8 @@ def test_a_file_ao_keeps_private_is_said_to_be_as_private_as_its_folder_on_windo
     assert _as_windows(monkeypatch, lambda: cli.cmd_email(project, saved)) == 0
     assert f"saved {email.CONF} ({SAVED_ON_WINDOWS}) → me@example.com" in _plain(capsys)
     # Named by its variable: a ping URL on the command line is refused (SECRETS-2).
-    monkeypatch.setenv("AO_TEST_PING_URL", "https://hc-ping.com/x")
-    pinged = SimpleNamespace(action="setup", url=None, url_env="AO_TEST_PING_URL", all=False)
+    monkeypatch.setenv("POLYCTL_TEST_PING_URL", "https://hc-ping.com/x")
+    pinged = SimpleNamespace(action="setup", url=None, url_env="POLYCTL_TEST_PING_URL", all=False)
     assert _as_windows(monkeypatch, lambda: cli.cmd_pings(project, pinged)) == 0
     assert f"saved {A.pings_path()} ({SAVED_ON_WINDOWS})" in _plain(capsys)
 
@@ -237,24 +237,24 @@ def test_the_telegram_setup_on_windows_says_what_windows_runs_and_how_the_file_i
 
     out = _plain(capsys)
     assert language.text(None, "private-file.kept-windows") in out and language.text(None, "private-file.windows") in out
-    assert "4. ao telegram test → ao telegram poll" in out
-    # ao asks for the token and writes the file itself: no command line holds the token, PowerShell's neither, since
+    assert "4. polyctl telegram test → polyctl telegram poll" in out
+    # polyctl asks for the token and writes the file itself: no command line holds the token, PowerShell's neither, since
     # its history file kept it as a shell's does (LEADS-SECRETS).
-    for posix in ("Invoke-RestMethod", "curl", "python3 -c", "mkdir -p", "chmod 600", "echo '", "ao telegram install"):
+    for posix in ("Invoke-RestMethod", "curl", "python3 -c", "mkdir -p", "chmod 600", "echo '", "polyctl telegram install"):
         assert posix not in out
 
 
-def test_the_doctor_names_what_ao_cannot_hold_on_windows_and_why(project, monkeypatch, capsys):
+def test_the_doctor_names_what_polyctl_cannot_hold_on_windows_and_why(project, monkeypatch, capsys):
     lines = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in _as_windows(monkeypatch, cli._windows_limit_lines)]
 
-    assert lines == [f"{'on Windows':<16}what ao cannot hold here, and why"] + [
+    assert lines == [f"{'on Windows':<16}what polyctl cannot hold here, and why"] + [
         f"{'':<16}{name}: {text}" for name, text in cli.WINDOWS_LIMITS.items()]
     if os.name != "nt":
         assert cli._windows_limit_lines() == []                              # elsewhere there is nothing to say
-    monkeypatch.setattr(cli, "_windows_limit_lines", lambda: ["what ao cannot hold"])
+    monkeypatch.setattr(cli, "_windows_limit_lines", lambda: ["what polyctl cannot hold"])
     monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)  # no agent CLI is found, or started
     cli.cmd_doctor(project, SimpleNamespace(check=False))
-    assert "what ao cannot hold" in _plain(capsys).split("\n")
+    assert "what polyctl cannot hold" in _plain(capsys).split("\n")
 
 
 
@@ -263,7 +263,7 @@ def test_the_doctor_names_what_ao_cannot_hold_on_windows_and_why(project, monkey
 def test_a_program_spelt_as_windows_starts_it_is_asked_as_any_other(rule):
     """From the review of WINDOWS-SAY-WHY: each forbidden command was one spelling, and a rule naming the program with its
     .exe, or in another case, admitted it unnamed; and `python -m` runs any module there is."""
-    from ao import allowlist as AL
+    from polyctl import allowlist as AL
     found = AL.problems(["claude", "-p", "{prompt}", "--allowedTools", f"Read,{rule}"], {})
 
     assert any(reason.startswith("runs arbitrary code") for reason, _, _ in found), found
@@ -292,11 +292,11 @@ def test_a_file_system_that_numbers_no_file_is_read_as_changed(monkeypatch, tmp_
 ])
 def test_a_grant_of_an_interpreter_is_named_whatever_its_rule_fixes(rule, reason):
     """Bare interpreters run code; paths name files and quoted paths are outside the closed grammar."""
-    from ao import allowlist as AL
+    from polyctl import allowlist as AL
     found = AL.problems(["claude", "-p", "{prompt}", "--allowedTools", f"Read,{rule}"], {})
     assert any(why == reason and granted == rule for why, _, granted in found), found
 
 
 def test_an_interpreter_asked_only_its_version_is_no_grant_of_code():
-    from ao import allowlist as AL
+    from polyctl import allowlist as AL
     assert AL.problems(["claude", "-p", "{prompt}", "--allowedTools", "Read,Bash(python3 --version)"], {}) == []

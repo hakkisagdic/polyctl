@@ -1,6 +1,6 @@
 """What the Windows lane would have met first, done here the way Windows does it (#9, #71).
 
-Git for Windows checks `.ao-project` out with CRLF; the clock ticks every 15.6 ms before
+Git for Windows checks `.polyctl-project` out with CRLF; the clock ticks every 15.6 ms before
 Python 3.13; a file another handle holds open cannot be renamed over or deleted; a
 program is C:\\...\\name.exe; TOML reads a backslash as an escape; and cmd.exe keeps
 single quotes and doubled backslashes. Each test holds on every platform.
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, drivers, lib as A, skillkit, storage
+from polyctl import cli, drivers, lib as A, skillkit, storage
 
 CRLF_MARKER = cli.PROJECT_MARKER_BYTES.replace(b"\n", b"\r\n")
 CHAIN = "test-windows-followups-v1"
@@ -45,7 +45,7 @@ def _enrolled_clone(tmp_path):
     _git(source, "init", "-q")
     (source / cli.PROJECT_MARKER).write_bytes(cli.PROJECT_MARKER_BYTES)
     _git(source, "add", cli.PROJECT_MARKER)
-    _git(source, "commit", "-q", "-m", "adopt ao")
+    _git(source, "commit", "-q", "-m", "adopt polyctl")
     clone = tmp_path / "windows-clone"
     _git(tmp_path, "clone", "-q", "-c", "core.autocrlf=true", str(source), str(clone))
     assert (clone / cli.PROJECT_MARKER).read_bytes() == CRLF_MARKER
@@ -79,8 +79,8 @@ def test_the_marker_git_for_windows_checks_out_is_the_marker_there_and_nowhere_e
     elsewhere = _marker_read_on("posix", monkeypatch)(str(clone))
 
     assert on_windows["problem"] is None and on_windows["fingerprint"][2] == CRLF_MARKER
-    assert elsewhere["problem"] == f"{cli.PROJECT_MARKER} bytes are not ao-project-v1"
-    for other in (CRLF_MARKER + b"\r\n", CRLF_MARKER + b"x", b"ao-project-v1\r\r\n", b"ao-project-v1\r"):
+    assert elsewhere["problem"] == f"{cli.PROJECT_MARKER} bytes are not polyctl-project-v1"
+    for other in (CRLF_MARKER + b"\r\n", CRLF_MARKER + b"x", b"polyctl-project-v1\r\r\n", b"polyctl-project-v1\r"):
         marker.write_bytes(other)
         assert _marker_read_on("nt", monkeypatch)(str(clone))["problem"], other
 
@@ -102,7 +102,7 @@ def test_enrollment_reads_the_exact_blob_whatever_the_working_tree_holds(tmp_pat
     _git(typed, "-c", "core.autocrlf=false", "add", cli.PROJECT_MARKER)
     indexed = cli._index_project_marker(str(typed))
 
-    assert indexed == {"status": "invalid", "detail": "active index marker bytes are not ao-project-v1"}
+    assert indexed == {"status": "invalid", "detail": "active index marker bytes are not polyctl-project-v1"}
     assert cli._project_enrollment(str(typed))["state"] == "broken"
 
 
@@ -117,13 +117,13 @@ def test_init_keeps_the_marker_a_windows_clone_holds_and_refuses_it_elsewhere(tm
 
     monkeypatch.setattr(cli, "_worktree_project_marker_document", elsewhere)
     assert cli.cmd_init({"root": str(clone)}, args) == 1
-    assert "bytes are not ao-project-v1" in capsys.readouterr().out
-    assert not (clone / ".ao" / "config.json").exists()
+    assert "bytes are not polyctl-project-v1" in capsys.readouterr().out
+    assert not (clone / ".polyctl" / "config.json").exists()
 
     monkeypatch.setattr(cli, "_worktree_project_marker_document", on_windows)
     assert cli.cmd_init({"root": str(clone)}, args) == 0, capsys.readouterr().out
 
-    assert (clone / ".ao" / "config.json").exists()
+    assert (clone / ".polyctl" / "config.json").exists()
     assert (clone / cli.PROJECT_MARKER).read_bytes() == CRLF_MARKER     # kept as Git checked it out
 
 
@@ -144,7 +144,7 @@ def _commit_text(root, text):
 
 def test_ids_minted_in_one_clock_tick_are_distinct_and_keep_their_shape(project, tmp_path, monkeypatch):
     root = project["root"]
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         json.dump({"gates": {"test": {"run": "exit 1"}}, "profiles": {"full": ["test"]}}, fh)
     monkeypatch.setattr(A, "GATE_LOCK", str(tmp_path / "gate.lock"))
     base = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
@@ -176,7 +176,7 @@ def test_two_submits_in_one_tick_pin_two_reviews_and_pass_over_an_id_another_pro
     root = project["root"]
     _repo_with_change(root)
     millisecond = _one_tick(monkeypatch) // 10 ** 6
-    reviews = os.path.join(root, ".ao", "reviews")
+    reviews = os.path.join(root, ".polyctl", "reviews")
     os.makedirs(reviews, exist_ok=True)
     held = os.path.join(reviews, f"R-{millisecond}.json")
     open(held, "wb").close()                                       # claimed by a submit in another process
@@ -291,22 +291,22 @@ def test_a_sibling_agent_binary_is_known_by_its_windows_path(monkeypatch):
 
 
 def test_the_manual_mcp_snippet_writes_a_windows_root_escaped_for_toml(project):
-    root, exe = "C:\\Users\\me\\work\\ao repo", "C:\\Users\\me\\venv\\Scripts\\ao.exe"
+    root, exe = "C:\\Users\\me\\work\\polyctl repo", "C:\\Users\\me\\venv\\Scripts\\polyctl.exe"
 
     snippet = skillkit.register_mcp(root, {"codex"}, exe=exe)["codex"].split("\n", 1)[1]
 
-    assert 'command = "C:\\\\Users\\\\me\\\\venv\\\\Scripts\\\\ao.exe"' in snippet
-    assert 'args = ["-C", "C:\\\\Users\\\\me\\\\work\\\\ao repo", "mcp", "serve"]' in snippet
+    assert 'command = "C:\\\\Users\\\\me\\\\venv\\\\Scripts\\\\polyctl.exe"' in snippet
+    assert 'args = ["-C", "C:\\\\Users\\\\me\\\\work\\\\polyctl repo", "mcp", "serve"]' in snippet
     assert skillkit._toml_string_body('a "quoted"\tname') == 'a \\"quoted\\"\\u0009name'
 
 
 def test_the_escaped_snippet_is_toml_that_reads_back_the_windows_paths(project):
     tomllib = pytest.importorskip("tomllib", reason="the TOML reader ships with Python 3.11")
-    root, exe = "C:\\Users\\me\\work\\ao repo", "C:\\Users\\me\\venv\\Scripts\\ao.exe"
+    root, exe = "C:\\Users\\me\\work\\polyctl repo", "C:\\Users\\me\\venv\\Scripts\\polyctl.exe"
 
     snippet = skillkit.register_mcp(root, {"codex"}, exe=exe)["codex"].split("\n", 1)[1]
 
-    assert tomllib.loads(snippet)["mcp_servers"]["ao"] == {"command": exe, "args": ["-C", root, "mcp", "serve"]}
+    assert tomllib.loads(snippet)["mcp_servers"]["polyctl"] == {"command": exe, "args": ["-C", root, "mcp", "serve"]}
 
 
 def test_a_scoped_review_diff_hands_git_its_pathspecs_without_a_shell(project, monkeypatch):
@@ -352,7 +352,7 @@ def test_the_probe_answers_when_a_timed_out_hook_still_holds_its_index(project, 
 
     assert proof == {"installed": False, "state": "not installed", "exit": None,
                      "detail": "Git could not execute the pre-commit probe: git query failed: timed out after 15 seconds"}
-    [left] = [name for name in os.listdir(tmp_path) if name.startswith("ao-hook-probe-")]
+    [left] = [name for name in os.listdir(tmp_path) if name.startswith("polyctl-hook-probe-")]
     assert os.listdir(tmp_path / left) == ["index"]
 
 

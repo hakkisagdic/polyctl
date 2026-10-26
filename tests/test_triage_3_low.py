@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage, watchdog as W
+from polyctl import cli, lib as A, storage, watchdog as W
 from tests.scenarios import World
 from tests.test_capability_matrix import _strict_config
 from tests.test_escalate_durable import BLOCKED, _architect, _architect_wakes, _age_last_wake
@@ -40,7 +40,7 @@ def test_doctor_checks_matrix_routes_with_their_pins(project):
 
 @pytest.mark.parametrize("limit", ["bytes", "depth"])
 def test_config_writer_refuses_what_its_reader_cannot_read(project, limit):
-    path = Path(project["root"]) / ".ao/config.json"
+    path = Path(project["root"]) / ".polyctl/config.json"
     before = path.read_bytes()
     if limit == "bytes":
         document = {"padding": "é" * ((A.PROJECT_CONFIG_MAX_BYTES - 20) // 2)}

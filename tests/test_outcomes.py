@@ -4,8 +4,8 @@ import time
 import subprocess
 from types import SimpleNamespace
 
-from ao import cli, lib as A
-from ao.storage import append_chained_jsonl
+from polyctl import cli, lib as A
+from polyctl.storage import append_chained_jsonl
 
 
 def _review(root, name, verdict, slice_id, digest="sha256:c1", kind="index-candidate", at=None):
@@ -15,7 +15,7 @@ def _review(root, name, verdict, slice_id, digest="sha256:c1", kind="index-candi
 
 def test_a_respecified_slice_keeps_its_history_and_the_outcome_is_read_from_the_ledgers(project, capsys):
     root = project["root"]
-    with open(os.path.join(root, ".ao", "board.md"), "a", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "board.md"), "a", encoding="utf-8") as fh:
         fh.write("- [S1] the store slice · since: 2026-09-15 09:00\n- [F1] fix what S1 landed · fixes: S1\n")
     _review(root, "r1.md", "NEEDS_CHANGES", "S1")
     append_chained_jsonl(A.decisions_path(root), {"id": "AD-1", "at": int(time.time()), "decision": "narrow it",
@@ -31,7 +31,7 @@ def test_a_respecified_slice_keeps_its_history_and_the_outcome_is_read_from_the_
                        candidate={"digest": "sha256:c1"}, scope={})
 
     subprocess.run([A.git_binary(), "-c", "core.hooksPath=", "commit", "--allow-empty", "-m",
-                    "land\n\nAo-Grant: C-1"],
+                    "land\n\nPolyctl-Grant: C-1"],
                    cwd=root, check=True, capture_output=True)
 
     [outcome] = A.slice_outcomes(root)
@@ -54,7 +54,7 @@ def test_a_waived_slice_counts_as_landed_without_rounds(project):
                        waiver=waiver["id"])
 
     subprocess.run([A.git_binary(), "-c", "core.hooksPath=", "commit", "--allow-empty", "-m",
-                    "land\n\nAo-Grant: C-2"],
+                    "land\n\nPolyctl-Grant: C-2"],
                    cwd=root, check=True, capture_output=True)
 
     [outcome] = A.slice_outcomes(root)

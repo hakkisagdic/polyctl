@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, language, lib as A, watchdog as W
+from polyctl import cli, language, lib as A, watchdog as W
 from tests import standin
 from tests.test_turn_argv import _seen, _store
 
@@ -41,7 +41,7 @@ def available(monkeypatch, tmp_path):
     monkeypatch.setattr(A, "window_headroom", lambda provider: (None, 10))
     found = A.program_path
     monkeypatch.setattr(A, "program_path", lambda name, *args, **kwargs: (
-        str(tmp_path / "ao") if name == "ao" else found(name, *args, **kwargs)))
+        str(tmp_path / "polyctl") if name == "polyctl" else found(name, *args, **kwargs)))
 
 
 def _inspect(consumer, project, capsys):

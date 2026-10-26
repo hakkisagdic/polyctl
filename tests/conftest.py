@@ -21,40 +21,40 @@ sys.path.insert(0, SRC)
 
 # ---- a machine of the suite's own (TRUST-HYGIENE) ----------------------------------------------
 #
-# ao binds what it keeps on a machine to the home when a module is imported: telegram.CONF,
+# polyctl binds what it keeps on a machine to the home when a module is imported: telegram.CONF,
 # email.CONF and the watchdog's STATE_DIR were the person's own files, and a test that did not point
 # them away itself - several did, "nothing reaches a phone" - could message their phone, read their
 # settings or write beside their watchdog. A program a test started by name was looked for on their
-# PATH, where their agent CLIs are, and ao read the files their AO_ variables name. So the suite gets
-# a home, a PATH and an environment of its own before ao is imported, and every process a test
+# PATH, where their agent CLIs are, and polyctl read the files their POLYCTL_ variables name. So the suite gets
+# a home, a PATH and an environment of its own before polyctl is imported, and every process a test
 # starts inherits them.
 
 REAL_HOME = os.path.expanduser("~")
-SESSION = tempfile.mkdtemp(prefix="ao-tests-")
+SESSION = tempfile.mkdtemp(prefix="polyctl-tests-")
 atexit.register(shutil.rmtree, SESSION, True)
 SESSION_HOME = os.path.join(SESSION, "home")
 SESSION_BIN = os.path.join(SESSION, "bin")
 # Who commits in a test that names nobody. git read the person's identity from their home, and a
 # guess from the host name fails on a host with no domain, so the suite's home holds one.
-GIT_IDENTITY = ("ao tests", "ao-tests@example.invalid")
-# Variables that point git or ao back into the person's home.
+GIT_IDENTITY = ("polyctl tests", "polyctl-tests@example.invalid")
+# Variables that point git or polyctl back into the person's home.
 HOME_POINTERS = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "GIT_CONFIG_GLOBAL")
 # The suite's own switches (tests/test_scenario_fuzz.py): a person sets them to run it differently.
-SUITE_SWITCHES = ("AO_FUZZ_SEED", "AO_FUZZ_SEEDS")
+SUITE_SWITCHES = ("POLYCTL_FUZZ_SEED", "POLYCTL_FUZZ_SEEDS")
 
 
 def _own_environment(environ):
     """Make `environ`, the environment the suite started with, the suite's own; it is changed in place.
 
-    Every variable of ao's begins AO_, and each points ao at something of the person's: a settings
-    file (AO_SETTINGS), the project registry, the ledgers' recorded lengths, the adapters they added
-    (AO_USER_ADAPTERS), the git ao measures with (AO_GIT), the role of a turn ao started (AO_ROLE).
-    Those and the variables that point back into the home are dropped, whatever ao names next, so ao
+    Every variable of polyctl's begins POLYCTL_, and each points polyctl at something of the person's: a settings
+    file (POLYCTL_SETTINGS), the project registry, the ledgers' recorded lengths, the adapters they added
+    (POLYCTL_USER_ADAPTERS), the git polyctl measures with (POLYCTL_GIT), the role of a turn polyctl started (POLYCTL_ROLE).
+    Those and the variables that point back into the home are dropped, whatever polyctl names next, so polyctl
     and git read the suite's home in their place; the suite's own switches stay. HOME, and
     USERPROFILE for Windows, name the suite's home.
     """
     for name in [name for name in environ
-                 if name in HOME_POINTERS or (name.startswith("AO_") and name not in SUITE_SWITCHES)]:
+                 if name in HOME_POINTERS or (name.startswith("POLYCTL_") and name not in SUITE_SWITCHES)]:
         del environ[name]
     environ["HOME"] = SESSION_HOME
     environ["USERPROFILE"] = SESSION_HOME
@@ -64,8 +64,8 @@ def _own_home():
     """The suite's home holds only a git identity and Git's background maintenance turned off, and the
     environment names it.
 
-    Every path ao derives from the home is then empty: ~/.ao, each harness's session store, the
-    credentials a harness keeps for its account, and each directory under the home ao searches for
+    Every path polyctl derives from the home is then empty: ~/.polyctl, each harness's session store, the
+    credentials a harness keeps for its account, and each directory under the home polyctl searches for
     a program. A commit starts `git maintenance run --auto` detached, and Git 2.55's maintenance prunes
     worktrees: on the macOS lane it pruned the worktree admin a test had just made, as the test read the
     repository, and the test read no repository at all (SUITE-MAINTENANCE).
@@ -85,10 +85,10 @@ def _own_signals():
     """The stop signals unblocked in the suite's process, so every process a test starts hears what is sent to it.
 
     A blocked signal stays blocked across fork and exec. The shell of a landing daemon had come to block
-    SIGINT, every suite it started inherited the block, and so did each `ao` a lane test started: the
+    SIGINT, every suite it started inherited the block, and so did each `polyctl` a lane test started: the
     test's SIGINT stayed pending, the post-create command ran out its minute and the lane went ready
     (SUITE-SIGMASK). SIGINT, SIGTERM and SIGHUP are what the tests send; a test that blocks one does so
-    itself. A signal the suite was started ignoring is CALM_AO's to put back.
+    itself. A signal the suite was started ignoring is CALM_POLYCTL's to put back.
     """
     if hasattr(signal, "pthread_sigmask"):
         signal.pthread_sigmask(signal.SIG_UNBLOCK, [signal.SIGINT, signal.SIGTERM, signal.SIGHUP])
@@ -96,9 +96,9 @@ def _own_signals():
 
 _own_signals()
 
-from ao import lib as A  # noqa: E402
-from ao import pressure as P  # noqa: E402
-from ao import watchdog as W  # noqa: E402
+from polyctl import lib as A  # noqa: E402
+from polyctl import pressure as P  # noqa: E402
+from polyctl import watchdog as W  # noqa: E402
 
 
 def _shared_install_dirs():
@@ -121,7 +121,7 @@ def _outside_shared_install_dirs(directory):
 
 
 def _agent_programs():
-    """The command name of every harness ao ships an adapter for."""
+    """The command name of every harness polyctl ships an adapter for."""
     return sorted({name for adapter in A.package_adapters().values() for name in A.adapter_binaries(adapter)})
 
 
@@ -135,8 +135,8 @@ def _holds_an_agent_cli(directory):
 def _system_directories():
     """The operating system's own program directories, which the suite's PATH keeps.
 
-    On POSIX that is the PATH launchd hands a job - /usr/bin, /bin, /usr/sbin, /sbin - which ao's own
-    scheduled jobs start with, so ao already finds what it needs there. On Windows it is each
+    On POSIX that is the PATH launchd hands a job - /usr/bin, /bin, /usr/sbin, /sbin - which polyctl's own
+    scheduled jobs start with, so polyctl already finds what it needs there. On Windows it is each
     directory under SystemRoot the PATH the suite started with names: cmd, PowerShell, tasklist.
     """
     if os.name == "nt":
@@ -146,7 +146,7 @@ def _system_directories():
 
 
 def _git_directory(found):
-    """The directory the suite's PATH names for the git ao found: one holding git and git's own programs alone.
+    """The directory the suite's PATH names for the git polyctl found: one holding git and git's own programs alone.
 
     On POSIX that is git's exec-path, where git keeps the programs it runs itself and which git puts
     first on the PATH of every hook and helper it starts. Not the directory git was found in: that can
@@ -154,7 +154,7 @@ def _git_directory(found):
     of the suite's own: a git built with a runtime prefix, as Apple's is, finds its helpers and templates
     from the place it was started from, and started through a link it finds neither. On Windows, where
     git.exe loads the libraries installed beside it, it is the directory git.exe was found in. Either
-    is left out when an agent CLI is in it, and then ao finds git in the system's directories, as it
+    is left out when an agent CLI is in it, and then polyctl finds git in the system's directories, as it
     does under launchd: None.
     """
     if not os.path.isabs(found):
@@ -203,57 +203,57 @@ SYSTEM_DIRS = _system_directories()
 GIT_DIRECTORY = _git_directory(A.git_binary())
 _own_path()
 
-# The git the fixtures here run, chosen once before any test moves PATH or AO_GIT: the one
-# ao measures with, found on the suite's own PATH.
+# The git the fixtures here run, chosen once before any test moves PATH or POLYCTL_GIT: the one
+# polyctl measures with, found on the suite's own PATH.
 GIT = A.git_binary()
 REPO = os.path.dirname(SRC)
 
 # Imported on the suite's own PATH, as every module a test imports is.
-from ao import cli  # noqa: E402
+from polyctl import cli  # noqa: E402
 
-# ---- ao's own search past PATH -------------------------------------------------------------------
+# ---- polyctl's own search past PATH -------------------------------------------------------------------
 #
-# ao also looks for a program in SHARED_INSTALL_DIRS, including package-declared bundles, whatever
+# polyctl also looks for a program in SHARED_INSTALL_DIRS, including package-declared bundles, whatever
 # PATH says - lib._BIN_DIRS when it resolves a binary or discovers a reviewer, watchdog.child_path
 # for the PATH it hands an agent it starts - because a launchd job's PATH omits them. Package
-# managers and app bundles install agent CLIs there for every user of a machine. `ao doctor`, a review
+# managers and app bundles install agent CLIs there for every user of a machine. `polyctl doctor`, a review
 # and an architect wake ask each copy they find for its --version. So in this process a program in those
-# directories is out of reach like one on the person's PATH: each function of ao's that looks there
+# directories is out of reach like one on the person's PATH: each function of polyctl's that looks there
 # is run with what it finds there left out. tests/test_suite_isolation.py finds every such function
-# in ao's source and fails on one KEPT_OFF_SHARED does not name. A process a test starts inherits
-# HOME, PATH and the environment but not this: an ao started as a child still looks in them.
+# in polyctl's source and fails on one KEPT_OFF_SHARED does not name. A process a test starts inherits
+# HOME, PATH and the environment but not this: a polyctl started as a child still looks in them.
 
 
 def _found_outside(found):
     return [path for path in found if _outside_shared_install_dirs(os.path.dirname(path))]
 
 
-_AO_BINARY_CANDIDATES = A.binary_candidates
-_AO_REVIEWER_CANDIDATE_PATHS = cli._reviewer_candidate_paths
-_AO_CHILD_PATH = W.child_path
+_POLYCTL_BINARY_CANDIDATES = A.binary_candidates
+_POLYCTL_REVIEWER_CANDIDATE_PATHS = cli._reviewer_candidate_paths
+_POLYCTL_CHILD_PATH = W.child_path
 
 
-@functools.wraps(_AO_BINARY_CANDIDATES)
+@functools.wraps(_POLYCTL_BINARY_CANDIDATES)
 def _binary_candidates(name, path=None):
-    return _found_outside(_AO_BINARY_CANDIDATES(name, path))
+    return _found_outside(_POLYCTL_BINARY_CANDIDATES(name, path))
 
 
-@functools.wraps(_AO_REVIEWER_CANDIDATE_PATHS)
+@functools.wraps(_POLYCTL_REVIEWER_CANDIDATE_PATHS)
 def _reviewer_candidate_paths(name, deadline=None):
-    return _found_outside(_AO_REVIEWER_CANDIDATE_PATHS(name, deadline))
+    return _found_outside(_POLYCTL_REVIEWER_CANDIDATE_PATHS(name, deadline))
 
 
-@functools.wraps(_AO_CHILD_PATH)
+@functools.wraps(_POLYCTL_CHILD_PATH)
 def _child_path():
-    return os.pathsep.join(d for d in _AO_CHILD_PATH().split(os.pathsep) if d and _outside_shared_install_dirs(d))
+    return os.pathsep.join(d for d in _POLYCTL_CHILD_PATH().split(os.pathsep) if d and _outside_shared_install_dirs(d))
 
 
-# `file:function` in ao's source -> (the module it runs in, its name there, what runs in its place).
+# `file:function` in polyctl's source -> (the module it runs in, its name there, what runs in its place).
 KEPT_OFF_SHARED = {
-    "src/ao/parts/lib_mail.py:binary_candidates": (A, "binary_candidates", _binary_candidates),
-    "src/ao/parts/cli_review.py:_reviewer_candidate_paths": (cli, "_reviewer_candidate_paths",
+    "src/polyctl/parts/lib_mail.py:binary_candidates": (A, "binary_candidates", _binary_candidates),
+    "src/polyctl/parts/cli_review.py:_reviewer_candidate_paths": (cli, "_reviewer_candidate_paths",
                                                             _reviewer_candidate_paths),
-    "src/ao/watchdog.py:child_path": (W, "child_path", _child_path),
+    "src/polyctl/watchdog.py:child_path": (W, "child_path", _child_path),
 }
 for _module, _name, _in_its_place in KEPT_OFF_SHARED.values():
     setattr(_module, _name, _in_its_place)
@@ -261,53 +261,53 @@ for _module, _name, _in_its_place in KEPT_OFF_SHARED.values():
 
 # ---- a calm machine (MACHINE-PRESSURE) -----------------------------------------------------------
 #
-# A gate run, `ao lock` and a lane start read the machine before they start - memory, paging and
+# A gate run, `polyctl lock` and a lane start read the machine before they start - memory, paging and
 # disk - and the reading samples paging for four seconds. The suite runs those commands hundreds of
 # times, on a machine that is nobody's to judge, so every test finds it calm, read at once:
-# pressure.read, the one place ao reads the machine through, hands CALM_MACHINE, and a test of the
-# reading puts its own there. An ao a test starts as a process reads the machine for itself, so such
-# a test starts CALM_AO: this interpreter running ao with the same calm machine, as `python -m ao`.
+# pressure.read, the one place polyctl reads the machine through, hands CALM_MACHINE, and a test of the
+# reading puts its own there. A polyctl a test starts as a process reads the machine for itself, so such
+# a test starts CALM_POLYCTL: this interpreter running polyctl with the same calm machine, as `python -m polyctl`.
 
 CALM_MACHINE = P.Reading(free_memory_pct=60.0, swapins_per_sec=0, swapin_samples=(0, 0, 0, 0), free_disk_gib=500.0,
                          unmeasured=())
 # A terminal starts a program with SIGINT, SIGTERM and SIGHUP at their defaults. A shell that runs the suite in the
-# background starts it with SIGINT ignored, nohup with SIGHUP ignored, and an ao keeps a signal it was set to ignore
-# ignored: a lane test's SIGINT or SIGHUP then stopped nothing (SUITE-SIGMASK). So CALM_AO starts ao as a terminal does.
+# background starts it with SIGINT ignored, nohup with SIGHUP ignored, and a polyctl keeps a signal it was set to ignore
+# ignored: a lane test's SIGINT or SIGHUP then stopped nothing (SUITE-SIGMASK). So CALM_POLYCTL starts polyctl as a terminal does.
 AS_A_TERMINAL_STARTS_IT = ("import signal\n"
                            "signal.signal(signal.SIGINT, signal.default_int_handler)\n"
                            "for _name in ('SIGTERM', 'SIGHUP'):\n"
                            "    if hasattr(signal, _name):\n"
                            "        signal.signal(getattr(signal, _name), signal.SIG_DFL)\n")
-CALM_AO = [sys.executable, "-c", AS_A_TERMINAL_STARTS_IT + "import sys\nfrom ao import pressure\n"
+CALM_POLYCTL = [sys.executable, "-c", AS_A_TERMINAL_STARTS_IT + "import sys\nfrom polyctl import pressure\n"
            f"pressure.read = lambda: pressure.{CALM_MACHINE!r}\n"
-           "from ao.cli import main\nsys.exit(main())\n"]
+           "from polyctl.cli import main\nsys.exit(main())\n"]
 
 
 @pytest.fixture
 def project(tmp_path, monkeypatch):
-    """A minimal ao project: git repo, .ao/config.json, board, empty mailbox."""
+    """A minimal polyctl project: git repo, .polyctl/config.json, board, empty mailbox."""
     root = tmp_path / "proj"
     root.mkdir()
     subprocess.run([GIT, "init", "-q"], cwd=root, check=True)
-    (root / ".ao-project").write_bytes(b"ao-project-v1\n")
-    subprocess.run([GIT, "add", ".ao-project"], cwd=root, check=True)
+    (root / ".polyctl-project").write_bytes(b"polyctl-project-v1\n")
+    subprocess.run([GIT, "add", ".polyctl-project"], cwd=root, check=True)
     subprocess.run([GIT, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
                     "-m", "init"], cwd=root, check=True)
-    (root / ".ao").mkdir()
-    (root / ".ao" / "ledger").mkdir()
+    (root / ".polyctl").mkdir()
+    (root / ".polyctl" / "ledger").mkdir()
     cfg = {"project": "proj", "mailbox": "agent-mail", "reviews": "semantic-review",
            "implementer": {"adapter": "kiro", "session": "s1", "name": "kiro"},
            "architect": {"name": "fable", "argv": ["claude", "-p", "{prompt}"]}}
-    (root / ".ao" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
-    (root / ".ao" / "board.md").write_text(
+    (root / ".polyctl" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    (root / ".polyctl" / "board.md").write_text(
         "# Board\n\n## running\n\n## blocked\n\n## queued\n\n## inbox\n\n## verified\n\n## done\n", encoding="utf-8")
     (root / "agent-mail").mkdir()
     (root / "semantic-review").mkdir()
-    # every test's ~/.ao is its own, apart from the suite's home and from every other test's
+    # every test's ~/.polyctl is its own, apart from the suite's home and from every other test's
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setattr(A, "HOME", str(home))
-    monkeypatch.setattr(W, "STATE_DIR", str(home / ".ao"))   # bound at import, from the suite's home
+    monkeypatch.setattr(W, "STATE_DIR", str(home / ".polyctl"))   # bound at import, from the suite's home
     full = dict(cfg, root=str(root))
     return full
 
@@ -321,26 +321,26 @@ def _ledger_checkpoints(tmp_path_factory):
     git in the real repository.
     """
     store = tmp_path_factory.mktemp("ledger-checkpoints") / "ledger-checkpoints.json"
-    previous = os.environ.get("AO_LEDGER_CHECKPOINTS")
-    os.environ["AO_LEDGER_CHECKPOINTS"] = str(store)
+    previous = os.environ.get("POLYCTL_LEDGER_CHECKPOINTS")
+    os.environ["POLYCTL_LEDGER_CHECKPOINTS"] = str(store)
     yield
     if previous is None:
-        os.environ.pop("AO_LEDGER_CHECKPOINTS", None)
+        os.environ.pop("POLYCTL_LEDGER_CHECKPOINTS", None)
     else:
-        os.environ["AO_LEDGER_CHECKPOINTS"] = previous
+        os.environ["POLYCTL_LEDGER_CHECKPOINTS"] = previous
 
 
 @pytest.fixture(autouse=True)
 def _machine_settings(tmp_path_factory):
     """Machine settings live outside the repository; give each test its own file."""
     path = tmp_path_factory.mktemp("machine-settings") / "settings.json"
-    previous = os.environ.get("AO_SETTINGS")
-    os.environ["AO_SETTINGS"] = str(path)
+    previous = os.environ.get("POLYCTL_SETTINGS")
+    os.environ["POLYCTL_SETTINGS"] = str(path)
     yield
     if previous is None:
-        os.environ.pop("AO_SETTINGS", None)
+        os.environ.pop("POLYCTL_SETTINGS", None)
     else:
-        os.environ["AO_SETTINGS"] = previous
+        os.environ["POLYCTL_SETTINGS"] = previous
 
 
 @pytest.fixture(autouse=True)
@@ -391,30 +391,30 @@ def real_desktop_notify(desktop_notifications):
 def _events_log(tmp_path_factory):
     """The machine's event log lives outside the repository; give each test its own file.
 
-    Beside the test's home, not in it, so a test that lists what ao keeps in ~/.ao finds no event
+    Beside the test's home, not in it, so a test that lists what polyctl keeps in ~/.polyctl finds no event
     log a verification or a mail of its own wrote there.
     """
     path = tmp_path_factory.mktemp("events") / "events.jsonl"
-    previous = os.environ.get("AO_EVENTS")
-    os.environ["AO_EVENTS"] = str(path)
+    previous = os.environ.get("POLYCTL_EVENTS")
+    os.environ["POLYCTL_EVENTS"] = str(path)
     yield
     if previous is None:
-        os.environ.pop("AO_EVENTS", None)
+        os.environ.pop("POLYCTL_EVENTS", None)
     else:
-        os.environ["AO_EVENTS"] = previous
+        os.environ["POLYCTL_EVENTS"] = previous
 
 
 @pytest.fixture(autouse=True)
 def _project_registry(tmp_path_factory):
     """Project keys are registered outside the repository; give each test its own registry."""
     registry = tmp_path_factory.mktemp("project-registry") / "projects.json"
-    previous = os.environ.get("AO_PROJECT_REGISTRY")
-    os.environ["AO_PROJECT_REGISTRY"] = str(registry)
+    previous = os.environ.get("POLYCTL_PROJECT_REGISTRY")
+    os.environ["POLYCTL_PROJECT_REGISTRY"] = str(registry)
     yield
     if previous is None:
-        os.environ.pop("AO_PROJECT_REGISTRY", None)
+        os.environ.pop("POLYCTL_PROJECT_REGISTRY", None)
     else:
-        os.environ["AO_PROJECT_REGISTRY"] = previous
+        os.environ["POLYCTL_PROJECT_REGISTRY"] = previous
 
 
 def _git_text(*args):
@@ -520,6 +520,6 @@ def _repo_untouched(request):
 def review_off(cfg):
     """`cfg` with review switched off as a person switches it, on the record: a config alone turns it off nowhere
     (FEATURE-RECORDED)."""
-    from ao import lib as A
+    from polyctl import lib as A
     A.record_opt_in(cfg["root"], "features.review", False, "a test's person")
     return dict(cfg, features=dict(cfg.get("features") or {}, review=False))

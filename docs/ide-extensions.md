@@ -16,10 +16,10 @@ clearest case: the `agent` command runs the same agent headlessly with `-p` and
 
 **2. It speaks MCP. Meet it there.**
 Since mid-2026, VS Code Copilot agent mode, Cursor and others load MCP servers. That does
-not let you *drive* the agent, but it lets the agent drive **agent-orchestrator**: register
-`ao mcp serve` in the editor and the in-editor agent can read the mailbox, report status and
+not let you *drive* the agent, but it lets the agent drive **polyctl**: register
+`polyctl mcp serve` in the editor and the in-editor agent can read the mailbox, report status and
 ask a question through the same tools any other agent uses. Commit authority is not on that
-surface: `ao commit-ok`, which decides it, is deliberately kept off MCP ([mcp.md](mcp.md)).
+surface: `polyctl commit-ok`, which decides it, is deliberately kept off MCP ([mcp.md](mcp.md)).
 The human dispatches in the editor; coordination flows through MCP. This is the realistic
 bridge for Copilot-in-VS-Code today.
 
@@ -52,7 +52,7 @@ verify," not a screen-scraper.
 | Tool | Best bridge | Notes |
 |---|---|---|
 | Cursor | **CLI** (`agent`) | Full headless: `-p`, json, `agent ls`, resume. Adapter shipped. |
-| VS Code Copilot agent mode | **MCP** | `chat.agent.enabled: true`; loads MCP servers. Dispatch stays in-editor; register `ao mcp serve`. Pre-auth with `gh` on headless/SSH. |
+| VS Code Copilot agent mode | **MCP** | `chat.agent.enabled: true`; loads MCP servers. Dispatch stays in-editor; register `polyctl mcp serve`. Pre-auth with `gh` on headless/SSH. |
 | Qoder | CLI if present, else workspace bridge | IDE-first; companion CLI adapter written but untested. |
 | Windsurf | workspace bridge | Cascade agent is extension-native; observe via git. |
 | Zed | workspace bridge / MCP | Assistant reads MCP; no headless dispatch surface confirmed. |

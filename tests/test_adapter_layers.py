@@ -2,12 +2,12 @@ import json
 import os
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.standin import program
 
 
 def _harness(tmp_path):
-    """The conformance harness ao ships, as a program: on Windows too, where a script's shebang line runs nothing and
+    """The conformance harness polyctl ships, as a program: on Windows too, where a script's shebang line runs nothing and
     every test here was skipped (WINDOWS-LANE-PARITY)."""
     source = open(os.path.join(os.path.dirname(A.__file__), "conformance_harness.py"), encoding="utf-8").read()
     return program(tmp_path, "harness", source)
@@ -29,13 +29,13 @@ def test_every_shipped_adapter_passes_conformance_through_the_fixture_harness(tm
 def test_a_project_adapter_overrides_by_id_and_a_foreign_contract_is_refused(project, monkeypatch, capsys):
     root = project["root"]
     monkeypatch.setattr(A, "tool_availability", lambda ttl=600: {})   # no real keyflip: the listing asks it for accounts
-    directory = os.path.join(root, ".ao", "adapters")
+    directory = os.path.join(root, ".polyctl", "adapters")
     os.makedirs(directory)
     kiro = json.load(open(os.path.join(A.adapters_dir(), "kiro.json"), encoding="utf-8"))
     with open(os.path.join(directory, "kiro.json"), "w", encoding="utf-8") as fh:
         json.dump(dict(kiro, name="Kiro, as this project runs it", contract=1), fh)
     with open(os.path.join(directory, "future.json"), "w", encoding="utf-8") as fh:
-        json.dump({"id": "future", "name": "a harness for a later ao", "verified": "untested", "contract": 99,
+        json.dump({"id": "future", "name": "a harness for a later polyctl", "verified": "untested", "contract": 99,
                    "send": {"argv": ["future", "{prompt}"]}}, fh)
 
     catalog = A.adapter_catalog(root)
@@ -60,5 +60,5 @@ def test_validate_names_what_a_candidate_is_missing_before_anyone_relies_on_it(p
     out = capsys.readouterr().out
     for text in ("`name` is missing", "`verified` is missing", "`contract` is missing",
                  "`send.argv` must carry {prompt} in exactly one argument", "`resume.argv` must carry {session}",
-                 "placeholders ao does not fill: wat"):
+                 "placeholders polyctl does not fill: wat"):
         assert text in out

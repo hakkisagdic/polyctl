@@ -2,16 +2,16 @@
 
 139 catch-up reviews of 2026-09-30 and 10-01 record no author family, and 83 of them were made by the alibaba
 family while a Qwen model also implemented: the ledgers do not show those reviewers' independence. A range can be
-reviewed again by a family that wrote none of it, but `ao review --commits` reviewed with the reviewer role alone,
+reviewed again by a family that wrote none of it, but `polyctl review --commits` reviewed with the reviewer role alone,
 judged a range against the running slice's boundary and recorded the review as the running slice's. `--reviewer`
-names an actor of the project's table, held to every rule `ao catchup --reviewer` holds one to, and `--slice` records
+names an actor of the project's table, held to every rule `polyctl catchup --reviewer` holds one to, and `--slice` records
 the review as the slice that landed the range, judged against its commit messages as a catch-up review is.
 """
 import json
 import os
 import subprocess
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_catchup_ready import _land
 from tests.test_catchup_reviewer import _roles, _table
 
@@ -21,7 +21,7 @@ def _review(cfg, *argv):
 
 
 def _rows(root):
-    with open(os.path.join(root, ".ao", "ledger", "reviews.jsonl"), encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "ledger", "reviews.jsonl"), encoding="utf-8") as fh:
         return [json.loads(line) for line in fh if line.strip()]
 
 
@@ -50,7 +50,7 @@ def test_an_actor_that_may_not_review_or_a_staged_candidate_is_refused_before_a_
     cfg = _table(project)
     start = _land(root, "a.py", "value = 0\n", "base")
     end = _land(root, "a.py", "value = 1\n", "B1")
-    before = len(_rows(root)) if os.path.exists(os.path.join(root, ".ao", "ledger", "reviews.jsonl")) else 0
+    before = len(_rows(root)) if os.path.exists(os.path.join(root, ".polyctl", "ledger", "reviews.jsonl")) else 0
     status = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True).stdout
 
     said = {}
@@ -63,8 +63,8 @@ def test_an_actor_that_may_not_review_or_a_staged_candidate_is_refused_before_a_
         assert "--reviewer and --slice go with --commits" in capsys.readouterr().out
 
     assert "the project's table has no such actor" in said["no-such-actor"]
-    assert "only an actor `ao role set reviewer` composed may review" in said["hand-written"]
+    assert "only an actor `polyctl role set reviewer` composed may review" in said["hand-written"]
     assert "builder is the implementer, and no actor reviews its own work" in said["builder"]
-    after = len(_rows(root)) if os.path.exists(os.path.join(root, ".ao", "ledger", "reviews.jsonl")) else 0
+    after = len(_rows(root)) if os.path.exists(os.path.join(root, ".polyctl", "ledger", "reviews.jsonl")) else 0
     assert after == before
     assert subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True).stdout == status

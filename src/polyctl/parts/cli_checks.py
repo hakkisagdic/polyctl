@@ -1,0 +1,2183 @@
+"""Checks: doctor problems, costs, settings, features, waivers, catch-up, pings.
+
+A part of src/polyctl/cli.py (#44): moved out byte for byte and run in its namespace by `_part`,
+where it stood; it is not importable on its own.
+"""
+
+
+def _actor_grant_problems(cfg):
+    """Doctor findings for each configured actor whose tool grant admits a bypass (#58), whose permission mode is
+    not the one its adapter pins, or whose wake grant lacks what its playbook asks of it (GRANTS-PINNED)."""
+    from . import allowlist as AL
+    grants = []
+    impl = cfg.get("implementer") or {}
+    adapter = A.load_adapter(impl["adapter"]) if impl.get("adapter") else {}
+    if impl.get("adapter"):
+        grants.append(("implementer", impl["adapter"],
+                       (adapter.get("resume") or {}).get("argv") or [], adapter.get("options") or {}, False))
+        # Another launch whose argv carries a grant of its own is asked what it admits too; only the resume's
+        # was, and a grant written into another launch went unread (GRANTS-AUDIT-2).
+        for key in sorted(adapter):
+            block = adapter[key]
+            argv = block.get("argv") if key != "resume" and isinstance(block, dict) else None
+            if isinstance(argv, list) and (A.carries_scope(argv) or any(str(arg) in AL.GRANT_ALL for arg in argv)):
+                grants.append((f"implementer {key}", impl["adapter"], argv, {}, False))
+    for role in ("architect", "reviewer"):
+        actor = cfg.get(role) or {}
+        if actor.get("argv"):
+            grants.append((role, actor.get("id") or actor.get("name") or role, actor["argv"], {}, _tool_route(actor)))
+    for fallback in (cfg.get("reviewer") or {}).get("fallbacks") or []:
+        if fallback.get("argv"):
+            grants.append(("reviewer fallback", fallback.get("id") or "fallback", fallback["argv"], {},
+                           _tool_route(fallback)))
+    if M.is_strict(cfg):
+        # Doctor reads the routes a strict review starts, not its ignored inline argv (TRIAGE-3-LOW).
+        grants = [grant for grant in grants if not grant[0].startswith("reviewer")]
+        try:
+            for route in _resolve_matrix(cfg, require_independent=False)["reviewers"]:
+                grants.append(("reviewer", route["identity"]["binding"], M.expand_argv(route, "{prompt}"), {}, False))
+        except M.MatrixError:
+            pass                            # the matrix check names the error (TRIAGE-3-LOW).
+    out = []
+    for role, name, argv, options, tool in grants:
+        if role == "implementer":
+            # A turn that would turn off its harness's own sandbox is not started until a person allows it,
+            # and the doctor says what allowing it costs (GRANTS-PINNED).
+            flags = A.unattended_flags(adapter, argv)[0]
+            refused = A.bypass_refusal(adapter, flags, cfg)
+            if refused:
+                out.append((f"nudge-refused:{name}", f"the watchdog nudges no {name} implementer: {refused}; allowed, "
+                                                     "each unattended turn runs every command outside that sandbox, "
+                                                     "with the network, and writes wherever this user can"))
+                continue
+        text = AL.describe(role, name, AL.problems(argv, options, role=role.split()[0]))
+        if text and role == "implementer" and A.sandbox_bypass(adapter, A.unattended_flags(adapter, argv)[0]):
+            text += (f"; and a person allowed {A.sandbox_bypass(adapter, A.unattended_flags(adapter, argv)[0])[0]} "
+                     "on this machine (watchdog.bypass_adapters), so its turns run outside its sandbox, with the network")
+        if text:
+            out.append((f"actor-grant:{role.replace(' ', '-')}", text))
+        # A reviewer reads, and starts no MCP server it was not given (#24).
+        if role.startswith("reviewer"):
+            # File tools do not read a tree; review invocation skips these checks too (TRIAGE-3-LOW).
+            if tool:
+                continue
+            argv, _ = A.pinned_argv(argv, "reviewer")
+            reach = AL.reviewer_problems(argv)
+            if A.command_adapter(argv) is not None:
+                reach += A.reading_problems(argv)
+            if reach:
+                out.append((f"reviewer-tools:{name}", f"{role} ({name}): " + "; ".join(reach)))
+        elif A.pin_conflicts(argv, role):
+            out.append((f"actor-mode:{role}", f"{role} ({name}): " + "; ".join(A.pin_conflicts(argv, role))))
+    out.extend(_architect_grant_gaps(cfg))
+    return out
+
+
+def _architect_grant_gaps(cfg):
+    """The rules the architect's configured grant lacks of the one its adapter declares now (GRANTS-PINNED).
+
+    `polyctl init` writes the architect's argv into .polyctl/config.json, so a grant composed before the
+    adapter's changed stays as it was: a refill wake told to write .polyctl/inbox/ could not. The grant
+    is the package's adapter's, as init composes it (TRIAGE-HIGHS).
+    """
+    from . import allowlist as AL
+    architect = cfg.get("architect") or {}
+    declared = (A.turn_adapter(architect["adapter"]) or {}) if architect.get("adapter") and architect.get("argv") \
+        else {}
+    options = declared.get("options") or {}
+    wanted = A.split_tool_list(str(options.get("architect_tools") or ""))
+    have = set(AL.rules(architect.get("argv") or []))
+    missing = [rule for rule in wanted if rule not in have]
+    if not wanted or not missing:
+        return []
+    flag = (options.get("allowed_tools") or ["the tool grant"])[0]
+    return [("architect-grant", f"the architect's grant lacks {len(missing)} rule(s) its playbook and prompts need "
+                                f"({', '.join(missing[:5])}{', …' if len(missing) > 5 else ''}): replace the value "
+                                f"after {flag} in the architect's argv in .polyctl/config.json with "
+                                f"{architect['adapter']}'s options.architect_tools")]
+
+
+def _implementer_commit_guard(cfg):
+    """Which guard holds commits for the configured implementer, in one sentence (#109)."""
+    from . import allowlist as AL
+    impl = cfg.get("implementer") or {}
+    if not impl.get("adapter"):
+        return None
+    adapter = A.load_adapter(impl["adapter"])
+    argv = (adapter.get("resume") or {}).get("argv") or []
+    if AL.problems(argv, adapter.get("options") or {}):
+        return (f"{impl['adapter']} can commit around the hook; an ungranted commit is not "
+                "prevented but surfaces within one watchdog cycle (landed-tree check)")
+    return f"{impl['adapter']}'s grant admits no hook bypass; polyctl commit and the hook hold commits"
+
+
+ENFORCEMENT_OFF_LITE = "enforcement: off - lite"
+ENFORCEMENT_OFF_LITE_LINE = f"{ENFORCEMENT_OFF_LITE} — nothing is enforced"
+
+
+def _lite_mode_opt_in(cfg):
+    """The recorded opt-in row when `mode` is `'lite'` in `.polyctl/config.json` with a valid `by` record, else None (MODES)."""
+    root = cfg.get("root")
+    if not root:
+        return None
+    try:
+        row = A.recorded_opt_in(root, "mode")
+    except Exception:
+        return None
+    if not isinstance(row, dict) or row.get("value") != "lite":
+        return None
+    value, source, _ = S.resolve(cfg, "mode")
+    if value != "lite" or source != "project":
+        try:
+            A.record_opt_in(root, "mode", "full", "polyctl")
+        except Exception:
+            pass
+        return None
+    by = str(row.get("by") or "").strip()
+    if not by or by == "polyctl init" or by.lower() in _agent_names(cfg):
+        return None
+    return row
+
+
+def unrecorded_lite(cfg):
+    """Where `mode` is set to `lite` without a recorded opt-in, or None (MODES)."""
+    value, source, _ = S.resolve(cfg, "mode")
+    if value == "lite" and _lite_mode_opt_in(cfg) is None:
+        return ".polyctl/config.json" if source == "project" else f"the {source} settings"
+    return None
+
+
+def project_mode(cfg):
+    """The project's effective mode: `'lite'` when set to `lite` in `.polyctl/config.json` with a recorded opt-in, else `'full'`."""
+    return "lite" if _lite_mode_opt_in(cfg) is not None else "full"
+
+
+def _init_hook_problem(root, allow_shared_hooks=False):
+    """Why commit hooks cannot be installed in `root`, or None when they can (MODES)."""
+    enrollment = _project_enrollment(root)
+    redirected = enrollment["detail"] if enrollment["state"] == "redirected" else _commit_repository_binding(root)
+    if redirected:
+        return redirected
+    if enrollment.get("unknown"):
+        return _hook_install_problem(enrollment)
+    inv = _polyctl_hook_inventory(root)
+    if inv["error"]:
+        return inv["error"]
+    if os.path.lexists(inv["active_dir"]) and not os.path.isdir(inv["active_dir"]):
+        return f"effective hook path is not a directory: {inv['active_dir']}"
+    targets = _active_hook_targets(inv)
+    for role in _HOOK_ROLES:
+        target = targets[role]
+        base = _state_base(target["static_state"])
+        if base not in ("current-local", "current-scoped") and not (
+            target["eligible"] and base in ("absent", "legacy")
+        ):
+            return (
+                f"{role} hook at {target['path']} is {target['static_state']} / {target['track_state']} "
+                "and cannot be installed"
+            )
+        if target["needs_authorization"] and (os.name == "nt" or not allow_shared_hooks):
+            return (
+                SHARED_HOOKS_REFUSED
+                if os.name == "nt"
+                else f"hooks at {inv['active_dir']} are {inv['directory_class']} (pass --allow-shared-hooks)"
+            )
+    return None
+
+
+def _mode_full_missing(cfg, allow_shared_hooks=False):
+    """What `polyctl mode full` needs before switching: reviewer independence/probe and installable commit hooks (MODES)."""
+    root = cfg["root"]
+    probe_cfg = dict(cfg, mode="full")
+    missing = []
+    if M.is_strict(probe_cfg):
+        probe = _reviewer_probe(probe_cfg)
+        if not probe["ok"]:
+            missing.append(f"independent reviewer: {_reviewer_probe_text(probe)}")
+    elif not probe_cfg.get("implementer"):
+        missing.append(
+            "independent reviewer: no implementer is configured "
+            f"(polyctl init --profile {A.default_profile()}, or an implementer in .polyctl/config.json)"
+        )
+    else:
+        reviewer = probe_cfg.get("reviewer") or {}
+        if reviewer and not reviewer.get("argv"):
+            missing.append(
+                "independent reviewer: no model reviewer is configured "
+                "(polyctl role set reviewer <adapter> --model <model>)"
+            )
+        elif reviewer.get("argv"):
+            probe = _reviewer_probe(probe_cfg)
+            if not probe["ok"]:
+                missing.append(f"independent reviewer: {_reviewer_probe_text(probe)}")
+    enrollment = _project_enrollment(root)
+    redirected = enrollment["detail"] if enrollment["state"] == "redirected" else _commit_repository_binding(root)
+    if redirected:
+        missing.append(f"commit hooks: {redirected}")
+    elif enrollment.get("unknown") or _hook_install_problem(enrollment):
+        missing.append(f"commit hooks: {_hook_install_problem(enrollment)}")
+    elif enrollment["state"] == "uninitialized":
+        missing.append(
+            f"commit hooks: {PROJECT_MARKER} is not tracked in HEAD or the index "
+            f"(stage {PROJECT_MARKER} with git add {PROJECT_MARKER})"
+        )
+    else:
+        hook_problem = _init_hook_problem(root, allow_shared_hooks=allow_shared_hooks)
+        if hook_problem:
+            missing.append(f"commit hooks: {hook_problem}")
+    return missing
+
+
+def _uninstall_lite_hooks(root, allow_shared_hooks=False):
+    """Remove untracked polyctl hooks when switching to `lite` mode; tracked hooks stay in the tree and stand aside in `polyctl commit-check` and `polyctl push check`."""
+    inv = _polyctl_hook_inventory(root)
+    if inv["error"]:
+        return
+    for target in inv["targets"]:
+        base = _state_base(target["static_state"])
+        if base not in ("current-local", "current-scoped", "legacy"):
+            continue
+        if target["track_state"] != "untracked":
+            continue
+        if (target["directory_class"] in ("shared", "external") or target["globally_configured"]) and (
+            os.name == "nt" or not allow_shared_hooks
+        ):
+            continue
+        try:
+            os.remove(target["path"])
+        except OSError:
+            pass
+
+
+def cmd_mode(cfg, args):
+    """Show or switch the project mode: `lite`, `full`, or `show` (MODES)."""
+    from .storage import ReplacedNotDurable
+    root = cfg["root"]
+    action = getattr(args, "action", "show") or "show"
+    by = (getattr(args, "by", None) or "").strip()
+    if action == "show":
+        if by:
+            print("--by is only used with `polyctl mode lite --by <name>`")
+            return 2
+        where = unrecorded_lite(cfg)
+        if where:
+            print(
+                f"{C['yellow']}mode is lite in {where} with no person's record, so full mode stays in force"
+                f"{C['reset']}: polyctl mode lite --by <name>"
+            )
+        mode = project_mode(cfg)
+        if mode == "lite":
+            opt_in = _lite_mode_opt_in(cfg)
+            who = f" (set by {_person_line(opt_in)})" if opt_in else ""
+            print(f"mode: lite — {ENFORCEMENT_OFF_LITE_LINE}{who}")
+        else:
+            print("mode: full — enforcement: on")
+        print("\nfull mode:")
+        print(
+            "  protects: independent reviewer probe and review gate, commit-ok grant, "
+            "pre-commit and pre-push hooks, and polyctl commit gate enforcement"
+        )
+        print(
+            "  does not protect: commits made outside polyctl's hooks or with --no-verify on a harness whose "
+            "tool grant admits raw git commit (surfaced after the fact as landed-without-grant)"
+        )
+        print(f"\nlite mode ({ENFORCEMENT_OFF_LITE}):")
+        print(
+            "  protects: nothing is enforced — basic setup only (.polyctl/config.json, .polyctl/backlog.md, "
+            ".polyctl/gates.json, mailbox, status, doctor, and the playbook)"
+        )
+        print(
+            "  does not protect: no reviewer probe, no independent review gate, no commit hooks, "
+            "no pre-commit or pre-push enforcement, and polyctl commit refuses because there is no gate to commit through"
+        )
+        return 0
+    if action == "lite":
+        if not by or not by.isprintable() or len(by) > 80:
+            print(
+                "--by is required: switching to lite mode turns enforcement off (no reviewer probe, no commit hooks), "
+                "and a person does it on the record, in one line of at most 80 characters"
+            )
+            return 2
+        if by.lower() in _agent_names(cfg):
+            print(f"--by names an agent or a role ({by}); switching to lite mode is a person's act")
+            return 2
+        config_path = os.path.join(root, ".polyctl", "config.json")
+        if os.path.lexists(config_path) or _project_enrollment(root)["state"] != "uninitialized":
+            document = A.project_config_document(root)
+            if document["problem"]:
+                print(f"{C['red']}not changed{C['reset']}: {document['problem']}")
+                return 1
+            base_config = document["config"]
+        else:
+            base_config = {
+                "project": os.path.basename(root),
+                "round_budget": S.default("round_budget"),
+            }
+        try:
+            A.write_project_config(
+                root, json.dumps(S.assign(base_config, "mode", "lite"), indent=2, ensure_ascii=False)
+            )
+        except ReplacedNotDurable as exc:
+            print(f"{C['red']}{exc}{C['reset']}; no opt-in was recorded; retry this command to record one if required")
+            return 1
+        except (OSError, ValueError) as exc:
+            print(f"{C['red']}not changed{C['reset']}: {exc}")
+            return 1
+        try:
+            A.record_opt_in(root, "mode", "lite", by)
+        except Exception as exc:
+            print(f"{C['red']}not recorded{C['reset']}: {exc}; lite mode is not in force until it is")
+            return 1
+        _uninstall_lite_hooks(root, allow_shared_hooks=bool(getattr(args, "allow_shared_hooks", False)))
+        print(f"mode = 'lite' (recorded as set by {by}) — {ENFORCEMENT_OFF_LITE_LINE}")
+        return 0
+    if action == "full":
+        document = A.project_config_document(root)
+        if document["problem"]:
+            print(f"{C['red']}not changed{C['reset']}: {document['problem']}")
+            return 1
+        allow = bool(getattr(args, "allow_shared_hooks", False))
+        missing = _mode_full_missing(cfg, allow_shared_hooks=allow)
+        if missing:
+            print(
+                f"{C['red']}mode full refused{C['reset']}: full mode needs an independent reviewer route and "
+                f"working commit hooks; still in {project_mode(cfg)} mode:"
+            )
+            for item in missing:
+                print(f"  - {item}")
+            return 1
+        was_lite = project_mode(cfg) == "lite"
+        rc = cmd_hooks(dict(cfg, mode="full"), argparse.Namespace(action="install", allow_shared_hooks=allow))
+        if rc != 0:
+            if was_lite:
+                _uninstall_lite_hooks(root, allow_shared_hooks=allow)
+            print(
+                f"{C['red']}mode full refused{C['reset']}: commit hooks could not be installed; "
+                f"still in {project_mode(cfg)} mode"
+            )
+            return 1
+        hook_proof = _hook_execution_probe(_polyctl_hook_inventory(root))
+        if not hook_proof["installed"]:
+            if was_lite:
+                _uninstall_lite_hooks(root, allow_shared_hooks=allow)
+            print(
+                f"{C['red']}mode full refused{C['reset']}: commit hooks: {_hook_probe_text(hook_proof)}; "
+                f"still in {project_mode(cfg)} mode"
+            )
+            return 1
+        planned_text = json.dumps(S.assign(document["config"], "mode", "full"), indent=2, ensure_ascii=False)
+        try:
+            A.record_opt_in(root, "mode", "full", by or "human")
+        except Exception as exc:
+            if was_lite:
+                _uninstall_lite_hooks(root, allow_shared_hooks=allow)
+            print(f"{C['red']}not recorded{C['reset']}: {exc}")
+            return 1
+        try:
+            A.write_project_config(root, planned_text)
+        except ReplacedNotDurable as exc:
+            print(f"{C['red']}{exc}{C['reset']}")
+            return 1
+        except (OSError, ValueError) as exc:
+            print(f"{C['red']}not changed{C['reset']}: {exc}")
+            return 1
+        print("mode = 'full' — enforcement: on (independent reviewer probe and commit hooks active)")
+        return 0
+    return 2
+
+
+def _active_review_tier(cfg):
+    """(the review tier a review would stand in now, [(key, problem)]), from the configuration alone (REVIEW-TIERS).
+
+    No reviewer is run. A project with no implementer to compare a reviewer with passed
+    every check while checking nothing, and a reviewer no tier admits was named only by
+    a probe: both are problems now, and so is an opt-in written into a config by hand
+    with no person's record, which is not in force.
+    """
+    from . import tiers as T
+    root = cfg["root"]
+    problems = []
+    value, source, _ = S.resolve(cfg, "mode")
+    if value == "lite" and _lite_mode_opt_in(cfg) is None:
+        where = ".polyctl/config.json" if source == "project" else f"the {source} settings"
+        problems.append(("mode-opt-in", f"mode is lite in {where}, but no person's opt-in is recorded for this "
+                                        "project, so full mode stays in force — polyctl mode lite --by <name>"))
+    if project_mode(cfg) == "lite":
+        return f"none ({ENFORCEMENT_OFF_LITE})", problems
+    value, source, _ = S.resolve(cfg, "review.same_family")
+    opt_in = _same_family_opt_in(cfg)
+    if value == T.LABELED and opt_in is None:
+        where = ".polyctl/config.json" if source == "project" else f"the {source} settings"
+        problems.append(("review-opt-in", f"review.same_family is labeled in {where}, but no person's opt-in is "
+                                          "recorded for this project, so a reviewer of the implementer's family "
+                                          "is still refused — polyctl config set review.same_family labeled --by <name>"))
+    opted = f"; opted in by {_person_line(opt_in)}" if opt_in is not None else ""
+    if M.is_strict(cfg):
+        try:
+            eligible = [route for route in _resolve_matrix(cfg, require_independent=False)["reviewers"]
+                        if route["eligible"]]
+        except M.MatrixError:
+            return "not established: the capability matrix cannot be resolved", problems
+        if not eligible:
+            return "none: no reviewer binding may review the implementer's work", problems
+        tier = eligible[0].get("tier")
+        return f"{T.label(tier)} ({eligible[0]['identity']['binding']}){opted if tier == T.SAME_FAMILY else ''}", \
+            problems
+    reviewer = cfg.get("reviewer") or {}
+    if not cfg.get("implementer") and os.path.exists(os.path.join(root, ".polyctl", "config.json")):
+        problems.append(("no-implementer", "no implementer is configured, so no reviewer can be shown to be of "
+                                           "another model family than the author and no review tier holds — "
+                                           f"polyctl init --profile {A.default_profile()}, or an implementer in "
+                                           ".polyctl/config.json"))
+    if not reviewer.get("argv"):
+        return ("person review: no model reviewer is configured, and each candidate lands on "
+                "polyctl person-review --by <name>" + _waiting_reviewer(cfg)), problems
+    tier, refused = _review_tier(cfg, reviewer)
+    if refused:
+        problems.append(("review-tier", _tier_refusal(refused)))
+        return f"none: {refused}", problems
+    if tier is None:
+        return "not established: no implementer is configured to compare the reviewer with", problems
+    return f"{T.label(tier)} ({reviewer.get('id') or 'reviewer'}){opted if tier == T.SAME_FAMILY else ''}", problems
+
+
+def _harness_config_unseen(root):
+    """(the changes to what a harness reads here that no person has seen, or None; why they cannot be read, or None)
+    (HARNESS-CONFIG)."""
+    try:
+        return A.unseen_harness_config(root), None
+    except Exception as exc:
+        return None, " ".join(str(exc).split())[:240]
+
+
+def _harness_config_problem(root):
+    """[("harness-config", text)] naming each change to what a harness reads here that no person has seen, or that it
+    cannot be read; [] when neither (HARNESS-CONFIG). A person must act: nothing polyctl starts in the tree runs until
+    then."""
+    unseen, unreadable = _harness_config_unseen(root)
+    if unreadable:
+        return [("harness-config", f"what a harness reads from this tree cannot be read ({unreadable}), so no wake, "
+                                   "refill, nudge, hunt or lane starts here until it can")]
+    if not unseen:
+        return []
+    return [("harness-config", f"{len(unseen)} change(s) to what a harness reads from this tree, unseen by a person: "
+                               f"{A.harness_config_line(unseen, limit=20)} - no wake, refill, nudge, hunt or lane "
+                               "starts here until a person reads them: polyctl harness seen --by <name>")]
+
+
+def _harness_config_told(root):
+    """What the harness-config alarm is about, as the watchdog raises it: the digest of what stands unseen, or that it
+    cannot be read (HARNESS-CONFIG)."""
+    unseen, unreadable = _harness_config_unseen(root)
+    return "unreadable" if unreadable else A.harness_config_digest(unseen or [])
+
+
+def _environment_problem(root):
+    """[("environment-in-tree", text)] when polyctl runs from, loads or trusts a place inside the tree an agent writes; []
+    otherwise (PYTHON-ENV). An advisory: what ran there ran before polyctl could name it, and only the person who set it up
+    can move it, so no turn is held for it - the files Python runs as it starts there are, as harness configuration."""
+    try:
+        found = A.environment_in_tree(root)
+    except Exception:
+        return []
+    if not found:
+        return []
+    named = "; ".join(f"{what} {A.shown_text(path)}" for what, path in found)
+    return [("environment-in-tree", f"polyctl runs from, loads or trusts what an agent can write: {named} - a .pth file "
+                                    "or a module there runs before polyctl can name it; run polyctl from an installation "
+                                    "outside the tree, and point these variables outside it")]
+
+
+# What polyctl cannot hold on Windows, and why: each is said where it bears - `polyctl writers`, a reviewer's wait, the
+# setup of a channel - and all of them in `polyctl doctor`. Each was a guarantee that quietly did not hold there, and
+# read as if it held (WINDOWS-SAY-WHY). None is a fault a person can fix, so `polyctl doctor --check` pages nobody.
+WINDOWS_LIMITS = {
+    "orphans": ("Windows has no process groups, so a process an ended turn left is not told apart from a turn: "
+                "`polyctl writers` counts it as a writer, and the watchdog starts no turn beside it until it is stopped - "
+                "`polyctl writers` lists it"),
+    "stall check": ("Windows has no process group to read a reviewer's CPU from, so review.stall_minutes does not "
+                    "apply: only the review's timeout ends a reviewer that hangs"),
+    "private files": ("Windows keeps no file mode, so ~/.polyctl/email.json, telegram.json and pings.json are as private "
+                      "as ~/.polyctl, which takes its permissions from your user profile unless someone changed them"),
+}
+
+
+def _private_mode():
+    """How a file polyctl keeps private is kept, as a saved line says it: mode 0600, or on Windows its folder's
+    permissions (WINDOWS-SAY-WHY)."""
+    return "no file mode on Windows: as private as its folder" if os.name == "nt" else "0600"
+
+
+def _windows_limit_lines():
+    """`polyctl doctor`'s lines naming what polyctl cannot hold on Windows, and why; none elsewhere (WINDOWS-SAY-WHY)."""
+    if os.name != "nt":
+        return []
+    return ([f"{'on Windows':<16}{C['yellow']}what polyctl cannot hold here, and why{C['reset']}"]
+            + [f"{'':<16}{C['dim']}{name}: {text}{C['reset']}" for name, text in WINDOWS_LIMITS.items()])
+
+# The features that start each role's turn: a command no turn starts with is no finding (TURN-ARGV).
+TURN_FEATURES = {"implementer": ("nudge",), "architect": ("architect_wake", "refill")}
+
+
+def _turn_problems(cfg):
+    """[("turn-refused:<role>", text)] for each role whose turn the watchdog would refuse to start, in the words it
+    refuses it in, so the doctor and the watchdog raise one alarm (TURN-ARGV). Read as the command is composed before a
+    program is looked for: where the program is found is the watchdog's to say."""
+    from . import features as F
+    out = []
+    for role, features in TURN_FEATURES.items():
+        block = cfg.get(role) if isinstance(cfg.get(role), dict) else {}
+        if not block or not any(F.enabled(cfg, name) for name in features):
+            continue
+        ident, argv = A.turn_command(cfg, role)
+        if argv is None and (role == "architect" or A.turn_adapter(ident) is not None):
+            continue
+        values = {"session": A.session_to_resume(cfg, role)[0]}
+        values.update({"model": block.get("model"), "effort": block.get("effort")} if role == "implementer"
+                      else {"prompt": block.get("prompt")})
+        refused = A.turn_refusal(role, ident, argv or [], root=cfg["root"], values=values)
+        if refused:
+            out.append((f"turn-refused:{role}", refused))
+    return out
+
+
+def _path_problems():
+    """[("path-relative", what it says)] where PATH holds a relative or empty entry on Windows, else [].
+
+    Such an entry names the directory a program is started in, or one below it, and polyctl starts
+    programs from inside trees agents write, so polyctl looks for no program there: one PATH reaches
+    only through it is not started, and the entry only waits for a program left under its name
+    (WINDOWS-NO-CWD-EXEC).
+    """
+    unsafe = A.unsafe_path_entries() if os.name == "nt" else []
+    if not unsafe:
+        return []
+    named = ["an empty entry" if not entry else f"`{entry}`" for entry in dict.fromkeys(unsafe)]
+    return [("path-relative", f"PATH holds {', '.join(named)}: each names the directory a program is started in, "
+                              "or one below it, and that can be a tree an agent writes; polyctl starts no program found "
+                              f"only through {'it' if len(named) == 1 else 'them'} - take "
+                              f"{'it' if len(named) == 1 else 'them'} out of PATH")]
+
+
+def _gates_file(root, cfg=None):
+    """(.polyctl/gates.json as read, or None; what keeps polyctl from running it, said after the file's name, or None)
+    (TRIAGE-HIGHS).
+
+    Read with the checks a run reads it with (_profile_gates): the profile `polyctl verify` runs when none is named,
+    every other profile `--profile` and `polyctl merge-check` may name, and each gate, since the coverage check reads
+    those no profile runs. The coverage check raised on a gate or a file of a shape it could not read, and the
+    doctor's scheduled check ended there without sending any alarm.
+    """
+    try:
+        with open(os.path.join(root, ".polyctl", "gates.json"), encoding=UTF8) as fh:
+            spec = json.load(fh)
+    except FileNotFoundError:
+        if not os.path.isdir(os.path.join(root, ".polyctl")):
+            return None, None                   # no polyctl project here, so nothing it would verify
+        return None, ("is missing, so `polyctl verify` has nothing to run and no candidate is granted - `polyctl init` "
+                      "writes one, or declare the gates as docs/gates.md shows")
+    except (OSError, ValueError) as exc:
+        return None, f"cannot be read ({' '.join(str(exc).split())}) - fix it as docs/gates.md shows"
+    refused = "`polyctl verify` refuses it - fix it as docs/gates.md shows"
+    declared = spec.get("profiles") if isinstance(spec, dict) else None
+    default = spec.get("default_profile", "quick") if isinstance(spec, dict) else "quick"
+    names, problem = _profile_gates(spec, default, cfg)
+    if problem:
+        return spec, f"cannot run: {problem}; {refused}"
+    if not names:
+        return spec, (f"runs no gate in profile {default}, the one `polyctl verify` runs when none is named - declare it "
+                      "as docs/gates.md shows")
+    for profile in sorted(name for name in declared if name != default):
+        names, problem = _profile_gates(spec, profile, cfg)
+        if not problem and not names:
+            problem = f"profile {profile} selects no gate"
+        if problem:
+            return spec, f"cannot run: {problem}; `polyctl verify --profile {profile}` and `polyctl merge-check` refuse it"
+    for name, gate in spec["gates"].items():
+        why = _gate_shape_problem(gate)
+        if why:
+            return spec, f"cannot be read: its gate {name} is in no profile, and {why} - fix it as docs/gates.md shows"
+    return spec, None
+
+
+def doctor_problems(cfg):
+    """What `polyctl doctor --check` acts on: conditions a person must fix, as (key, text)."""
+    from .watchdog import wake_error, STATE_DIR
+    root = cfg["root"]
+    redirected = _commit_repository_binding(root)
+    key = A.project_key(root)
+    # A redirect is a finding, not a reason to suppress the other checks or their alarms (NESTED-GIT).
+    out = [("repository-redirect", redirected)] if redirected else []
+    lite = project_mode(cfg) == "lite"
+    strict_matrix = M.is_strict(cfg)
+    if strict_matrix and not lite:
+        try:
+            matrix_resolution = _resolve_matrix(cfg, require_independent=False)
+        except M.MatrixError as exc:
+            out.append(("capability-matrix", "; ".join(exc.problems[:3])))
+        else:
+            if not any(route["eligible"] for route in matrix_resolution["reviewers"]):
+                out.append((
+                    "no-independent-reviewer",
+                    "capability matrix reviewer chain has no binding outside the implementer binding and model family",
+                ))
+    out.extend(_active_review_tier(cfg)[1])
+    # A review switch the config turns off with no person's record stays on, and says so (FEATURE-RECORDED).
+    from . import features as F
+    for switch in F.unrecorded(cfg):
+        out.append((f"unrecorded-switch:{switch}",
+                    f"{switch} is off in .polyctl/config.json with no person's record, so it stays on - "
+                    f"polyctl features off {switch} --by <name>, or remove it"))
+    # A row of a gate ledger this machine never recorded polyctl appending is nobody's record (OPTIN-ATTESTED,
+    # LEDGER-ATTESTED).
+    from .storage import GATE_LEDGERS, _unattested_repair, unattested_in_tree, unattested_ledger
+    for name, rel, chain, legacy, effect in GATE_LEDGERS:
+        try:
+            foreign, attested = (unattested_in_tree(root, rel, chain) if rel == ".polyctl/ledger/opt-ins.jsonl"
+                                 else unattested_ledger(os.path.join(root, *rel.split("/")), chain,
+                                                        legacy_prefix=legacy))
+        except Exception as exc:
+            # Said, never swallowed: a ledger polyctl cannot read decides nothing, and the person learns why.
+            foreign, attested = 0, 0
+            out.append((f"{name}-unreadable", f"{rel} cannot be read, so {effect}: {exc}"))
+        if foreign:
+            out.append((f"{name}-unattested", f"{rel} holds {_unattested_repair(foreign, attested)}"))
+    where_lite = unrecorded_lite(cfg)
+    if where_lite:
+        out.append((
+            "mode-opt-in",
+            f"mode is lite in {where_lite} with no opt-in record, so full mode stays in force — "
+            "polyctl mode lite --by <name>, or remove it",
+        ))
+    out.extend(_harness_config_problem(root))
+    out.extend(_environment_problem(root))
+
+    out.extend(_turn_problems(cfg))
+    # A platform run polyctl recorded no longer covers this tree: red, naming a commit this repository
+    # cannot place, or past the bound. Absence is not a finding (LANE-EVIDENCE).
+    out.extend(A.evidence_problems(cfg))
+    hb = A.heartbeat_age(root)
+    if hb is not None and hb > WATCHDOG_SILENT_AFTER:
+        # The tool named is this platform's: launchctl means nothing on Windows or Linux (WINDOWS-SAY-WHY).
+        out.append(("watchdog-dead", f"watchdog silent for {hb // 60}m — {A.scheduler_hint()} / polyctl watchdog status"))
+    we = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", key)))
+    if we and we["kind"] in ("binary", "session"):
+        try:
+            when = time.mktime(time.strptime(we["when"], "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            when = time.time()
+        if time.time() - when < 24 * 3600:
+            out.append(("wake-failed", f"last architect wake failed ({we['kind']}): {we['text'][:90]}"))
+    from . import telegram as _tg, email as _em, ntfy as _nt
+    if not (_tg.config() or _em.config() or _nt.config()):
+        out.append(("no-channel", "no human channel beyond desktop notifications — polyctl email setup"))
+    for sib, age in A.stale_siblings(root).items():
+        out.append((f"sibling-dead:{sib}", f"{sib}: watchdog silent for {age // 60}m"))
+    own = _implementer_credits(cfg)
+    credits = _credits_problem(own["rate"], own["samples"][-1] if own["samples"] else None)
+    if credits:
+        out.append(credits)
+    from . import features as _features
+    try:
+        from .watchdog import load_state as _load_state
+        blind = (_load_state(root) or {}).get("credit_check_problem")
+    except Exception:
+        blind = None
+    # Paged only while the implementer is being driven: a check that cannot read
+    # usage matters because exhaustion stops the work, and an owner who stopped the
+    # work on purpose does not need an hourly page saying so. Plain doctor always
+    # prints it. Only a check of the implementer's own account is its blind check
+    # (ACCOUNT-READERS): one another harness's lookup failed is not.
+    if blind and own["readable"] and blind.get("adapter") == own["adapter"] and _features.enabled(cfg, "nudge"):
+        out.append(("credits-check", f"credit usage cannot be read ({blind.get('reason')}) — "
+                                     f"the exhaustion alarm is blind until it reads again"))
+    try:
+        msgs_p, _ = A.session_paths(cfg)
+        # The watchdog's heartbeat now comes before its transcript check, so a
+        # transcript it cannot find no longer looks like a dead watchdog (#71).
+        if (A.session_state(cfg, "implementer") or {}).get("session") and _features.enabled(cfg, "nudge") \
+                and (not msgs_p or not os.path.exists(msgs_p)):
+            out.append(("transcript-missing", "the implementer's transcript cannot be found — the "
+                        "watchdog has nothing to watch and restarts nobody; check implementer.session"))
+        if msgs_p and os.path.exists(msgs_p) and time.time() - os.path.getmtime(msgs_p) < 3600 \
+                and not A.read_tail(msgs_p, 2_000_000):
+            out.append(("transcript-blind", "fresh transcript, nothing parsed — the agent CLI's format changed"))
+    except Exception:
+        pass
+    # A role's `auto` that settles on no session it may resume: the watchdog nudges or wakes nobody, and an
+    # ambiguity is named rather than guessed at (SESSION-IDENTITY).
+    try:
+        for role, key, feature in (("implementer", "implementer-session", "nudge"),
+                                   ("architect", "architect-session", "architect_wake")):
+            state = A.session_state(cfg, role)
+            if state is None or state["how"] == "pinned" or not _features.enabled(cfg, feature) \
+                    or (role == "architect" and not any("{session}" in str(part)
+                                                        for part in (cfg.get(role) or {}).get("argv") or [])):
+                continue
+            if not (state["session"] and state["trusted"]):
+                out.append((key, f"the {role}'s session is {state['how']}: {state['why']}"))
+    except Exception:
+        pass
+    # A source tree no gate exercises is a tree nothing verifies (#5). The file is read with the checks `polyctl verify`
+    # reads it with, and one that cannot run is a finding of its own: a shape the coverage check could not read
+    # raised out of `polyctl doctor --check --notify` before it sent any alarm, and a missing or unreadable file said
+    # nothing (TRIAGE-HIGHS).
+    gate_spec, gates_problem = _gates_file(root, cfg)
+    if isinstance(gate_spec, dict):
+        try:
+            gaps = A.gate_coverage_gaps(root, gate_spec, S.get(cfg, "gates.coverage_min_files"))
+        except Exception as exc:
+            gaps = []
+            gates_problem = gates_problem or (f"cannot be read for coverage ({' '.join(str(exc).split())}) - fix it "
+                                              "as docs/gates.md shows")
+        for tree, chain, files in gaps:
+            out.append((f"gate-uncovered:{tree}", f"{tree}/ holds {files} {chain} files that no gate in "
+                                                  ".polyctl/gates.json exercises"))
+    if gates_problem:
+        out.append(("gates-unusable", f".polyctl/gates.json {gates_problem}"))
+    # A setting that is written but not used says one thing and does another (#74).
+    for name, text in S.problems(cfg):
+        out.append((f"setting:{name}", text))
+    # A program found only through a relative or empty PATH entry is one polyctl does not start (WINDOWS-NO-CWD-EXEC).
+    out.extend(_path_problems())
+    if len(A.deferred_open(root)) >= 3:
+        out.append(("deferred-pile", f"{len(A.deferred_open(root))} deferred actions waiting — polyctl catchup"))
+    # The playbook exists but nothing the agent reads points at it: the rules are
+    # written and not in force. init prints the pointer; this is the reminder.
+    from . import skillkit
+    if skillkit.rules_wired(root) is False:
+        named = ", ".join(skillkit.rule_file_names(root) + skillkit.steering_dirs(root))
+        out.append(("rules-not-wired", f"no rule file ({named}) points at the polyctl playbook — "
+                                       "paste the pointer or run `polyctl init --rules`"))
+    # Two critical roles on one rate-limited pool fail together: the day the
+    # architect ran dry, so did the reviewer, and the run locked.
+    arch_bin = os.path.basename(((cfg.get("architect") or {}).get("argv") or [""])[0])
+    rv = cfg.get("reviewer") or {}
+    rv_bin = os.path.basename((rv.get("argv") or [""])[0])
+    if not lite and not strict_matrix and arch_bin and arch_bin == rv_bin and not rv.get("fallbacks"):
+        out.append(("shared-pool", f"architect and reviewer both run `{arch_bin}` on one quota pool and the reviewer has no "
+                                   f"fallback — let keyflip rotate accounts before a spawn (`polyctl config set "
+                                   f"keyflip.rotation on --machine`), use another model family, or, on a "
+                                   f"machine without keyflip, add reviewer.fallbacks"))
+    # A dependency the board cannot resolve makes READY wrong without a word (#33).
+    try:
+        graph_problems = A.board_graph(root)["problems"]
+    except Exception as exc:
+        # A board that cannot be read as a graph is the finding; it was nothing (READY-GRAPH-2).
+        graph_problems = [f"the board cannot be read as a graph ({' '.join(str(exc).split())})"]
+    if graph_problems:
+        out.append(("board-graph", "; ".join(graph_problems[:3])
+                    + (f" and {len(graph_problems) - 3} more" if len(graph_problems) > 3 else "")
+                    + " — polyctl board"))
+    # A boundary its own acceptance cannot fit is found before the work, not in it (#35).
+    try:
+        conflicts = [f"{item['id']}: {text}" for state in ("running", "queued")
+                     for item in A.board(root)[state] for text in A.boundary_conflicts(root, item)]
+    except Exception:
+        conflicts = []
+    if conflicts:
+        out.append(("boundary-conflict", "; ".join(conflicts[:3])
+                    + (f" and {len(conflicts) - 3} more" if len(conflicts) > 3 else "") + " — polyctl board"))
+    # Green branches make a red main when nobody ran their merge (#39).
+    try:
+        unverified = A.unverified_merges(root, cfg)
+    except Exception as exc:
+        # A merge ledger that cannot be read vouches for nothing: one row broken took every recent merge
+        # for a checked one, since the error was read as no merge to name (MERGE-EVIDENCE-2).
+        unverified = [("merge ledger", f"cannot be read ({' '.join(str(exc).split())}), so no recent merge "
+                                       "is known to have been checked")]
+    if unverified:
+        out.append(("unverified-merge", "; ".join(f"{sha[:12]}: {why}" for sha, why in unverified[:3])
+                    + (f" and {len(unverified) - 3} more" if len(unverified) > 3 else "")
+                    + " — polyctl merge-check <branch> before merging"))
+    # A mail store that cannot be read leaves the queue to the view alone, where a message removed unhandled
+    # is missing: the queue said nothing of it (MESSAGE-STORE-2).
+    if A.mail_store_mode(root) == "append-only":
+        try:
+            A.unhandled_messages(root)
+        except Exception as exc:
+            out.append(("mail-store", f"the mail store cannot be read ({' '.join(str(exc).split())}), so the queue "
+                                      "is read from the mailbox view alone and a message removed unhandled is "
+                                      "missing from it — restore .polyctl/ledger/mail-store.jsonl from a backup"))
+    # A reviewer whose adapter cannot deny tools is not a reviewer (#88).
+    reviewer_adapter = (cfg.get("reviewer") or {}).get("adapter")
+    if reviewer_adapter and not lite:
+        eligible, why = A.reviewer_eligibility(A.load_adapter(reviewer_adapter, root))
+        if not eligible:
+            out.append((f"reviewer-ineligible:{reviewer_adapter}", f"the reviewer runs {reviewer_adapter}, which may not "
+                        f"review: {why} — polyctl role set reviewer <adapter> --model <model>"))
+    # A configured adapter whose command this machine lacks would fail at its first spawn (#89).
+    try:
+        absent = A.absent_adapter_binaries(cfg)
+    except Exception:
+        absent = []
+    for actor, ident, binaries in absent:
+        if lite and actor == "reviewer":
+            continue
+        out.append((f"adapter-binary:{actor}", f"{actor} runs the {ident} adapter, but {' or '.join(binaries)} "
+                    "is not on this machine (PATH, binaries.extra_dirs, the usual install directories)"))
+    # Agent configuration checked by AgentShield's categories, natively (#14).
+    try:
+        for category, text in A.agent_config_findings(root):
+            out.append((f"agent-config:{category}", text))
+        for text in A.verify_content(root):
+            out.append(("content-drift", text))
+    except Exception:
+        pass
+    # A filter in front of an agent's shell is asked what it does to each measurement,
+    # not trusted to leave them alone because its configuration says so (#52).
+    try:
+        probed = A.probe_filters(root)
+    except Exception as exc:
+        probed = []
+        out.append(("measurement-filter", f"the filter probe failed ({exc}); what a filter does to a "
+                                          "measurement is not verified"))
+    filtering = {}
+    for result in probed:
+        if result["verdict"] == "in-force":
+            continue
+        hint = ("add them to the filter's exclusions" if result["changed"]
+                else "docs/gates.md says which filters polyctl may ask")
+        key, text = f"measurement-filter:{result['program']}", f"{A.filter_probe_text(result)} — {hint}"
+        filtering[key] = f"{filtering[key]}; {text}" if key in filtering else text
+    out.extend(filtering.items())
+    # Mail is governance; a store ahead of its private copy is on one disk (#83).
+    try:
+        sync = A.mail_sync_state(root, cfg)
+    except Exception:
+        sync = None
+    if sync:
+        local, remote, problem = sync
+        if problem:
+            out.append(("mail-sync", problem + (" — polyctl mail sync refuses it" if problem.endswith("verified private")
+                                                else "")))
+        elif local and local != remote:
+            out.append(("mail-sync", "the message store is ahead of its private copy — polyctl mail sync"))
+    # An implementer with nothing pre-authorised to pick up next stalls the moment
+    # the architect is away; two READY items is the floor.
+    try:
+        ready = len(A.ready(root)) if hasattr(A, "ready") else len(A.board(root)["queued"])
+        if ready < 2 and not A.board(root)["running"]:
+            out.append(("queue-shallow", f"{ready} READY item(s) and nothing running — refill .polyctl/backlog.md before the architect is away"))
+    except Exception:
+        pass
+
+    # Static intent is only the safety precondition for running a hook.  A green
+    # commit-hook result requires Git itself to resolve the active path, execute
+    # it with an isolated synthetic index, and return polyctl's nonce-bound refusal.
+    # Pre-push remains informational: #59 is about commit authority.
+    if not lite:
+        hook_inventory = _polyctl_hook_inventory(root)
+        proof = _hook_execution_probe(hook_inventory)
+        if hook_inventory["error"]:
+            out.append(("commit-hook", proof["detail"] + " — polyctl hooks status"))
+        else:
+            active = _active_hook_targets(hook_inventory)
+            commit = active["pre-commit"]
+            misplaced = [
+                target for target in hook_inventory["targets"]
+                if not target["active"]
+                and target["role"] == "pre-commit"
+                and target["reachability"] == "potentially-effective"
+                and _state_base(target["static_state"]) in (
+                    "current-local", "current-scoped", "legacy", "ambiguous-polyctl"
+                )
+            ]
+            reasons = []
+            if not proof["installed"]:
+                reasons.append("execution proof failed: " + proof["detail"])
+            if misplaced:
+                reasons.append(
+                    "potentially-effective misplaced pre-commit: "
+                    + ", ".join(target["path"] for target in misplaced[:3])
+                )
+            if reasons:
+                enrollment = _project_enrollment(root)
+                install_problem = _hook_install_problem(enrollment)
+                if install_problem:
+                    repair = _hook_install_problem(enrollment, said=proof["detail"])
+                elif commit["repository_source"] and commit["track_state"] == "tracked" \
+                        and commit["crlf_only"]:
+                    repair = "git restore -- .githooks/pre-commit"
+                elif misplaced:
+                    needs_allow = any(
+                        target["directory_class"] in ("shared", "external")
+                        or target["globally_configured"]
+                        for target in misplaced
+                    )
+                    flag = " --allow-shared-hooks" if needs_allow else ""
+                    repair = f"polyctl hooks uninstall{flag}, then polyctl hooks install{flag}"
+                elif _state_base(commit["static_state"]) not in (
+                    "current-local", "current-scoped"
+                ):
+                    repair = "polyctl hooks install (restore tracked hooks with Git)"
+                elif HOOK_POLYCTL_NOT_FOUND in proof["detail"]:
+                    repair = _polyctl_link_fix()           # an alias is invisible to the hook's /bin/sh (SAFE-REMOVE)
+                else:
+                    repair = "ensure the hook can resolve this polyctl executable, then polyctl hooks status"
+                out.append(("commit-hook", "; ".join(reasons) + (f" — {repair}" if repair else "")))
+    out.extend(_actor_grant_problems(cfg))
+    if not lite and _project_enrollment(root)["state"] in ("enrolled", "legacy"):
+        # Every commit since the first grant, merges among them, and a check that cannot run named as such: an
+        # error read as no commit to name (LEDGER-HISTORY).
+        landed = A.landed_without_grant(root)
+        if landed:
+            out.append(("landed-without-grant", landed))
+    return out
+
+
+# Conditions the watchdog raises itself, by the doctor's finding: the key, level and
+# window the watchdog raises them with. Two alarms for one condition double the
+# ladder - two ids, two levels, two mails - and ringing the doctor's copy only while
+# the watchdog's was quiet still rang both: the watchdog's alarm is quiet after a
+# silence, under a snooze and between readings it could not take. So the doctor
+# raises the watchdog's own alarm at the watchdog's level and known end: one
+# condition is one alarm whoever sees it, with one snooze and one mail (#106).
+DOCTOR_WATCHDOG_ALARMS = {"credits-exhaust": {"key": "credits-exhaust", "level": "red", "window": 6 * 3600},
+                          "wake-failed": {"key": "architect-wake-failed", "level": None, "window": 6 * 3600},
+                          "harness-config": {"key": "harness-config", "level": None, "window": 6 * 3600},
+                          # A turn the watchdog refuses to start, in the words it refuses it in (TURN-ARGV).
+                          "turn-refused:implementer": {"key": "turn-refused:implementer", "level": None,
+                                                       "window": 6 * 3600},
+                          "turn-refused:architect": {"key": "turn-refused:architect", "level": None,
+                                                     "window": 6 * 3600},
+                          # A commit no grant bound, in the words the watchdog raises it in (LEDGER-HISTORY).
+                          "landed-without-grant": {"key": "landed-without-grant", "level": None,
+                                                   "window": 6 * 3600}}
+
+# A heartbeat older than this is a watchdog that stopped.
+WATCHDOG_SILENT_AFTER = 360
+# The scheduled check runs every fifteen minutes, from its launchd job, its systemd timer or its
+# Windows task: a run this long after its last one follows a silence of its own.
+DOCTOR_SILENT_AFTER = 20 * 60
+
+
+def _watchdog_interval(root):
+    """Seconds between the watchdog's cycles: its systemd timer's, its launchd job's StartInterval, or two minutes.
+
+    Two minutes is what `polyctl watchdog install` schedules without --interval, and what
+    the Windows task runs. Each file is read where it is, whatever the platform: only
+    the scheduler this machine has holds one.
+    """
+    import plistlib
+    key = A.project_key(root)
+    interval = _systemd_interval(os.path.join(_systemd_dir(), _systemd_unit("watchdog", key) + ".timer"))
+    if interval is None:
+        try:
+            with open(_launchd_plist(_launchd_label("watchdog", key)), "rb") as fh:
+                interval = int(plistlib.load(fh).get("StartInterval") or 120)
+        except (OSError, ValueError, TypeError, AttributeError, plistlib.InvalidFileException):
+            interval = 120
+    return max(60, interval)
+
+
+def _watchdog_first_cycle_due(root, now=None):
+    """When the watchdog's first cycle after its job came back is due, while it still is; else None.
+
+    Both scheduled jobs run at load, and the doctor could run before the watchdog's
+    first cycle: on re-enabling a project after two weeks it rang a dead watchdog and
+    exhausted credits on the desktop and the phone, two notices each about a watchdog
+    that was starting and credits its first cycle was about to name (NOTICE-NOISE).
+
+    Nothing the job loader keeps says when a job was loaded, and a marker written by
+    `polyctl watchdog install` is not written when the jobs are enabled again with launchctl,
+    after a reboot or after sleep. What every one of those leaves is this check's own
+    silence: the scheduled check records each run, and a run that finds its last one
+    more than twenty minutes ago was stopped too, by whatever stopped the watchdog. The
+    watchdog then has one of its own cycles from that run before it counts as dead,
+    unless its heartbeat had already stopped when this check last ran - a watchdog that
+    died while the check was watching is not given another cycle. A check with no
+    record counts as back: at worst a dead watchdog is paged one run later.
+
+    A watchdog with no heartbeat at all has its cycle too when this check saw its heartbeat
+    at its last run: `polyctl watchdog uninstall` takes the heartbeat with the jobs, and the check
+    that ran first after `polyctl watchdog install` paged what that cycle was about to name, a
+    reading two weeks old among it. Each run records the heartbeat it saw for that. A check
+    that saw none at its last run, or has no run of its own yet, gives none, as before: it
+    knows of no watchdog to come back, and one run by hand where none is installed would
+    hold its pages on every run (LEADS-OPS).
+    """
+    from .storage import replace_file_durably
+    now = time.time() if now is None else now
+    path = A.project_file(root, "doctor-runs")
+    try:
+        with open(path, encoding=UTF8) as fh:
+            record = json.load(fh)
+    except (OSError, ValueError):
+        record = {}
+    record = record if isinstance(record, dict) else {}
+    last = record.get("at") if isinstance(record.get("at"), (int, float)) else None
+    back = record.get("back") if isinstance(record.get("back"), (int, float)) else None
+    age = A.heartbeat_age(root)
+    beat = None if age is None else now - age
+    if last is None or now - last > DOCTOR_SILENT_AFTER:
+        seen = beat if beat is not None else record.get("beat") if isinstance(record.get("beat"), (int, float)) \
+            else None               # with none now, the heartbeat this check's last run saw
+        stopped_first = seen is None or (last is not None and last - seen > WATCHDOG_SILENT_AFTER)
+        back = None if stopped_first else now
+    try:
+        replace_file_durably(path, json.dumps({"at": int(now), "back": back,
+                                               "beat": None if beat is None else int(beat)}).encode("utf-8"))
+    except OSError:
+        return None                 # a check that cannot keep its record gives no cycle: it pages as it did
+    if back is None or (beat is not None and beat >= back):
+        return None
+    due = back + _watchdog_interval(root)
+    return due if now < due else None
+
+
+def _no_account(ident):
+    """What stands where a credit figure would, for an implementer whose adapter declares no account polyctl can read."""
+    return f"{ident or 'the implementer'} declares none polyctl can read"
+
+
+def _implementer_credits(cfg):
+    """The implementer's own credit readings: {adapter, readable, samples, rate} (ACCOUNT-READERS).
+
+    The account is the one the implementer's adapter declares a lookup for, and its
+    readings are the samples that lookup took. A ledger can hold another harness's
+    readings, and every credits finding, page and line was computed from all of them:
+    an implementer whose adapter declares no account polyctl can read is not readable, and has
+    no samples and no rate whatever the ledger holds.
+    """
+    ident = A.implementer_adapter_id(cfg)
+    readable = bool(A.usage_api(ident))
+    return {"adapter": ident, "readable": readable,
+            "samples": A.credit_samples(cfg["root"], ident) if readable else [],
+            "rate": A.burn_rate(cfg["root"], ident) if readable else None}
+
+
+def _credits_problem(br, last, now=None):
+    """The one credits problem the readings show: exhausted outranks a projection.
+
+    At 12503/10000 the doctor still said "credits run out 15 Sep, before the
+    reset", because the projection was checked first and a date that had already
+    passed read like one still ahead. A spent reading whose own reset has passed says
+    nothing of the plan after it: rehearsing 2026-10-01, the scheduled check paged
+    credits exhausted from a reading taken before the plan reset, on the desktop, the
+    phone and in four mails in a day while the usage could not be read again (OCT1-FIXES).
+    """
+    from .watchdog import credit_reset
+    now = time.time() if now is None else now
+    # Which account, since a switch leaves another account's figures behind (#36).
+    whose = (f"account {last['account']}" if last and last.get("account")
+             else "account not named by the reading")
+    reset = credit_reset(last.get("reset_at"), now) if last else None
+    if last and last.get("limit") and float(last.get("used") or 0) >= float(last["limit"]) \
+            and not (reset is not None and reset <= now):
+        return ("credits-exhaust", f"credits exhausted at the last reading: "
+                                   f"{float(last['used']):.0f}/{float(last['limit']):.0f} ({whose})")
+    if br and br.get("before_reset"):
+        return ("credits-exhaust", f"credits run out {time.strftime('%d %b', time.localtime(br['exhausts_at']))}, "
+                                   f"before the reset ({br['per_day']:.0f}/day, account {br.get('account')}) "
+                                   "— new account or fewer features")
+    return None
+
+
+def _doctor_credit_lines(cfg):
+    """`polyctl doctor`'s credits lines, read from the implementer's own readings (ACCOUNT-READERS).
+
+    Where the figure stood, an implementer whose adapter declares no account polyctl can read is
+    told so: no credit alarm can ring for it, and a check that cannot exist must not look
+    like one that passes. A blind check is shown only for the implementer's own account.
+    """
+    from .watchdog import credit_reset
+    own = _implementer_credits(cfg)
+    if not own["readable"]:
+        return [f"credits         {C['dim']}{_no_account(own['adapter'])}{C['reset']}"]
+    lines, br = [], own["rate"]
+    last = (own["samples"] or [None])[-1]
+    # A reading already over the limit is exhausted; a date ahead would say otherwise.
+    over = bool(last and last.get("limit") and float(last.get("used") or 0) >= float(last["limit"]))
+    # Unless its own reset has passed: it says nothing of the plan after it, as the check reads it (OCT1-FIXES).
+    # The panel still said exhausted, in red, of a plan the check no longer paged about (LEADS-OPS).
+    reset = credit_reset(last.get("reset_at")) if over else None
+    reset_passed = reset is not None and reset <= time.time()
+    if br and not over:
+        when = time.strftime('%d %b', time.localtime(br['exhausts_at'])) if br['exhausts_at'] else '—'
+        tone = C['red'] if br['before_reset'] else C['green']
+        lines.append(f"credits         {br['used']:.0f}/{br['limit']:.0f} · {br['per_day']:.0f}/day · runs out "
+                     f"{tone}{when}{C['reset']}"
+                     + (f"  {C['red']}before the reset — new account / polyctl features off{C['reset']}"
+                        if br['before_reset'] else ""))
+    if reset_passed:
+        lines.append(f"credits         {C['dim']}{float(last.get('used') or 0):.0f}/{float(last['limit']):.0f} at the "
+                     f"last reading, taken before its reset on {time.strftime('%d %b %H:%M', time.localtime(reset))}"
+                     f" — unknown since; `polyctl credits` reads them now{C['reset']}")
+    elif (over or not br) and last and last.get("limit"):
+        used, limit = float(last.get("used") or 0), float(last["limit"])
+        lines.append(f"credits         {C['red'] if used >= limit else C['green']}{used:.0f}/{limit:.0f}{C['reset']} "
+                     "at the last reading" + (f"  {C['red']}exhausted{C['reset']}" if used >= limit else ""))
+    try:
+        from .watchdog import load_state as _load_state
+        blind = (_load_state(cfg["root"]) or {}).get("credit_check_problem")
+    except Exception:
+        blind = None
+    if blind and blind.get("adapter") == own["adapter"]:
+        lines.append(f"credits check   {C['red']}cannot read usage{C['reset']} — {blind.get('reason')}  "
+                     f"{C['dim']}the exhaustion alarm is blind until it reads again{C['reset']}")
+    return lines
+
+
+# Findings that mean work has stopped and only a person can restart it. Everything
+# else a doctor finds is an advisory: recorded for the architect, never paged (#40).
+# Harness configuration nobody has seen holds every turn polyctl starts, and only a person
+# may read it and record it as seen (HARNESS-CONFIG). A turn the watchdog refuses to
+# start waits for its configuration to change (TURN-ARGV). A commit no grant bound is
+# the backstop for a harness that can commit around the hook, and was an advisory row
+# nobody sends (LEDGER-HISTORY).
+DOCTOR_RED = {"watchdog-dead", "wake-failed", "transcript-blind", "transcript-missing", "implementer-session",
+              "harness-config", "turn-refused:implementer", "turn-refused:architect", "repository-redirect",
+              "landed-without-grant"}
+
+
+def _doctor_severity(key, text):
+    if key in DOCTOR_RED or (key == "credits-exhaust" and text.startswith("credits exhausted")):
+        return "red"
+    return "yellow"
+
+
+def _doctor_check(cfg, page=False):
+    """Machine-facing doctor: one line per problem, exit 1 if any.
+
+    Run by a person or an agent it pages nobody: it reports to its caller and
+    returns non-zero (#40). Only the scheduled job passes page=True, and then a red
+    finding goes to the human ladder while an advisory is recorded for the
+    architect. On 2026-09-08 two wake turns ran --check by hand and mailed a
+    standing advisory; on 2026-09-15 the scheduled job mailed exhausted credits
+    every six hours although nothing could change before their reset.
+
+    A condition the watchdog raises itself is raised under the watchdog's own alarm
+    (#106). While the watchdog's first cycle after its job came back is due, neither
+    that cycle's conditions nor its silence are paged: that cycle names them (NOTICE-NOISE).
+    """
+    from .watchdog import credit_reset, credits_told, notify
+    root = cfg["root"]
+    project = A.project_key(root)
+    if project_mode(cfg) == "lite":
+        print(ENFORCEMENT_OFF_LITE_LINE)
+    due = _watchdog_first_cycle_due(root) if page else None
+    problems = doctor_problems(cfg)
+    if not problems:
+        print(f"ok {time.strftime('%H:%M')} — no problems")
+        return 0
+    samples = A.credit_samples(root, A.implementer_adapter_id(cfg)) if page else []
+    last = samples[-1] if samples else {}
+    for key, text in problems:
+        print(f"PROBLEM {key}: {text}")
+        if not page:
+            continue
+        if _doctor_severity(key, text) != "red":
+            notify(f"{project}: {key}", text, root, key=f"doctor:{key}", window=3600,
+                   audience="architect")
+            continue
+        shared = DOCTOR_WATCHDOG_ALARMS.get(key)
+        if due and (shared or key == "watchdog-dead"):
+            print(f"  not paged: the watchdog's job came back with this check; its first cycle is due by "
+                  f"{time.strftime('%H:%M', time.localtime(due))}")
+        elif key == "credits-exhaust":
+            notify(f"{project}: {key}", text, root, key=shared["key"], window=shared["window"],
+                   audience="human", level=shared["level"], quiet_until=credit_reset(last.get("reset_at")),
+                   what=credits_told("exhausted", last.get("account")),
+                   evidence=A.notice_evidence("credit_reading", [
+                       {"value": f"{last['used']:.0f}/{last['limit']:.0f}", "at": last.get("at"),
+                        "source": f"GetUsageLimits, account {last.get('account')}"}] if last else []))
+        elif shared:
+            # A failed wake says what the watchdog's own raise of it says, so the same failure rings once
+            # whoever sees it (NOISE-REPEATS); so does harness configuration nobody has seen (HARNESS-CONFIG),
+            # and a refused turn, in the words the watchdog refuses it in (TURN-ARGV), and a commit no grant
+            # bound, in the words the watchdog raises it in (LEDGER-HISTORY).
+            from .watchdog import STATE_DIR, wake_error, wake_failure_told
+            failed = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", project))) \
+                if key == "wake-failed" else None
+            what = wake_failure_told(failed) if failed else _harness_config_told(root) \
+                if key == "harness-config" else text \
+                if key.startswith("turn-refused:") or key == "landed-without-grant" else None
+            notify(f"{project}: {key}", text, root, key=shared["key"], window=shared["window"],
+                   audience="human", level=shared["level"], what=what)
+        else:
+            notify(f"{project}: {key}", text, root, key=f"doctor:{key}", window=3600,
+                   audience="human")
+    return 1
+
+
+# A credit pool is shared: what polyctl reads is polyctl's share, what the account says is everyone's (#95).
+SHARED_POOL_NOTE = ("the account's figure counts every session on it - another project's CLI, an IDE, "
+                    "another orchestrator - and polyctl's transcript holds only polyctl's own turns")
+
+
+def _account_beside_share(cfg, acct=None):
+    """Lines setting the implementer's own account beside polyctl's own transcript share, labelled as such.
+
+    The account is the one the implementer's adapter declares a lookup for. The first shipped
+    adapter's was read whatever the implementer ran, so an implementer on a harness that bills
+    another pool in another unit was shown a credit account it never spends; it has none polyctl
+    can read, and the line says so.
+    """
+    ident = A.implementer_adapter_id(cfg)
+    if not A.usage_api(ident):
+        return [f"{C['dim']}the account: {_no_account(ident)}; what follows is polyctl's transcript only{C['reset']}"]
+    if acct is None:
+        try:
+            acct = A.account_usage(adapter_id=ident)
+        except Exception:
+            acct = None
+    if not acct or acct.get("error") or acct.get("expired") or not acct.get("limit"):
+        return [f"{C['dim']}the account's figure could not be read; what follows is polyctl's transcript "
+                f"only{C['reset']}"]
+    lines = [f"the account: {float(acct['used']):,.0f} of {float(acct['limit']):,.0f} used"]
+    start = acct.get("cycle_start")
+    known = isinstance(start, (int, float)) and not isinstance(start, bool) and 0 < start <= time.time()
+    if known:
+        try:
+            mine = A.turn_costs(cfg, since=start)
+        except Exception:
+            mine = None
+        if mine and mine.get("turns") and float(acct["used"] or 0) > 0:
+            lines.append(f"polyctl's own share, from its transcript: {mine['total']:,.0f} {mine['unit']} "
+                         f"({100 * mine['total'] / float(acct['used']):.0f}% of the account's used); "
+                         f"cycle since {time.strftime('%Y-%m-%d %H:%M', time.localtime(start))}")
+    else:
+        lines.append("the account's cycle start is unknown; no transcript share percentage can be compared")
+    lines.append(f"{C['dim']}{SHARED_POOL_NOTE}{C['reset']}")
+    return lines
+
+
+def _cost_by_feature(cfg, since, window):
+    """`polyctl cost --features`: the implementer's spend each switch caused, over the window it was measured (#10)."""
+    measured = A.feature_costs(cfg, since=since)
+    if not measured["turns"]:
+        print("no transcript turns in this window")
+    else:
+        span = " to ".join(time.strftime("%d %b %H:%M", time.localtime(at))
+                           for at in (measured["from"], measured["to"]))
+        print(f"{C['b']}implementer spend by feature{C['reset']}  {C['dim']}({measured['unit']}; {measured['turns']} "
+              f"turns, {span}{' — ' + window if window else ''}){C['reset']}")
+        for name, spent in measured["features"].items():
+            share = 100 * spent["usage"] / measured["total"] if measured["total"] else 0
+            print(f"  {name:<18}{spent['turns']:>5} turns {spent['usage']:>9.1f}  {share:>5.1f}%")
+    # What runs on another command is counted whether or not this transcript has turns: hunts were left out
+    # when it had none, and the hunter runs on its own command, not the architect's (BUG-HUNTER-2).
+    for name, count in measured["counted"].items():
+        whose = "its own command" if name == "hunter" else "the architect's pool"
+        print(f"  {name:<18}{count:>5} started  {C['dim']}{whose}, not this transcript{C['reset']}")
+    if measured["turns"]:
+        print(f"  {'inventory_review':<18}  {C['dim']}counted with review: a transcript cannot tell them apart"
+              f"{C['reset']}")
+    return 0
+
+
+def _usd(amount):
+    """A dollar figure as the estimate prints it: `unknown` for none, and a spend under a cent never as free."""
+    if amount is None:
+        return "unknown"
+    return "<$0.01" if 0 < amount < 0.005 else f"${amount:,.2f}"
+
+
+def _cost_in_usd(cfg, since, window):
+    """`polyctl cost --usd`: the implementer's tokens priced from the table polyctl ships, labelled an estimate (USD-COST).
+
+    Each model at each rate is a row, its tokens by kind beneath it. A row the table cannot
+    price says `unknown` and why, never $0.00, and the total is then unknown too, with what the
+    priced rows add up to as a floor. The label names the table's version and each vendor's
+    as-of day and source, so a reader sees how old the prices are and where to check them. An
+    implementer billed in another unit - credits - gets no dollar figure: a credit's price in
+    dollars is its plan's, which no table here holds.
+    """
+    c = A.turn_costs(cfg, since=since, by_model=True)
+    if not c["turns"]:
+        print("no transcript")
+        return 0
+    if c["tokens"] is None:
+        print(f"no estimate in US dollars: {A.implementer_adapter_id(cfg) or 'the implementer'} declares no tokens by "
+              f"model and kind that polyctl can price (`telemetry.cost.tokens`); `polyctl cost` counts its spend in its own "
+              f"unit, {c['unit']}")
+        return 0
+    table, problems = A.price_table()
+    if problems:
+        print(f"{C['red']}no estimate in US dollars{C['reset']}: " + "; ".join(problems))
+        return 1
+    estimate = A.usd_estimate(c["tokens"], table)
+    print(f"{C['b']}implementer spend in US dollars: an estimate{C['reset']}  {C['dim']}(list prices, not a bill; "
+          f"{window or 'whole transcript'}){C['reset']}")
+    if not estimate["rows"]:
+        print("  no tokens in this window")
+        return 0
+    order = list(table["kinds"])
+    for row in estimate["rows"]:
+        label = (row["model"] or "a model the transcript does not name") + (f" at {row['rate']}" if row["rate"] else "")
+        why = f"  {C['dim']}{row['why']}{C['reset']}" if row["why"] else ""
+        print(f"  {label:<40}{_usd(row['usd']):>14}{why}")
+        kinds = sorted(row["tokens"], key=lambda kind: order.index(kind) if kind in order else len(order))
+        print(f"    {C['dim']}" + " · ".join(f"{kind} {row['tokens'][kind]:,.0f}" for kind in kinds) + C["reset"])
+    floor = f"  at least {_usd(estimate['priced'])}, what the rows priced add up to" \
+        if estimate["total"] is None and estimate["priced"] else ""
+    print(f"  {C['b']}{'total (estimate)':<40}{_usd(estimate['total']):>14}{C['reset']}{floor}")
+    used = "".join(f"; {vendor} as of {spec['as_of']}, {spec['source']}"
+                   for vendor, spec in estimate["vendors"].items())
+    print(f"  {C['dim']}prices: table version {estimate['version']}{used}{C['reset']}")
+    print(f"  {C['dim']}unknown is never counted as zero: a model, a kind of token or a rate the table does not "
+          f"price{C['reset']}")
+    return 0
+
+
+def cmd_cost(cfg, args):
+    """What the coordination spends: the implementer's turns by what they did.
+
+    The honest answer to "is polyctl bureaucracy" is the share of spend in turns that
+    wrote nothing — ceremony (review/gate commands), coordination (inbox, reports,
+    writer checks) — against turns that wrote product. `wasted` counts turns that
+    ended in a blocked report without a product change: the queue-empty loop.
+    `--usd` prices the same turns' tokens in US dollars, as an estimate (`_cost_in_usd`).
+    """
+    root = cfg["root"]
+    # One time syntax for every command (CLI-ROBUST): `yesterday` or `30m` reached a pattern of
+    # hours and days here and ended in a traceback.
+    when = A.parse_time(args.since) if args.since else None
+    since = when.moment() if when else None
+    window = when.label() if when else None
+    if getattr(args, "features", False):
+        return _cost_by_feature(cfg, since, window)
+    if getattr(args, "usd", False):
+        return _cost_in_usd(cfg, since, window)
+    c = A.turn_costs(cfg, since=since)
+    if not c["turns"]:
+        print("no transcript"); return 0
+    # Nothing spent has no shares: the total was printed as 1, and each class as 0% of it (LEADS-OPS).
+    tot = c["total"]
+    print(f"{C['b']}implementer spend by turn class{C['reset']}  {C['dim']}({c['unit']}; "
+          f"{window or 'whole transcript'}){C['reset']}")
+    # What the subagents a turn started spent is inside that turn's spend; a column says how much, when any did.
+    delegated = any(b.get("delegated") for b in c["by_class"].values())
+    column = f"{'delegated':>11}" if delegated else ""
+    print(f"  {'class':<14}{'turns':>6}{'spend':>10}{'share':>7}{column}   {'wasted turns':>12}")
+    for cls in ("product", "analysis", "ceremony", "coordination"):
+        b = c["by_class"].get(cls)
+        if not b:
+            continue
+        w = f"{b['wasted']} ({b['wasted_usage']:.0f})" if b["wasted"] else ""
+        d = f"{b.get('delegated', 0.0):>11.0f}" if delegated else ""
+        share = f"{100 * b['usage'] / tot:>6.0f}%" if tot else f"{'—':>7}"
+        print(f"  {cls:<14}{b['turns']:>6}{b['usage']:>10.0f}{share}{d}   {w:>12}")
+    d = f"{'':>7}{sum(b.get('delegated', 0.0) for b in c['by_class'].values()):>11.0f}" if delegated else ""
+    # A turn the model never answered is the implementer's work in no class, and in no total of turns.
+    work = [b for cls, b in c["by_class"].items() if cls != A.UNANSWERED]
+    print(f"  {'total':<14}{sum(b['turns'] for b in work):>6}{tot:>10.0f}{d}")
+    unanswered = c["by_class"].get(A.UNANSWERED)
+    if unanswered:
+        print(f"  {C['dim']}{A.UNANSWERED}: {unanswered['turns']} more turn(s) the model never answered, the harness "
+              f"replying in its place with nothing spent{C['reset']}")
+    if delegated:
+        print(f"  {C['dim']}delegated: what the subagents a turn started spent, inside that turn's spend{C['reset']}")
+    overhead = sum(c["by_class"].get(k, {}).get("usage", 0) for k in ("ceremony", "coordination"))
+    for line in _account_beside_share(cfg):
+        print(f"  {line}")
+    told = f"{C['b']}{100 * overhead / tot:.0f}%{C['reset']} of spend" if tot else "no share: nothing was spent"
+    print(f"\n  coordination + ceremony: {told}"
+          f"  ·  polyctl commands: {', '.join(f'{k} {v}' for k, v in c['polyctl_commands'].most_common(6))}")
+    # the reviewer's side: files, wasted, sizes
+    d = os.path.join(root, cfg["reviews"])
+    if os.path.isdir(d):
+        # Each file is looked at once, and one removed since it was listed - a prune running beside this - is
+        # not counted: listed, then looked at again for its time and its size, it ended the command (LEADS-OPS).
+        sizes = {}
+        for name in os.listdir(d):
+            if not name.endswith(".md"):
+                continue
+            try:
+                found = os.stat(os.path.join(d, name))
+            except OSError:
+                continue
+            if not since or found.st_mtime >= since:
+                sizes[name] = found.st_size
+        verdicts = dict(A.reviews(root, cfg["reviews"], limit=10_000))
+        una = sum(1 for name in sizes if verdicts.get(name) in ("UNAVAILABLE", "INVALID"))
+        print(f"  reviews: {len(sizes)} files ({una} unavailable/invalid, cost nothing), "
+              f"{sum(sizes.values()) // 1000}k chars of verdict text; each review sends the slice diff to the reviewer model")
+    return 0
+
+
+def cmd_config(cfg, args):
+    """Read and change what polyctl lets a person set (#74).
+
+    `list` shows every setting with its value, its default and where the value came
+    from; `get` prints one; `set` and `unset` change the project's config, or with
+    --machine the machine's settings. Both are written whole or not at all.
+    """
+    from .storage import ReplacedNotDurable
+    root = cfg["root"]
+    key = getattr(args, "key", None)
+    if args.action == "list":
+        print(f"  {'setting':<32}{'value':<14}{'default':<12}{'from':<9}what it decides")
+        for name, spec in S.SETTINGS.items():
+            value, source, problem = S.resolve(cfg, name)
+            mark = f" {C['red']}!{C['reset']}" if problem else ""
+            colour = C["dim"] if source == "default" else C["b"]
+            print(f"  {name:<32}{colour}{str(value):<14}{C['reset']}{str(spec.default):<12}{source:<9}"
+                  f"{C['dim']}{spec.text}{C['reset']}{mark}")
+            if problem:
+                print(f"  {'':<32}{C['red']}{problem}{C['reset']}")
+        print(f"\n  {C['dim']}project: .polyctl/config.json · machine: {S.machine_path()} · "
+              f"polyctl config set <setting> <value> [--machine]{C['reset']}")
+        return 0
+    if key not in S.SETTINGS:
+        print(f"unknown setting {key!r}; `polyctl config list` shows the names")
+        return 2
+    if args.action == "get":
+        print(project_mode(cfg) if key == "mode" else S.get(cfg, key))
+        return 0
+    machine = bool(getattr(args, "machine", False))
+    if S.SETTINGS[key].scope == "machine" and not machine:
+        print(f"{key} governs the whole machine; set it with --machine")
+        return 2
+    if key == "mode":
+        print("mode is switched with `polyctl mode lite --by <name>` or `polyctl mode full`, not `polyctl config`")
+        return 2
+    by = (getattr(args, "by", None) or "").strip()
+    if key in S.RECORDED:
+        # A setting that weakens a guarantee is a person's act on one project, on the record (REVIEW-TIERS).
+        if machine:
+            print(f"{key} is a person's choice for one project, recorded there; set it without --machine")
+            return 2
+        if not by:
+            print(f"--by is required: {key} changes what a review must be independent of, and a person "
+                  "changes it on the record")
+            return 2
+        if by.lower() in _agent_names(cfg):
+            print(f"--by names an agent or a role ({by}); changing {key} is a person's act")
+            return 2
+    elif by:
+        print(f"--by records who changed a setting that weakens a guarantee ({', '.join(S.RECORDED)}); "
+              f"{key} is not one")
+        return 2
+    if args.action == "set":
+        try:
+            value = S.parse(key, args.value)
+        except (TypeError, ValueError) as exc:
+            print(f"{C['red']}not changed{C['reset']}: {exc}")
+            return 2
+    else:
+        value = S._MISSING
+    if machine:
+        try:
+            S.write_machine(S.assign(S.machine_settings(), key, value))
+        except ReplacedNotDurable as exc:
+            print(f"{C['red']}{exc}{C['reset']}")
+            return 1
+        except OSError as exc:
+            print(f"{C['red']}not changed{C['reset']}: {exc}")
+            return 1
+    else:
+        document = A.project_config_document(root)
+        if document["problem"]:
+            # Rebuilding a config polyctl cannot read would drop what it held (#56).
+            print(f"{C['red']}not changed{C['reset']}: {document['problem']}")
+            return 1
+        try:
+            A.write_project_config(root, json.dumps(S.assign(document["config"], key, value), indent=2,
+                                                    ensure_ascii=False))
+        except ReplacedNotDurable as exc:
+            print(f"{C['red']}{exc}{C['reset']}; no opt-in was recorded; retry this command to record one if required")
+            return 1
+        except (OSError, ValueError) as exc:
+            print(f"{C['red']}not changed{C['reset']}: {exc}")
+            return 1
+        if key in S.RECORDED:
+            # Written after the config: a value with no record is not in force, never the other way round.
+            try:
+                A.record_opt_in(root, key, None if value is S._MISSING else value, by)
+            except Exception as exc:
+                print(f"{C['red']}not recorded{C['reset']}: {exc}; {key} is not in force until it is")
+                return 1
+        cfg = dict(A.load_config(root), root=root)
+    value, source, _ = S.resolve(cfg, key)
+    print(f"{key} = {value!r} ({source})" + (f", recorded as set by {by}" if key in S.RECORDED else ""))
+    if key == "review.transport" and value != S.default(key):
+        # How a review reaches its routes is part of the reviewer a person accepts, as the routes are (REVIEW-PATH-HIGHS).
+        print(f"{C['dim']}a review starts its routes this way once a person has read the change: "
+              f"polyctl harness seen --by <name>{C['reset']}")
+    return 0
+
+
+def _feature_cell(measured, key):
+    """One feature's measured cost as a short cell: a share of the implementer's spend, or a count (#10)."""
+    if not measured:
+        return "—"
+    if key in measured["counted"]:
+        return f"{measured['counted'][key]} started"
+    if key not in measured["features"] or not measured["total"]:
+        return "with review" if key == "inventory_review" else "—"
+    return f"{100 * measured['features'][key]['usage'] / measured['total']:.1f}%"
+
+
+def cmd_features(cfg, args):
+    """The switches and what each costs. All off: deterministic polyctl, zero model spend."""
+    from .storage import ReplacedNotDurable
+    from . import features as F
+    root = cfg["root"]
+    if args.action in ("on", "off"):
+        if args.key not in F.FEATURES:
+            print(f"unknown feature {args.key}; one of {', '.join(F.ORDER)}"); return 2
+        # A switch that weakens a guarantee is turned off by a person, on the record (FEATURE-RECORDED).
+        by = (getattr(args, "by", None) or "").strip()
+        if args.key in F.RECORDED and args.action == "off":
+            if not by or not by.isprintable() or len(by) > 80:
+                print(f"--by is required: turning {args.key} off lets a commit land without that review, and a person "
+                      "does it on the record, in one line of at most 80 characters")
+                return 2
+            if by.lower() in _agent_names(cfg):
+                print(f"--by names an agent or a role ({by}); turning {args.key} off is a person's act")
+                return 2
+        elif by and args.key not in F.RECORDED:
+            print(f"--by records who turned off a switch that weakens a guarantee ({', '.join(F.RECORDED)}); "
+                  f"{args.key} is not one")
+            return 2
+        try:
+            F.set_switch(root, args.key, args.action == "on")
+        except ReplacedNotDurable as exc:
+            print(f"{C['red']}{exc}{C['reset']}; no opt-in was recorded; retry this command to record one if required")
+            return 1
+        except (OSError, ValueError) as exc:
+            print(f"{C['red']}not changed{C['reset']}: {exc}")
+            return 1
+        if args.key in F.RECORDED:
+            # Written after the config, and on as well as off: a value with no record is not in force, and an
+            # earlier off is never one a later hand edit can stand on.
+            try:
+                A.record_opt_in(root, f"features.{args.key}", args.action == "on", by)
+            except Exception as exc:
+                print(f"{C['red']}not recorded{C['reset']}: {exc}; {args.key} stays on until it is")
+                return 1
+        cfg = dict(A.load_config(root), root=root)
+    on = F.switches(cfg)
+    for key in F.unrecorded(cfg):
+        print(f"{C['yellow']}{key} is off in .polyctl/config.json with no person's record, so it stays on{C['reset']}: "
+              f"polyctl features off {key} --by <name>")
+    try:
+        measured = A.feature_costs(cfg, since=time.time() - 7 * 86400)
+    except Exception:
+        measured = None
+    print(f"  {'feature':<18}{'':<4}{'last 7 days':>13}  what it spends")
+    for k in F.ORDER:
+        label, _, what = F.FEATURES[k]
+        state = f"{C['green']}on {C['reset']}" if on[k] else f"{C['dim']}off{C['reset']}"
+        print(f"  {k:<18}{state:<4}{_feature_cell(measured, k):>13}  {C['dim']}{what}{C['reset']}")
+    print(f"\n  {C['dim']}measured from the implementer's transcript and the watchdog's logs, never estimated; "
+          f"all off = board, mail, gates, commit-ok, alarms, pings and hooks only; `polyctl cost --features` "
+          f"for the window{C['reset']}")
+    print(f"  {C['dim']}polyctl features on|off <feature>{C['reset']}")
+    return 0
+
+
+def _agent_names(cfg):
+    """Names that belong to agents or roles, never to the person a waiver or a person's review must name.
+
+    Every actor in the role table counts, not only those holding a role now: an actor
+    waiting for the next slice is an agent all the same (REVIEW-TIERS).
+    """
+    names = {"architect", "implementer", "reviewer", "watchdog", "polyctl", "agent", "human"}
+    for role in ("implementer", "architect"):
+        block = cfg.get(role) or {}
+        names.update(str(block.get(key) or "") for key in ("name", "adapter", "session"))
+    primary = cfg.get("reviewer") or {}
+    names.update(str(route.get("id") or "") for route in [primary] + list(primary.get("fallbacks") or [])
+                 if isinstance(route, dict))
+    actors = cfg.get("actors") if isinstance(cfg.get("actors"), dict) else {}
+    for actor, block in actors.items():
+        names.add(str(actor))
+        if isinstance(block, dict):
+            names.update(str(block.get(key) or "") for key in ("id", "name", "adapter", "session"))
+    return {name.strip().lower() for name in names if name.strip()}
+
+
+def cmd_waive(cfg, args):
+    """A person bypasses a gate for a slice, on the record. Reconciled later by `polyctl catchup`."""
+    root = cfg["root"]
+    if not args.why:
+        print("--why is required: a waiver without a reason cannot be reconciled"); return 2
+    # A waiver covers one slice for a bounded time and names a person (#67).
+    if not args.slice or args.slice == "*":
+        print("--slice is required: a waiver covers one slice, never every slice"); return 2
+    if not (args.by or "").strip():
+        print("--by is required: name the person who authorises this waiver"); return 2
+    if args.by.strip().lower() in _agent_names(cfg):
+        print(f"--by names an agent or a role ({args.by}); a waiver is a person's act"); return 2
+    hours = args.hours if args.hours is not None else S.get(cfg, "waivers.default_hours")
+    longest = S.get(cfg, "waivers.max_hours")
+    if not 0 < hours <= longest:
+        print(f"--hours must be above 0 and at most {longest}"); return 2
+    try:
+        rec = A.waive(root, args.gate, args.slice, args.why, by=args.by.strip(), hours=hours)
+    except Exception as exc:
+        print(f"{C['red']}waiver not recorded{C['reset']}: {exc}"); return 1
+    print(f"{C['yellow']}{C['b']}waived{C['reset']} {args.gate} for {rec['slice']} ({rec['id']}) by {rec['by']} at HEAD {rec['head'][:8]}")
+    print(f"{C['dim']}commit-ok honours it; `polyctl catchup` runs the missed {args.gate} against the landed range and closes it.{C['reset']}")
+    A.record_notice(root, f"waiver {args.gate}", f"{rec['slice']}: {args.why[:120]} ({rec['by']})", sent=False, key="waiver")
+    return 0
+
+
+def _catchup_statement(cfg, args):
+    """(what a person states for this run, or None; why the command is refused, or None).
+
+    A person may name the family that wrote the waived ranges (--author-family) and the
+    waived slices that were pure moves (--move-only), or replace the commit claims with
+    --boundary (TRIAGE-4-REST). Each is a person's statement. It is
+    recorded with what it decides, beside what polyctl can check about who made it - the login
+    and whether a terminal was attached - as a waiver is. A statement of moves closes
+    nothing by itself: a waiver closes only on the move proof, run on what landed (#44).
+    """
+    family = str(getattr(args, "author_family", None) or "").strip().lower()
+    boundary = bool(getattr(args, "boundary", None))
+    named = getattr(args, "move_only", None)
+    moves = list(dict.fromkeys(part.strip() for part in str(named or "").split(",") if part.strip()))
+    by = str(getattr(args, "by", None) or "").strip()
+    if named is not None and (not moves or not all(move.isprintable() and len(move) <= 200 for move in moves)):
+        return None, "--move-only names waived slices as the board writes them, separated by commas"
+    if not family and not moves and not boundary:
+        return None, ("--by names the person who states --author-family, --move-only or --boundary; give one with it"
+                      if by else None)
+    if family and not A.re.fullmatch(r"[a-z0-9][a-z0-9._:-]{0,63}", family):
+        return None, "--author-family is one family name, such as the lowercase id its model family goes by"
+    if not by and boundary:
+        return None, "--by is required with --boundary: name the person who replaces the commit claims"
+    if not by:
+        return None, ("--by is required with --author-family: name the person who says which family wrote the ranges"
+                      if family else "--by is required with --move-only: name the person who says those slices "
+                                     "only moved code")
+    if by.lower() in _agent_names(cfg):
+        what = ("replacing the commit claims" if boundary else
+                "naming the author's family" if family else "saying which slices only moved code")
+        return None, f"--by names an agent or a role ({by}); {what} is a person's statement"
+    user, interactive = A._login_and_terminal()
+    return {"family": family or None, "move_only": moves, "by": by, "user": user, "interactive": interactive}, None
+
+
+def _catchup_reviewer(cfg, actor):
+    """(cfg, None) with `actor` holding the reviewer role for this run alone, or (cfg, why it may not) (CATCHUP-REVIEWER).
+
+    Runs over different slices can then go side by side, each with its own reviewer, as the machine's
+    load and each platform's quota allow. Only an actor `polyctl role set reviewer` composed may stand in,
+    and never the implementer's: the table is read, not changed, and every rule a review applies to
+    the reviewer role - the author's family, the implementer's session and engine, the flags that
+    keep a reviewer from writing - applies to the actor as it is.
+    """
+    if not actor:
+        return cfg, None
+    actors, roles, _ = A.role_table(cfg)
+    block = actors.get(actor)
+    if not isinstance(block, dict):
+        composed = ", ".join(sorted(name for name, item in actors.items() if item.get("composed"))) or "none"
+        return cfg, f"--reviewer {actor}: the project's table has no such actor; its reviewer actors: {composed}"
+    if actor == roles.get("implementer"):
+        return cfg, f"--reviewer {actor}: {actor} is the implementer, and no actor reviews its own work"
+    if not block.get("composed"):
+        return cfg, f"--reviewer {actor}: only an actor `polyctl role set reviewer` composed may review, and {actor} was not"
+    print(f"{C['dim']}this run reviews with {actor} in place of {roles.get('reviewer') or 'the reviewer role'}; "
+          f"the table is unchanged{C['reset']}")
+    return dict(cfg, reviewer=dict(block, actor=actor)), None
+
+
+def _catchup_author(item, statement):
+    """What a waived range's review is told about who wrote it: its grant's record, and a person's statement."""
+    recorded = item.get("author") if isinstance(item.get("author"), dict) else {}
+    author = {key: recorded.get(key) for key in ("role", "actor", "adapter")}
+    stated = {key: statement[key] for key in ("family", "by", "user", "interactive")} \
+        if statement and statement.get("family") else None
+    author.update(family=str(recorded.get("family") or "").strip().lower() or None,
+                  grant=item.get("grant"), stated=stated)
+    return author
+
+
+def _catchup_reviewer_note(cfg, author):
+    """Why the configured reviewers may not review a range this author wrote, or None; a plan names it early."""
+    if M.is_strict(cfg):
+        try:
+            _resolve_matrix(cfg, require_independent=True, author_families=_author_families(author))
+        except M.MatrixError as exc:
+            return "; ".join(exc.problems[:2])
+        return None
+    reviewer = cfg.get("reviewer") or {}
+    if not reviewer.get("argv"):
+        return "no reviewer is configured" + _waiting_reviewer(cfg)
+    refused = _reviewer_ineligible(cfg, reviewer, author=author)
+    return f"the reviewer may not review it: {refused}" if refused else None
+
+
+def _waiting_reviewer(cfg):
+    """'; <actor> is assigned the reviewer role and holds it once <slice> leaves running', or '' (OCT1-FIXES)."""
+    waiting, after = A.pending_roles(cfg.get("root"), cfg)
+    return (f"; {waiting['reviewer']} is assigned the reviewer role and holds it once {after} leaves running"
+            if waiting.get("reviewer") else "")
+
+
+def _catchup_mail(root, cfg, waiver, rng, artefact):
+    """The architect's decision request after a waived range is reviewed NEEDS_CHANGES.
+
+    Named and addressed as every message polyctl writes (#31): to whoever holds the architect
+    role, from the role this command runs for, or from a person when polyctl did not start it.
+    """
+    implementer, architect = A.mail_names(cfg)
+    sender = {"implementer": implementer, "architect": architect}.get(A.invoking_role(), "human")
+    # The waiver's fields come from a ledger anyone on the machine can edit: one line each (#55).
+    slice_id, wid, by, why = (A.review_header_value(waiver.get(key) or "") for key in ("slice", "id", "by", "why"))
+    name = (f"{time.strftime('%Y%m%d-%H%M')}-{sender}-to-{architect}-REVIEW-"
+            f"{A.safe_slug(str(waiver.get('slice') or '').lower(), 'slice')}-needs-changes.md")
+    findings = A.review_header_value(f"{cfg['reviews']}/{artefact or ''}")
+    body = (f"# The waived review of {slice_id} needs changes\n\n## Decision required\n\n"
+            f"The retrospective review of {rng}, which landed under waiver {wid} ({by}: {why}), "
+            f"returned NEEDS_CHANGES. The findings are in {findings}.\n\n"
+            "The waiver closes on this review. Decide the fix slice.\n")
+    return A.write_mail(root, cfg, name, body, {"kind": "review", "class": "needs-decision", "from": sender,
+                                                 "to": architect, "slice": slice_id})
+
+
+def _catchup_undecided(root, targets):
+    """{waiver id: verdict} for each waived range whose newest review of exactly that range decided nothing.
+
+    A review that ends UNAVAILABLE or INVALID keeps its waiver open, and the next run met
+    that waiver first again: runs of --limit N whose first N reviews kept failing reviewed
+    nothing else, however often they were repeated (OCT1-FIXES). A ledger that cannot be
+    read orders nothing; the review that needs it says so.
+    """
+    from .storage import read_chained_jsonl
+    try:
+        rows = read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)
+    except Exception:
+        return {}
+    newest = {row.get("commits"): row.get("verdict") for row in rows
+              if isinstance(row, dict) and row.get("kind") == "commit-range"}
+    ranges = {item["waiver"].get("id"): f"{item['start']}..{item['end']}" for item in targets if item.get("landed")}
+    return {wid: newest[rng] for wid, rng in ranges.items() if newest.get(rng) in ("UNAVAILABLE", "INVALID")}
+
+
+def _catchup_exit(failed, started, decided):
+    """The exit code of a catch-up run: what failed, reviews that decided nothing, or 0 (CATCHUP-POLISH).
+
+    Rehearsing the catch-up planned for 2026-10-01, a run whose every review ended
+    UNAVAILABLE exited 0, as a run that closed ten waivers did, so a person or a script
+    repeating --limit could not tell a reviewer that decides nothing from progress. 1 stays
+    what could not be written or read. 3 is reviews started and none deciding anything,
+    whatever else closed, as `polyctl review` exits 3 when no reviewer could review. Anything else
+    is 0: progress, or nothing to do, since an idle catch-up is no failure and a wake turn, a
+    `set -e` script and a person all read a nonzero exit as one.
+    """
+    if failed:
+        return 1
+    return 3 if started and not decided else 0
+
+
+def cmd_catchup(cfg, args):
+    """Replay what could not run: waived reviews, deferred wakes and nudges.
+
+    A waived range is reviewed by a model family other than the one that wrote it (#65):
+    the family the grant under the waiver recorded, and any a person names with
+    --author-family and --by. With neither, its review is refused and the waiver stays
+    open. The reviewer judges the range against what its commit messages claim, unless a
+    person gives --boundary, and the review is recorded as the waived slice's. A range whose
+    grant recorded a move proof, or whose slice a person names with --move-only and --by, is
+    not reviewed: the proof runs on what landed, and the waiver closes on it or stays open
+    with the reason (#44). A range with neither is reviewed, whatever its diff looks like.
+    --plan says what a run would do and changes nothing; --slice and --limit bound a run. A
+    review stays synchronous: a waiver closes in the same run, on the review recorded for
+    exactly its range, or stays open. A range whose last review decided nothing waits behind
+    the rest, and once a review finds the reviewer unavailable the run starts no other. --limit
+    bounds the reviews a run starts in the same way: what needs no review is still done.
+
+    A person's review of exactly a waived range (`polyctl person-review --commits <range>`) closes
+    its waiver with no reviewer started (REVIEW-TIERS): a person is of no model family, so the
+    author-family rule holds whichever family wrote the range. No same-family tier reaches a
+    range: its grant recorded the family that wrote it, never the model.
+
+    The exit code says what a run did (CATCHUP-POLISH): 3 when it started reviews and none of
+    them decided anything, whatever else it closed; 1 when a close, a ledger or a decision
+    request could not be written or read; 2 when it is refused; otherwise 0, for progress and
+    for nothing to do alike. --plan exits 0, or 1 when the waivers cannot be read.
+    """
+    from types import SimpleNamespace
+    from .storage import LedgerCorruption
+    root = cfg["root"]
+    plan = bool(getattr(args, "plan", False))
+    limit = getattr(args, "limit", None)
+    only = getattr(args, "slice", None)
+    statement, refusal = _catchup_statement(cfg, args)
+    if refusal:
+        print(refusal)
+        return 2
+    cfg, refusal = _catchup_reviewer(cfg, getattr(args, "reviewer", None))
+    if refusal:
+        print(refusal)
+        return 2
+    if limit is not None and limit < 1:
+        print("--limit is at least 1: the number of reviews this run may start")
+        return 2
+    did = started = decided = held = waiting = 0
+    unavailable = None                          # the waiver whose review found the reviewer unavailable
+    failed = []
+    totals = {"waivers": 0, "commits": 0, "lines": 0, "unnamed": 0, "proven": 0}      # what --plan sums up
+
+    def close(wid, outcome, evidence=None):
+        # A waiver retires on a durable append or not at all; a failure is reported
+        # and fails the command, never counted as handled (#67).
+        try:
+            A.close_waiver(root, wid, outcome, evidence=evidence)
+            return True
+        except Exception as exc:
+            print(f"  {C['red']}could not close {wid}{C['reset']}: {exc}")
+            failed.append(wid)
+            return False
+
+    def request(waiver, rng, artefact):
+        # The architect's decision request is written before its waiver closes: closed first, a request
+        # that could not be written left no open waiver, and no later run wrote it (LEADS-OPS).
+        try:
+            _catchup_mail(root, cfg, waiver, rng, artefact)
+            return True
+        except OSError as exc:
+            print(f"  {C['red']}the architect's decision request was not written{C['reset']}: {exc}; "
+                  f"{waiver['id']} stays open, and the next run writes it")
+            failed.append(waiver["id"])
+            return False
+
+    if plan:
+        print(f"{C['b']}catchup plan{C['reset']}{C['dim']}: nothing is reviewed or written{C['reset']}")
+    try:
+        targets = A.review_waiver_ranges(root)
+    except Exception as exc:
+        print(f"  {C['red']}waivers cannot be read{C['reset']}: {exc}")
+        targets = []
+        failed.append("ledger")
+    moves = (statement or {}).get("move_only") or []
+    open_slices = {item["waiver"].get("slice") for item in targets}
+    # A ledger that cannot be read says nothing about which slices it names (OCT1-FIXES).
+    for name in [] if "ledger" in failed else moves:
+        # A statement about a slice with nothing to prove is reported, never dropped quietly.
+        if name not in open_slices:
+            print(f"  --move-only {name}: no open review waiver names it; nothing is proven or closed")
+        elif only and name != only:
+            print(f"  --move-only {name}: --slice {only} bounds this run; it waits for another")
+    if only:
+        targets = [item for item in targets if item["waiver"].get("slice") == only]
+    undecided = _catchup_undecided(root, targets)
+    targets = sorted(targets, key=lambda item: item["waiver"].get("id") in undecided)
+    for item in targets:
+        w = item["waiver"]
+        label = f"{w['id']} ({w['slice']})"
+        totals["waivers"] += 1
+        if item["problem"]:
+            print(f"  {label}: {item['problem']}; keeping it open")
+            continue
+        if item.get("unused"):
+            if not item.get("expired"):
+                print(f"  {label}: nothing was granted under it yet; keeping it open until it expires")
+            elif plan:
+                print(f"  {label}: expired unused; a run closes it")
+            elif close(w["id"], "nothing was granted under it before it expired"):
+                print(f"  {label}: expired unused; closed")
+                did += 1
+            continue
+        if not item["landed"]:
+            if item["newest"]:
+                print(f"  {label}: nothing landed yet after the waiver; keeping it open")
+            elif plan:
+                print(f"  {label}: no commits landed before the next waiver; a run closes it")
+            elif close(w["id"], "no commits landed before the next waiver was opened"):
+                print(f"  {label}: no commits landed before the next waiver; closed")
+                did += 1
+            continue
+        rng = f"{item['start'][:12]}..{item['end'][:12]}"
+        lines = A.range_changed_lines(root, item["start"], item["end"])
+        size = f"{item['landed']} commit(s), {'unknown' if lines is None else lines} changed line(s)"
+        granted_proof = item.get("move_only")
+        # Older grants could record a different running slice's proof (TRIAGE-4-REST).
+        if not isinstance(granted_proof, dict) or granted_proof.get("slice") != w.get("slice"):
+            granted_proof = None
+        stated = w.get("slice") in moves
+        if granted_proof or stated:
+            # A semantic review of a proven pure move reads nothing the proof did not. Its grant
+            # recorded the proof for the tree it granted, or a person states the slice only moved
+            # code; either way what landed is proven here, and the waiver closes on that proof
+            # alone, with no reviewer, or stays open. A statement never closes one by itself (#44).
+            claimed = " and ".join(part for part in ("its grant recorded a pure move" if granted_proof else "",
+                                                     f"{statement['by']} states it is a pure move" if stated else "")
+                                   if part)
+            moved, problems = A.range_move_proof(root, item["start"], item["end"])
+            if problems:
+                print(f"  {label}: {rng}, {size}: {claimed}, and the landed range is not one: "
+                      f"{'; '.join(problems[:3])}" + (f" and {len(problems) - 3} more" if len(problems) > 3 else "")
+                      + "; keeping it open")
+                continue
+            totals["proven"] += 1
+            proof = {"proof": "split-moves", "commits": f"{item['start']}..{item['end']}", "grant": item.get("grant"),
+                     "moved": len(moved), "paths": sorted({f"{source} -> {target}" for _, source, target in moved})}
+            if granted_proof:
+                proof["recorded"] = granted_proof
+            if stated:
+                proof["stated"] = {key: statement[key] for key in ("move_only", "by", "user", "interactive")}
+            proven = f"{len(moved)} definition(s) moved byte for byte on the landed range"
+            if plan:
+                print(f"  {label}: {rng}, {size}: {claimed}; closes by proof, {proven}; no reviewer")
+            elif close(w["id"], f"closed by proof: {proven}; {claimed}", proof):
+                print(f"  {label}: {rng}, {size}: {claimed}; {proven}; closed by proof, with no reviewer")
+                did += 1
+            continue
+        try:
+            person = _person_range_review(root, cfg, f"{item['start']}..{item['end']}")
+        except Exception as exc:
+            person = None
+            print(f"  {C['red']}review ledger cannot be read{C['reset']}: {exc}")
+        if person:
+            # A person is of no model family, so a person's review of exactly this range holds whichever
+            # family wrote it: the waiver closes on it, with no reviewer started (REVIEW-TIERS).
+            who = _person_line(person.get("person"))
+            if plan:
+                print(f"  {label}: {rng}, {size}: {person['verdict']} in a person's review ({who}); a run closes on it")
+            elif (person["verdict"] != "NEEDS_CHANGES" or request(w, rng, person.get("artefact"))) \
+                    and close(w["id"], f"reviewed by a person: {person['verdict']}",
+                              {"review": person.get("artefact"), "person": person.get("person")}):
+                print(f"  {label}: {rng}, {size}: closed on a person's review ({who}): {person['verdict']}")
+                did += 1
+            continue
+        author = _catchup_author(item, statement)
+        families = _author_families(author)
+        if not families:
+            # A review by the family that wrote the range would not be independent (#65).
+            totals["unnamed"] += 1
+            landed_by = " ".join(str(author[key]) for key in ("role", "actor") if author.get(key))
+            print(f"  {label}: {rng}, {size}: the family of the model that wrote it is not established"
+                  + (f" (landed by the {landed_by})" if landed_by else "")
+                  + "; a person names it with --author-family <family> --by <name>, or reviews the range: "
+                    "polyctl person-review --commits <range> --by <name>; keeping it open")
+            continue
+        if unavailable:
+            # Every review after one that found the reviewer unavailable waits on it too; each
+            # could spend the review's whole time budget finding that out again (OCT1-FIXES).
+            held += 1
+            continue
+        if limit is not None and started >= limit:
+            # --limit bounds the reviews a run starts, as an unavailable reviewer does, and nothing else. The
+            # run stopped at the limit instead, and said a waiver nothing was granted under waited for the
+            # next run, which would close it unreviewed (CATCHUP-POLISH).
+            waiting += 1
+            continue
+        started += 1
+        totals["commits"] += item["landed"]
+        totals["lines"] += lines or 0
+        last = (f"; its last review ended {undecided[w['id']]}, so it comes after the ranges no review has "
+                "failed on") if w["id"] in undecided else ""
+        if plan:
+            note = _catchup_reviewer_note(cfg, author)
+            print(f"  {label}: {rng}, {size}: review by a family other than {', '.join(families)}"
+                  + (f"; {note}" if note else "") + last)
+            continue
+        print(f"  {label}: reviewing its own landed range {rng}, {size}, by a family other than {', '.join(families)}"
+              + last)
+        # No deadline is passed: a reviewer's time is review_timeout per call, and a silent
+        # one is killed after review.stall_minutes (#63, #25). The range's commit messages
+        # are the statement it is judged against; a person's --boundary replaces them.
+        ns = SimpleNamespace(boundary=args.boundary or f"waived review for {w['slice']}: {w['why']}",
+                             paths=None, commits=f"{item['start']}..{item['end']}", author=author,
+                             claims=not args.boundary, range_slice=w["slice"],
+                             boundary_by={key: statement[key] for key in ("by", "user", "interactive")}
+                             if args.boundary else None)
+        # The row count is only a readability check: without it a broken ledger spent
+        # a reviewer call, or let an unchanged range close unreviewed (CATCHUP-ROW).
+        try:
+            A.review_row_count(root)
+        except Exception as exc:
+            print(f"  {C['red']}review ledger cannot be read{C['reset']}: {exc}; {w['id']} stays open")
+            failed.append(w["id"])
+            continue
+        try:
+            code = cmd_review(cfg, ns)
+        except (OSError, LedgerCorruption) as exc:
+            # A ledger or artefact can fail after the pre-check; keep this waiver for
+            # another run and still attempt the later ranges (CATCHUP-ROW).
+            print(f"  {C['red']}review could not be recorded{C['reset']}: {exc}; "
+                  f"{w['id']} stays open; retry catch-up once the review can be recorded")
+            failed.append(w["id"])
+            continue
+        # The exit code is not a verdict: a review that refused to run exits 1 or 2
+        # too. Counting ledger rows took another review of the same range and author
+        # for this call's; cmd_review hands back the row it recorded (CATCHUP-ROW).
+        recorded = getattr(ns, "recorded", None) or {}
+        verdict = recorded.get("verdict")
+        if verdict in ("APPROVED", "NEEDS_CHANGES") or (verdict is None and code == 0):
+            decided += 1                        # the review decided what becomes of the waiver
+        if verdict == "APPROVED":
+            if close(w["id"], "reviewed: APPROVED"):
+                did += 1
+        elif verdict == "NEEDS_CHANGES":
+            if request(w, rng, recorded.get("artefact")) and close(w["id"], "reviewed: NEEDS_CHANGES — fix slice needed"):
+                did += 1
+        elif verdict is None and code == 0 and A.range_unchanged(root, item["start"], item["end"]) is not True:
+            # A review that exits 0 with no verdict recorded for exactly this range closes it only when the
+            # range has no net change; one whose record polyctl cannot find, or a range it cannot size, was taken
+            # for an empty one and its waiver retired unreviewed (WAIVER-BOUND-2). No net change is the same
+            # tree at both ends: a range no line of which changed, a binary file's, can still change
+            # (WAIVER-BOUND-3).
+            print(f"  the review of {rng} recorded no verdict polyctl can find; {w['id']} stays open")
+            failed.append(w["id"])
+        elif verdict is None and code == 0:
+            if close(w["id"], "nothing to review: the landed range has no net change"):
+                print(f"  {label}: the landed range has no net change; closed")
+                did += 1
+        elif verdict == "INVALID":
+            # An INVALID review exits 3 as an unavailable one does: the verdict tells them apart (OCT1-FIXES).
+            print(f"  the reviewer returned no valid verdict; {w['id']} stays open")
+        elif verdict == "UNAVAILABLE":
+            # An unavailable reviewer is recorded so before `polyctl review` exits 3. One that exits 3 with nothing
+            # recorded asked no reviewer - another review of the range held its sections - and was told as an
+            # unavailable reviewer; it is told as what it is, and holds no other review (LEADS-OPS).
+            print(f"  reviewer still unavailable; {w['id']} stays open")
+            unavailable = w["id"]
+        elif code == 2:
+            print(f"  reviewer configuration invalid, or the range cannot be reviewed; {w['id']} stays open")
+        else:
+            print(f"  no review was recorded (exit {code}); {w['id']} stays open")
+    if held:
+        print(f"  the reviewer was unavailable for {unavailable}: this run started no other review, and "
+              f"{held} waiver(s) wait for a run in which it answers")
+    if waiting:
+        print(f"  --limit {limit}: {waiting} waiver(s) wait for a later run to review them")
+    if plan:
+        print(f"totals: {totals['waivers']} waiver(s); {started} review(s) of {totals['commits']} commit(s) and "
+              f"{totals['lines']} changed line(s); {totals['unnamed']} refused until a person names the author's "
+              f"family; {totals['proven']} closed by proof, with no reviewer; "
+              f"{len(A.deferred_open(root))} deferred wake(s) and nudge(s) a run replays")
+        return 1 if failed else 0
+    # A deferral is replayed by a cycle that runs with it in view, and closed after it: closed first, a cycle
+    # that then did not run - no watchdog, or another cycle holding the project - left it forgotten (JOURNAL-4).
+    ran = False
+    from . import watchdog as W
+    # What was open before the cycle: the cycle closes what it did itself, before catchup asks (JOURNAL-4-3).
+    before = {row["id"]: row for row in A.deferred_open(root)}
+    if A.heartbeat_age(root) is None:
+        # A cycle writes this project's heartbeat. Where no watchdog runs, that file
+        # goes stale within minutes and every sibling watchdog reports it as dead.
+        print(f"{C['dim']}no watchdog runs for this project; skipping the cycle{C['reset']}")
+    else:
+        print(f"{C['dim']}running one watchdog cycle to act on what is now possible{C['reset']}")
+        cycle = SimpleNamespace(root=root, idle_minutes=S.get(cfg, "watchdog.idle_minutes"), dry_run=False)
+        W.run(cycle)
+        ran = bool(getattr(cycle, "ran", False))
+        if not ran:
+            print(f"{C['dim']}another cycle holds this project; what was deferred waits for it{C['reset']}")
+    # A deferral closes on the work it waited for, started after it by this cycle or an earlier one. One the
+    # cycle still could not do - it deferred it again, or wrote it - stays open.
+    W._close_deferred_done(root, W.load_state(root))
+    standing = {row["id"] for row in A.deferred_open(root)}
+    for r in (row for rid, row in before.items() if rid not in standing):
+        print(f"  deferred {r['kind']} ({r.get('reason', '')}) since {time.strftime('%d %b %H:%M', time.localtime(r['at']))}: done")
+        did += 1
+    for r in A.deferred_open(root):
+        print(f"  deferred {r['kind']} ({r.get('reason', '')}) since {time.strftime('%d %b %H:%M', time.localtime(r['at']))}"
+              + ("; stays open: its cycle could not do it yet" if ran else "; stays open: no cycle ran"))
+    code = _catchup_exit(failed, started, decided)
+    print(f"{C['green']}catchup{C['reset']} handled {did} item(s)"
+          + (f"; none of the {started} review(s) it started decided anything" if code == 3 else ""))
+    return code
+
+
+def cmd_pings(cfg, args):
+    """Dead man's switch: an external service that alarms when the pings stop."""
+    root = cfg["root"]
+    if args.action == "setup":
+        return _pings_setup(root, args)
+    url = A.ping_url(root)
+    if args.action == "test":
+        ok = A.ping(root)
+        print(f"{C['green']}pinged{C['reset']}" if ok else f"{C['red']}no ping{C['reset']} ({'no url' if not url else 'request failed'})")
+        return 0 if ok else 1
+    if not url:
+        print(f"ping url: {C['yellow']}not configured{C['reset']}")
+        return 0
+    print(f"ping url: {_ping_url_shown(url)}  {C['dim']}(the rest is the secret, in {A.pings_path()}){C['reset']}")
+    return 0
+
+
+def _pings_setup(root, args):
+    """`polyctl pings setup`: its steps, then the ping URL asked at the terminal and not shown, or read from the variable a
+    script names.
+
+    The steps had a person type the URL on a command line, `polyctl pings setup --url https://hc-ping.com/<uuid>`: the
+    shell's history and the process list kept it, and whoever reads the check's UUID can ping it, so a dead watchdog
+    looks alive. polyctl asks for it now as `polyctl telegram setup` asks for the bot token (LEADS-SECRETS) and `polyctl email setup`
+    for an account's password (EMAIL-SETUP-PROMPT); neither ever took its secret on a command line, and a URL given
+    with --url is refused unsaved (SECRETS-2).
+    """
+    url_env = getattr(args, "url_env", None)
+    if getattr(args, "url", None) is not None:
+        print(f"{C['red']}not saved{C['reset']}: a ping URL on a command line stays in the shell's history and the "
+              "process list, where whoever reads it can ping the check; run polyctl pings setup to paste it unseen, or "
+              "name the variable that holds it with --url-env NAME")
+        return 2
+    if url_env:
+        # Read once from the environment, for a script.
+        url = os.environ.get(url_env)
+        if not url:
+            print(f"{C['red']}not saved{C['reset']}: ${url_env} is {'empty' if url == '' else 'not set'}")
+            return 2
+    else:
+        print("1. Create a check at https://healthchecks.io (free) with a 15-minute period and a 10-minute grace.\n"
+              "2. Copy its ping URL and paste it when polyctl asks. It is not shown: whoever has the check's UUID can ping\n"
+              "   it, so no command line or shell history holds it. With --all it is the URL of every project that\n"
+              "   has none of its own.\n"
+              "The watchdog and the doctor job ping it every cycle; when both die, healthchecks e-mails you.\n")
+        if not sys.stdin.isatty():
+            print(f"{C['red']}not saved{C['reset']}: the ping URL is asked at a terminal, and none is attached; run "
+                  "polyctl pings setup in a terminal of yours, or name the variable that holds it with --url-env NAME")
+            return 2
+        url = _hidden_input("ping URL (not shown): ")
+        if url is None:
+            print(f"{C['red']}not saved{C['reset']}: this terminal cannot hide what is typed, and a ping URL typed "
+                  "here would stand in its scrollback; --url-env names a variable that holds it")
+            return 2
+    url = url.strip()
+    if not url:
+        print(f"{C['red']}not saved{C['reset']}: no ping URL was given"); return 2
+    if not _pingable(url):
+        # Said without the value: what was pasted unseen may be another secret.
+        print(f"{C['red']}not saved{C['reset']}: that is no ping URL; healthchecks gives one as "
+              "https://hc-ping.com/<uuid>")
+        return 2
+    every = bool(getattr(args, "all", False))
+    A.set_ping_url(root, url, all_projects=every)
+    print(f"{C['green']}saved{C['reset']} {A.pings_path()} ({_private_mode()}): "
+          f"{'every project with no URL of its own' if every else 'this project'} pings {_ping_url_shown(url)}")
+    print(f"now: {C['b']}polyctl pings test{C['reset']}")
+    return 0
+
+
+def _pingable(url):
+    """Whether a URL is one the watchdog's ping can request: http or https, a host, and no space or control character.
+
+    It is pasted where it is not shown, so a person cannot see they pasted something else, and the ping hands it to
+    urllib, which opens a file:// address as readily (SECRETS-2).
+    """
+    from urllib.parse import urlsplit
+    if any(ch.isspace() or not ch.isprintable() for ch in url):
+        return False
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname and parts.hostname + (f":{parts.port}" if parts.port else "")
+    except ValueError:                                   # a URL urllib cannot read, a port that is no number among them
+        return False
+    return parts.scheme in ("http", "https") and bool(host)
+
+
+def _ping_url_shown(url):
+    """A ping URL as `polyctl pings` shows it: its scheme, and the file that holds it.
+
+    The address is the secret: whoever has it can ping the check, and then a dead watchdog looks alive and the alarm
+    that its pings stopped never rings. `polyctl pings` printed the URL whole, then its host - and a check's UUID can stand
+    in a host's labels, or a host can be the check's own name, `https://deadmansecret.com`, and its last four
+    characters can be all of the secret (LEADS-SECRETS). So no part of it is shown but its scheme, and the file that
+    holds it is named.
+    """
+    from urllib.parse import urlsplit
+    try:
+        scheme = urlsplit(url).scheme
+    except ValueError:                                   # a URL urllib cannot read, a port that is no number among them
+        scheme = ""
+    # No character of it: four from its end were the whole secret of an address with a public prefix.
+    return (f"{scheme}://" if scheme in ("http", "https") else "") + "…"

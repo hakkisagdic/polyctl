@@ -1,9 +1,9 @@
-"""A commit ao makes names the grant it was made under, and a range check holds each landed commit to it
+"""A commit polyctl makes names the grant it was made under, and a range check holds each landed commit to it
 (COMMIT-TRAILER).
 
-`ao commit` ends the message with Ao- trailers read from the grant it held the index to, and
-`ao commit-check --range` checks that each commit of a range has the tree they name: in the checkout
-against its ledger too, in a clone with no .ao/ by tree alone, as CI runs it.
+`polyctl commit` ends the message with Polyctl- trailers read from the grant it held the index to, and
+`polyctl commit-check --range` checks that each commit of a range has the tree they name: in the checkout
+against its ledger too, in a clone with no .polyctl/ by tree alone, as CI runs it.
 """
 import os
 import subprocess
@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_landed_tree import _granted_candidate
 
 
@@ -30,7 +30,7 @@ def _check(root, capsys, spec, *more):
 
 
 def _landed(project, monkeypatch, message="land a"):
-    """The fixture's first commit, then one ao commit of a granted candidate: (root, base, grant)."""
+    """The fixture's first commit, then one polyctl commit of a granted candidate: (root, base, grant)."""
     root = project["root"]
     base = _git(root, "rev-parse", "HEAD").strip()
     cfg = _granted_candidate(project, monkeypatch)
@@ -39,27 +39,27 @@ def _landed(project, monkeypatch, message="land a"):
     return root, base, grant
 
 
-def test_ao_commit_ends_the_message_with_the_grant_it_checked(project, monkeypatch):
+def test_polyctl_commit_ends_the_message_with_the_grant_it_checked(project, monkeypatch):
     root, _, grant = _landed(project, monkeypatch, "land a\n\nCo-Authored-By: someone <someone@example.com>\n")
 
     tree = _git(root, "rev-parse", "HEAD^{tree}").strip()
     assert tree == grant["candidate"]["index_tree"]
     # One trailer block: the message's own trailer first, then the grant's, the review switch off here.
-    assert _trailers(root) == ["Co-Authored-By: someone <someone@example.com>", f"Ao-Grant: {grant['token']}",
-                               f"Ao-Tree: {tree}", "Ao-Verification: V-1", "Ao-Review: off"]
+    assert _trailers(root) == ["Co-Authored-By: someone <someone@example.com>", f"Polyctl-Grant: {grant['token']}",
+                               f"Polyctl-Tree: {tree}", "Polyctl-Verification: V-1", "Polyctl-Review: off"]
     assert _git(root, "log", "-1", "--format=%s").strip() == "land a"
 
 
 def test_a_message_that_ends_in_prose_gets_the_trailers_as_a_paragraph_of_their_own():
     message = "fix: a thing\n\nWhy: it broke\nand this line is prose, so the paragraph is no trailer block\n\n\n"
 
-    text = A.with_trailers(message, [("Ao-Grant", "C-1"), ("Ao-Tree", "t" * 40)])
+    text = A.with_trailers(message, [("Polyctl-Grant", "C-1"), ("Polyctl-Tree", "t" * 40)])
 
-    assert text.endswith("so the paragraph is no trailer block\n\nAo-Grant: C-1\nAo-Tree: " + "t" * 40 + "\n")
+    assert text.endswith("so the paragraph is no trailer block\n\nPolyctl-Grant: C-1\nPolyctl-Tree: " + "t" * 40 + "\n")
 
 
-@pytest.mark.parametrize("message", ["land a\n\nAo-Grant: C-1\n", "land a\n\nCo-Authored-By: x <x@x>\nao-tree: abc\n"])
-def test_a_message_that_already_carries_ao_trailers_is_refused_and_nothing_is_committed(
+@pytest.mark.parametrize("message", ["land a\n\nPolyctl-Grant: C-1\n", "land a\n\nCo-Authored-By: x <x@x>\npolyctl-tree: abc\n"])
+def test_a_message_that_already_carries_polyctl_trailers_is_refused_and_nothing_is_committed(
         project, monkeypatch, capsys, message):
     root = project["root"]
     cfg = _granted_candidate(project, monkeypatch)
@@ -68,10 +68,10 @@ def test_a_message_that_already_carries_ao_trailers_is_refused_and_nothing_is_co
     assert cli.cmd_commit(cfg, SimpleNamespace(message=message, file=None)) == 2
 
     assert _git(root, "rev-parse", "HEAD").strip() == head
-    assert "ao commit writes the Ao- trailers itself" in capsys.readouterr().out
+    assert "polyctl commit writes the Polyctl- trailers itself" in capsys.readouterr().out
 
 
-def test_the_range_check_passes_on_a_commit_ao_made_and_finds_its_grant_on_record(project, monkeypatch, capsys):
+def test_the_range_check_passes_on_a_commit_polyctl_made_and_finds_its_grant_on_record(project, monkeypatch, capsys):
     root, base, grant = _landed(project, monkeypatch)
 
     code, out = _check(root, capsys, f"{base}..HEAD")
@@ -97,7 +97,7 @@ def test_history_before_the_first_trailer_is_left_out_only_when_asked(project, m
     root, _, _ = _landed(project, monkeypatch)
 
     code, out = _check(root, capsys, "HEAD")
-    assert code == 1 and "carries no Ao- trailers, which ao commit writes" in out       # the fixture's init
+    assert code == 1 and "carries no Polyctl- trailers, which polyctl commit writes" in out       # the fixture's init
 
     code, out = _check(root, capsys, "HEAD", "--since-first-trailer")
     assert code == 0, out
@@ -114,11 +114,11 @@ def test_a_commit_without_trailers_after_the_first_one_fails(project, monkeypatc
     assert "TRAILERS DO NOT MATCH  1 of 2 commit(s)" in out
 
 
-def test_a_clone_with_no_ao_state_checks_by_tree_alone(project, monkeypatch, capsys, tmp_path):
+def test_a_clone_with_no_polyctl_state_checks_by_tree_alone(project, monkeypatch, capsys, tmp_path):
     root, _, _ = _landed(project, monkeypatch)
     clone = tmp_path / "clone"
     subprocess.run(["git", "clone", "-q", root, str(clone)], check=True, capture_output=True)
-    assert not (clone / ".ao").exists()
+    assert not (clone / ".polyctl").exists()
 
     code, out = _check(clone, capsys, "HEAD", "--since-first-trailer")
 
@@ -133,7 +133,7 @@ def test_a_range_check_refuses_a_missing_recorded_ledger_even_when_its_trailers_
     root, base, _ = _landed(project, monkeypatch)
     span = "HEAD..HEAD" if empty else f"{base}..HEAD"
     assert _check(root, capsys, span)[0] == 0
-    path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     os.unlink(path)
 
     code, out = _check(root, capsys, span)
@@ -144,7 +144,7 @@ def test_a_range_check_refuses_a_missing_recorded_ledger_even_when_its_trailers_
 
 
 def test_a_merge_with_no_trailers_does_not_match_and_a_bad_range_is_refused(project, monkeypatch, capsys):
-    """A merge carrying no trailers was skipped; it lands through ao commit now, as any commit, since two changes
+    """A merge carrying no trailers was skipped; it lands through polyctl commit now, as any commit, since two changes
     reviewed alone can act together where neither review looked (LEADS-GATE)."""
     root, base, _ = _landed(project, monkeypatch)
     landed = _git(root, "rev-parse", "HEAD").strip()
@@ -155,7 +155,7 @@ def test_a_merge_with_no_trailers_does_not_match_and_a_bad_range_is_refused(proj
 
     audit = A.trailer_audit(root, f"{landed}..HEAD")
     merge = [commit for commit in audit["commits"] if commit["merge"]]
-    assert len(merge) == 1 and "ao lands no merge" in merge[0]["problems"][0]
+    assert len(merge) == 1 and "polyctl lands no merge" in merge[0]["problems"][0]
 
     code, out = _check(root, capsys, "HEAD~1...HEAD")
-    assert code == 2 and "is not a range ao reads" in out
+    assert code == 2 and "is not a range polyctl reads" in out

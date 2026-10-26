@@ -3,22 +3,22 @@ import os
 import sys
 from types import SimpleNamespace
 
-from ao import allowlist as AL, cli
+from polyctl import allowlist as AL, cli
 
 
 def _bare(root):
-    json.dump({"project": "proj", "round_budget": 5}, open(os.path.join(root, ".ao", "config.json"), "w",
+    json.dump({"project": "proj", "round_budget": 5}, open(os.path.join(root, ".polyctl", "config.json"), "w",
                                                              encoding="utf-8"))
 
 
-def test_the_reviewer_ao_writes_starts_no_mcp_server_on_either_path(project):
+def test_the_reviewer_polyctl_writes_starts_no_mcp_server_on_either_path(project):
     root = project["root"]
     for reviewer_model in (None, "gpt-6-luna"):
         _bare(root)
         args = SimpleNamespace(profile="agy-codex", implementer=None, model=None, effort=None,
                                reviewer_model=reviewer_model)
         cli._apply_profile(root, args)
-        argv = json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))["reviewer"]["argv"]
+        argv = json.load(open(os.path.join(root, ".polyctl", "config.json"), encoding="utf-8"))["reviewer"]["argv"]
 
         assert "--ignore-user-config" in argv
         assert AL.reviewer_problems(argv) == []
@@ -27,7 +27,7 @@ def test_the_reviewer_ao_writes_starts_no_mcp_server_on_either_path(project):
         args = SimpleNamespace(profile=None, implementer="claude-code", model=None, effort=None,
                                reviewer_model=reviewer_model, review_tier="same-family", by="Alice")
         cli._apply_profile(root, args)
-        argv = json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))["reviewer"]["argv"]
+        argv = json.load(open(os.path.join(root, ".polyctl", "config.json"), encoding="utf-8"))["reviewer"]["argv"]
 
         assert "--strict-mcp-config" in argv and not any(arg.startswith("--mcp-config") for arg in argv)
         assert AL.reviewer_problems(argv) == []
@@ -60,7 +60,7 @@ def test_the_doctor_names_a_reviewer_that_reaches_beyond_reading(project):
 
 import pytest  # noqa: E402
 
-from ao import lib as A, storage  # noqa: E402
+from polyctl import lib as A, storage  # noqa: E402
 from tests.test_review_chain import _args, _fake, _repo_with_change  # noqa: E402
 
 CODEX = ["codex", "exec", "{prompt}", "--ignore-user-config"]
@@ -80,7 +80,7 @@ WIDER = [
 
 @pytest.mark.parametrize("argv", WIDER, ids=lambda argv: " ".join(argv[3:]))
 def test_a_reviewer_route_that_could_write_is_refused_not_started(project, monkeypatch, argv):
-    """Only `ao doctor --check` named such a route; a review started it and recorded what it answered."""
+    """Only `polyctl doctor --check` named such a route; a review started it and recorded what it answered."""
     started = []
     monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root, name: (f"/agents/{name}", "0.160.0"))
     monkeypatch.setattr(cli, "_run_reviewer", lambda root, argv, timeout, fallback=False, **kw:
@@ -101,7 +101,7 @@ def test_a_review_whose_only_reviewer_could_write_approves_nothing_and_a_compose
     fake = _fake("VERDICT: APPROVED", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0")
     started, real = [], cli._run_reviewer
     monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root, name: (fake[0], "0.160.0"))
-    # The harness is a fake that answers APPROVED; the flags ao handed it are kept for the assertion.
+    # The harness is a fake that answers APPROVED; the flags polyctl handed it are kept for the assertion.
     monkeypatch.setattr(cli, "_run_reviewer", lambda root, argv, timeout, fallback=False, **kw:
                         started.append(argv[1:]) or real(root, fake[:3] + ["x"], timeout, fallback, **kw))
     writing = {"id": "rv", "adapter": "codex", "family": "openai", "argv": CODEX + ["--sandbox", "workspace-write"]}
@@ -119,7 +119,7 @@ def test_a_review_whose_only_reviewer_could_write_approves_nothing_and_a_compose
 def test_a_second_sandbox_flag_after_the_pinned_one_is_named():
     composed = A.compose_reviewer("codex", model="m")["argv"]
     assert AL.reviewer_problems(composed + ["--sandbox", "danger-full-access"]) == \
-        ["it runs with --sandbox danger-full-access, where ao pins read-only"]
+        ["it runs with --sandbox danger-full-access, where polyctl pins read-only"]
 
 
 # ---- a route without the flags its adapter declares leave it only reading is refused too (REVIEWER-REACH-2) ----
@@ -240,7 +240,7 @@ def test_a_reading_flag_given_again_with_an_equals_sign_and_a_second_word_does_n
         ["kiro-cli", "chat", "--no-interactive", "{prompt}", "--trust-tools=", "fs_write"]))
 
 
-def test_ao_s_own_prompt_after_a_reading_flag_is_no_second_value():
+def test_polyctl_s_own_prompt_after_a_reading_flag_is_no_second_value():
     """REVIEWER-REACH-4: kiro takes its prompt as the word after its options, and a route may put it there."""
     assert A.reading_problems(["kiro-cli", "chat", "--no-interactive", "--trust-tools=", "{prompt}"]) == []
     assert A.reading_problems(["kiro-cli", "chat", "--no-interactive", "--trust-tools=", "review this"],

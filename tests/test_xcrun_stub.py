@@ -3,7 +3,7 @@ import shlex
 
 import pytest
 
-from ao import lib as A
+from polyctl import lib as A
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="the fake xcrun is a POSIX shell script, and the xcrun "
                                                        "stub in front of git exists only on macOS")
@@ -28,7 +28,7 @@ def _stub_beside_xcrun(tmp_path, monkeypatch, answer=None, exit_code=0):
     xcrun.write_text(f"#!/bin/sh\necho \"$@\" >> {shlex.quote(str(calls))}\n"
                      f"echo {shlex.quote(str(answer or real))}\nexit {exit_code}\n", encoding="utf-8")
     xcrun.chmod(0o755)
-    monkeypatch.delenv("AO_GIT", raising=False)
+    monkeypatch.delenv("POLYCTL_GIT", raising=False)
     monkeypatch.delenv("DEVELOPER_DIR", raising=False)
     monkeypatch.setenv("PATH", str(stub.parent) + os.pathsep + os.environ.get("PATH", ""))
     monkeypatch.setattr(A, "_XCRUN_STUB", os.path.realpath(str(stub)))          # where macOS keeps its stub
@@ -55,9 +55,9 @@ def test_an_xcrun_beside_a_git_that_is_not_macos_stub_is_never_run(tmp_path, mon
     assert not calls.exists()
 
 
-def test_ao_git_still_wins_and_xcrun_is_not_asked(tmp_path, monkeypatch):
+def test_polyctl_git_still_wins_and_xcrun_is_not_asked(tmp_path, monkeypatch):
     stub, real, calls = _stub_beside_xcrun(tmp_path, monkeypatch)
-    monkeypatch.setenv("AO_GIT", str(stub))
+    monkeypatch.setenv("POLYCTL_GIT", str(stub))
 
     assert A.git_binary() == str(stub) and A.measured_by()["git"] == str(stub)
     assert not calls.exists()
@@ -89,7 +89,7 @@ def test_a_script_beside_xcrun_is_no_stub_and_xcrun_is_not_asked(tmp_path, monke
 
 def test_a_compiled_git_without_xcrun_beside_it_is_taken_as_it_is(tmp_path, monkeypatch):
     git = _compiled(tmp_path / "bin" / "git", ELF)
-    monkeypatch.delenv("AO_GIT", raising=False)
+    monkeypatch.delenv("POLYCTL_GIT", raising=False)
     monkeypatch.setenv("PATH", str(git.parent) + os.pathsep + os.environ.get("PATH", ""))
     monkeypatch.setattr(A, "_GIT_BINARIES", {})
 

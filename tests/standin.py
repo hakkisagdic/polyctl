@@ -1,7 +1,7 @@
 """Stand-in programs a test starts, on POSIX and on Windows alike (WINDOWS-LANE-PARITY).
 
 A stand-in harness - a reviewer, a conformance harness, a fake gh - was a Python script whose first line named
-this interpreter. POSIX runs such a script; Windows runs no shebang line, and ao knows a harness by the name of
+this interpreter. POSIX runs such a script; Windows runs no shebang line, and polyctl knows a harness by the name of
 the program it starts, so `[sys.executable, script]` would be no harness of any adapter's. Every test that
 started one was skipped on Windows, the reviewer and authority tests among them.
 

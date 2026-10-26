@@ -4,9 +4,9 @@ Each reading below was checked against a local store of the reference harness be
 changed, and each was wrong against it:
 
 - the harness writes a prompt and then its turn's start marker, and both opened a turn, so
-  `ao cost` and `ao cost --features` counted every turn twice while spend stayed put;
+  `polyctl cost` and `polyctl cost --features` counted every turn twice while spend stayed put;
 - the credit estimate took a usage record for the running total of the turn in progress and
-  a drop between two records for a new turn, while `ao cost` and the panel added records up:
+  a drop between two records for a new turn, while `polyctl cost` and the panel added records up:
   every record is a whole turn's cost, and the peaks merged each run of rising turns into its
   last. The reading is the adapter's to declare, and every reader applies the declared one;
 - tools that replace text in, append to, delete or move a file were not writes;
@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from ao import lib as A
+from polyctl import lib as A
 from tests.test_transcript_shape import FIXTURE, _event, _world
 
 MONTH_END = datetime(2026, 8, 31, 21, 0, tzinfo=timezone.utc).timestamp()
@@ -73,7 +73,7 @@ def test_a_prompt_and_the_start_marker_after_it_are_one_turn_and_no_spend_moves(
         records = []
         _turn(records, MONTH_END, 5.0, ("fs_write", {"path": f"{root}/src/a.py", "text": "x"}), prompt=prompted)
         # A call the harness makes of its own between the prompt and the start does not split the turn.
-        _turn(records, MONTH_END + 600, 3.0, ("execute_bash", {"command": "ao review --boundary b"}), prompt=prompted,
+        _turn(records, MONTH_END + 600, 3.0, ("execute_bash", {"command": "polyctl review --boundary b"}), prompt=prompted,
               before_start=[_record(MONTH_END + 600, "tool_call", toolName="settings_fetch", args={})] if prompted
               else ())
         _turn(records, MONTH_END + 1200, 1.0, ("read_file", {"path": f"{root}/src/a.py"}), prompt=prompted)
@@ -100,7 +100,7 @@ def test_a_start_marker_still_opens_a_turn_once_the_open_one_has_started(project
 
 # ── usage adds up under the declared reading, for every reader alike ──
 
-def test_every_usage_record_is_a_whole_turn_and_the_credit_estimate_ao_cost_and_the_panel_agree(project, tmp_path,
+def test_every_usage_record_is_a_whole_turn_and_the_credit_estimate_polyctl_cost_and_the_panel_agree(project, tmp_path,
                                                                                                   monkeypatch):
     records = []
     _turn(records, MONTH_END, [], request_ids=False)                               # failed: an empty summary
@@ -139,7 +139,7 @@ def _rounds(meters):
     ("peak-per-turn", [[100, 250, 400], [50, 300], [80]], 780),   # each record the running total of its round
     ("sum", [[400], [300], [80]], 780),                           # each record the whole cost of its round
 ])
-def test_the_declared_reading_adds_usage_up_for_ao_cost_the_panel_and_the_credit_estimate(project, monkeypatch,
+def test_the_declared_reading_adds_usage_up_for_polyctl_cost_the_panel_and_the_credit_estimate(project, monkeypatch,
                                                                                           tmp_path, reading, meters,
                                                                                           spent):
     adapter = dict(FIXTURE, billing={"fallback": {"transcripts": str(tmp_path / "transcript.jsonl"),
@@ -156,9 +156,9 @@ def test_the_declared_reading_adds_usage_up_for_ao_cost_the_panel_and_the_credit
     assert panel["last"] == (80, 0)
 
 
-def test_the_estimate_needs_a_reading_ao_implements_and_nothing_reads_usage_under_an_unknown_one(project, monkeypatch,
+def test_the_estimate_needs_a_reading_polyctl_implements_and_nothing_reads_usage_under_an_unknown_one(project, monkeypatch,
                                                                                                  tmp_path):
-    # Undeclared, usage adds up for `ao cost` and the panel as it always has, and the estimate
+    # Undeclared, usage adds up for `polyctl cost` and the panel as it always has, and the estimate
     # still reads nothing; declared but unknown, no reader reads usage rather than misread it.
     for fallback, spent in (({}, 480), ({"reading": "every-record"}, 0)):
         adapter = dict(FIXTURE, billing={"fallback": dict(fallback, transcripts=str(tmp_path / "transcript.jsonl"))})

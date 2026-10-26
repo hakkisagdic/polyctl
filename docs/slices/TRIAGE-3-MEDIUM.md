@@ -28,15 +28,15 @@ this same candidate.
 
 ## Paths
 
-- src/ao/allowlist.py — tool grant parsing and bypass detection.
-- src/ao/drivers.py — credit lookup failures.
-- src/ao/parts/cli_review.py — deferred review identity and route checks.
-- src/ao/parts/lib_adapters.py — route and unattended-turn checks.
-- src/ao/parts/lib_gates.py — review artefact retention.
-- src/ao/parts/lib_lanes.py — lane-specific retirement checks.
-- src/ao/parts/lib_mail.py — strict worktree status reads.
-- src/ao/parts/lib_slices.py — worktree retirement.
-- src/ao/watchdog.py — turn prompts, credit checks and escalation keys.
+- src/polyctl/allowlist.py — tool grant parsing and bypass detection.
+- src/polyctl/drivers.py — credit lookup failures.
+- src/polyctl/parts/cli_review.py — deferred review identity and route checks.
+- src/polyctl/parts/lib_adapters.py — route and unattended-turn checks.
+- src/polyctl/parts/lib_gates.py — review artefact retention.
+- src/polyctl/parts/lib_lanes.py — lane-specific retirement checks.
+- src/polyctl/parts/lib_mail.py — strict worktree status reads.
+- src/polyctl/parts/lib_slices.py — worktree retirement.
+- src/polyctl/watchdog.py — turn prompts, credit checks and escalation keys.
 - tests/test_triage_3_medium.py (new) — original cluster regressions.
 - tests/test_triage_3_medium_rereview.py (new) — pre-review regressions.
 - tests/test_watchdog_cycle.py — per-decision throttle expectation.

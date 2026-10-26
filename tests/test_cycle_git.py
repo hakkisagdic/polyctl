@@ -4,7 +4,7 @@ A watchdog cycle, a status read, a verification and a review started a shell in 
 git for their small queries - the head, the dirty paths, the newest commit's time, what is
 unpushed - on every cycle of every watched project. They ask git directly now and must read
 what the shell read: whatever a failing git printed, the same stripping, the same answer
-outside a repository. `ao since` handed its ref to that shell, which split it, expanded it
+outside a repository. `polyctl since` handed its ref to that shell, which split it, expanded it
 and ran what followed a `;`; the ref is one argument to git now. And every process took
 the quota line again through a shell, because the reading was kept only in memory; it is
 kept on disk now for the adapter's window, and never when the command failed.
@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage, watchdog as W
+from polyctl import cli, lib as A, storage, watchdog as W
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -75,7 +75,7 @@ def _places(project, tmp_path):
     loose.mkdir()
     places = [root, str(empty), str(loose)]
     for place in places:
-        _write(os.path.join(place, ".ao", "ledger", "progress.jsonl"), "")
+        _write(os.path.join(place, ".polyctl", "ledger", "progress.jsonl"), "")
         review = os.path.join(place, "semantic-review", "r-001.md")
         _write(review, "# review\n\nVERDICT: NEEDS_CHANGES\n")
         storage.append_chained_jsonl(A.review_ledger_path(place),
@@ -128,7 +128,7 @@ def test_the_cycles_git_queries_read_what_the_shell_read_and_start_no_shell(proj
     for cwd, words, answer in asked:
         if words in SHELL:
             assert answer == shell[(cwd, words)], (cwd, words)
-    with open(os.path.join(root, ".ao", "ledger", "progress.jsonl"), encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "ledger", "progress.jsonl"), encoding="utf-8") as fh:
         assert json.loads(fh.readlines()[-1])["head"] == shell[(root, ("rev-parse", "--short", "HEAD"))] != ""
     assert waiver["head"] == shell[(root, ("rev-parse", "HEAD"))] and len(waiver["head"]) == 40
     assert answers[root]["unpushed"] == 2 and "open review findings" in answers[root]["open_work"]
@@ -142,7 +142,7 @@ def test_a_verification_records_the_head_and_dirty_count_the_shell_read(project,
     _write(os.path.join(root, "untracked é.txt"), "new\n")
     gate = (subprocess.list2cmdline if os.name == "nt" else shlex.join)([sys.executable, "-c", "print('ok')"])
     spec = {"gates": {"test": {"run": gate, "timeout": 30}}, "profiles": {"quick": ["test"]}, "default_profile": "quick"}
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         json.dump(spec, fh)
     monkeypatch.setattr(A, "GATE_LOCK", str(tmp_path / "gate.lock"))
     head, status = A.sh("git rev-parse --short HEAD", cwd=root), A.sh("git status --short", cwd=root)
@@ -183,7 +183,7 @@ def test_since_hands_git_one_ref_and_runs_nothing_a_ref_carries(project, tmp_pat
 
 def test_no_git_query_goes_through_a_shell():
     found = []
-    for directory, _, names in os.walk(os.path.join(ROOT, "src", "ao")):
+    for directory, _, names in os.walk(os.path.join(ROOT, "src", "polyctl")):
         for name in sorted(names):
             if not name.endswith(".py"):
                 continue
@@ -206,7 +206,7 @@ def test_no_git_query_goes_through_a_shell():
 PROBE = r"""
 import json, os, subprocess, sys
 sys.path.insert(0, os.path.join(sys.argv[1], "src"))
-from ao import storage, lib as A
+from polyctl import storage, lib as A
 started = []
 real_run = subprocess.run
 def spy(*args, **kwargs):
@@ -222,7 +222,7 @@ def _quota_tool(tmp_path, *lines, status=0):
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     calls = tmp_path / "calls.txt"
-    tool = bindir / "ao-quota-probe"
+    tool = bindir / "polyctl-quota-probe"
     body = "".join(f"echo {shlex.quote(line)}\n" for line in lines)
     tool.write_text(f'#!/bin/sh\necho "$(pwd -P) $# $*" >> {shlex.quote(str(calls))}\n{body}exit {status}\n',
                     encoding="utf-8")
@@ -249,7 +249,7 @@ def test_a_quota_reading_is_kept_across_processes_for_its_window_and_taken_again
     home = tmp_path / "home"
     home.mkdir()
     tool, calls = _quota_tool(tmp_path, "Usage (probe):", "  alpha  42%  5h", "  beta   unknown")
-    spec = {"from": "command", "argv": ["ao-quota-probe", "usage", "--providers"], "cache_seconds": 300}
+    spec = {"from": "command", "argv": ["polyctl-quota-probe", "usage", "--providers"], "cache_seconds": 300}
 
     first = _another_process(home, tmp_path / "bin", spec)
     second = _another_process(home, tmp_path / "bin", spec)
@@ -258,18 +258,18 @@ def test_a_quota_reading_is_kept_across_processes_for_its_window_and_taken_again
     assert _calls(calls) == [f"{os.path.realpath(home)} 2 usage --providers"]
     assert first["started"] == [{"shell": False, "executable": tool, "cwd": str(home)}] and second["started"] == []
 
-    kept_file = home / ".ao" / "quota.json"
+    kept_file = home / ".polyctl" / "quota.json"
     kept = json.loads(kept_file.read_text(encoding="utf-8"))
-    assert kept["ao-quota-probe usage --providers"]["lines"] == ["alpha  42%  5h"]
-    kept["ao-quota-probe usage --providers"]["at"] -= 301
+    assert kept["polyctl-quota-probe usage --providers"]["lines"] == ["alpha  42%  5h"]
+    kept["polyctl-quota-probe usage --providers"]["at"] -= 301
     kept_file.write_text(json.dumps(kept), encoding="utf-8")
     third = _another_process(home, tmp_path / "bin", spec)
-    other = _another_process(home, tmp_path / "bin", dict(spec, argv=["ao-quota-probe", "usage"]))
+    other = _another_process(home, tmp_path / "bin", dict(spec, argv=["polyctl-quota-probe", "usage"]))
 
     assert third["lines"] == other["lines"] == ["alpha  42%  5h"]
     assert len(_calls(calls)) == 3 and _calls(calls)[-1].endswith(" 1 usage")
-    assert set(json.loads(kept_file.read_text(encoding="utf-8"))) == {"ao-quota-probe usage --providers",
-                                                                     "ao-quota-probe usage"}
+    assert set(json.loads(kept_file.read_text(encoding="utf-8"))) == {"polyctl-quota-probe usage --providers",
+                                                                     "polyctl-quota-probe usage"}
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the quota command here is a POSIX shell script")
@@ -280,14 +280,14 @@ def test_a_failed_quota_command_is_not_kept_and_a_word_the_shell_splits_still_go
     monkeypatch.setattr(A, "HOME", str(home))
     monkeypatch.setattr(A, "_QUOTA", {})
     monkeypatch.setenv("PATH", str(tmp_path / "bin") + os.pathsep + os.environ.get("PATH", ""))
-    failing = {"telemetry": {"quota": {"argv": ["ao-quota-probe", "usage"], "cache_seconds": 300}}}
+    failing = {"telemetry": {"quota": {"argv": ["polyctl-quota-probe", "usage"], "cache_seconds": 300}}}
 
     assert A.quota(failing) == A.quota(failing) == ["alpha  99%  5h"]
-    assert len(_calls(calls)) == 2 and not (home / ".ao" / "quota.json").exists()
-    assert A.quota({"telemetry": {"quota": {"argv": ["ao-quota-absent-probe"]}}}) == []
+    assert len(_calls(calls)) == 2 and not (home / ".polyctl" / "quota.json").exists()
+    assert A.quota({"telemetry": {"quota": {"argv": ["polyctl-quota-absent-probe"]}}}) == []
 
     started = _shell_flags(monkeypatch)
-    A.quota({"telemetry": {"quota": {"argv": ["ao-quota-probe", "two words"]}}})
+    A.quota({"telemetry": {"quota": {"argv": ["polyctl-quota-probe", "two words"]}}})
 
     assert started == [True] and _calls(calls)[-1] == f"{os.path.realpath(home)} 2 two words"
-    assert not (home / ".ao" / "quota.json").exists()
+    assert not (home / ".polyctl" / "quota.json").exists()

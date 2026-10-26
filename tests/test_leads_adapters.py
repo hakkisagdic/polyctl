@@ -1,25 +1,25 @@
-"""The bug hunter's leads on adapters, `ao init`, the board's imports, the hold and the status panel (LEADS-ADAPTERS).
+"""The bug hunter's leads on adapters, `polyctl init`, the board's imports, the hold and the status panel (LEADS-ADAPTERS).
 
-ao's read-only bug hunter read src/ao/parts/lib_adapters.py, cli_project.py and cli_status.py on 2026-10-12 and sent
+polyctl's read-only bug hunter read src/polyctl/parts/lib_adapters.py, cli_project.py and cli_status.py on 2026-10-12 and sent
 sixteen leads. Each was read against the code and docs/threat-model.md; what was real is held here:
 
 - what a harness reads was digested so that a file's bytes could stand for a FIFO or a link no person saw, and a folder
   walked for a few declared names hid what a link to it, read whole, held;
 - two first readings, or two acceptances, of a project's harness records at once wrote over each other;
-- `ao init` wrote through a link on its way out of the project, over a file made between its look and its write, into
+- `polyctl init` wrote through a link on its way out of the project, over a file made between its look and its write, into
   whatever a linked `.gitignore` named, and kept a configuration that appeared after it had planned without one;
-- `ao source import` wrote a tracker item's line breaks into the board as items of their own;
-- `ao hold release` took the hold away before it wrote the note the agent wakes to;
-- `ao adapters validate` passed paths on a drive, an environment that was no object, and raised on options that were
+- `polyctl source import` wrote a tracker item's line breaks into the board as items of their own;
+- `polyctl hold release` took the hold away before it wrote the note the agent wakes to;
+- `polyctl adapters validate` passed paths on a drive, an environment that was no object, and raised on options that were
   no object;
 - the status panel raised in a terminal a few columns wide and filled a one-line one, and the fleet read a workspace's
   adapter without the project's own layer.
 
 Two leads found wrong are held too, where a test can say why: a search path left with no folder finds nothing in the
-current directory, and no shipped command ends its options before what ao appends to it.
+current directory, and no shipped command ends its options before what polyctl appends to it.
 
-The independent review of this slice found init still writing outside the project: `.ao/config.json` went through a
-`.ao` swapped for a link after init's last look, the playbook was appended to through a `.ao/PLAYBOOK.md` link and a
+The independent review of this slice found init still writing outside the project: `.polyctl/config.json` went through a
+`.polyctl` swapped for a link after init's last look, the playbook was appended to through a `.polyctl/PLAYBOOK.md` link and a
 rule file's, and an MCP registration was read and written through a link put in place after its look; a source item
 with no id was dropped without a word. Every file init writes is now made, replaced or read in folders held open from
 the project's root down, never through a link; Windows pins each folder with native handles without delete sharing,
@@ -37,7 +37,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, skillkit, storage
+from polyctl import cli, lib as A, skillkit, storage
 from tests import standin
 from tests.test_profiles import _init_args
 
@@ -75,7 +75,7 @@ def _digests(root):
 
 
 def _fresh_repository(tmp_path, monkeypatch):
-    """A repository no ao has been put on, on a machine with no agent's program."""
+    """A repository no polyctl has been put on, on a machine with no agent's program."""
     monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
     monkeypatch.setattr(A, "program_path", lambda name, *args, **kwargs: None)
     monkeypatch.setattr(A, "HOME", str(tmp_path / "home"))
@@ -85,7 +85,7 @@ def _fresh_repository(tmp_path, monkeypatch):
     return root
 
 
-# ---- a program ao starts is found outside the repository and never in the current directory ----------------------
+# ---- a program polyctl starts is found outside the repository and never in the current directory ----------------------
 
 def test_a_search_path_whose_every_folder_is_in_the_repository_finds_no_program_in_the_current_one(project,
                                                                                                  monkeypatch):
@@ -93,14 +93,14 @@ def test_a_search_path_whose_every_folder_is_in_the_repository_finds_no_program_
     its readers - program_path and resolve_binary - reads a search path as search_directories does, with no empty
     entry, so nothing is looked for in the current directory (WINDOWS-NO-CWD-EXEC)."""
     root = project["root"]
-    standin.program(root, "ao-cwd-probe", "print('ran')\n")
+    standin.program(root, "polyctl-cwd-probe", "print('ran')\n")
     monkeypatch.chdir(root)
 
     kept = A.outside_repository(os.pathsep.join([root, os.path.join(root, "bin")]), root)
 
     assert kept == os.pathsep
-    assert A.program_path("ao-cwd-probe", path=kept) is None
-    assert A.resolve_binary("ao-cwd-probe", path=kept) == (None, "")
+    assert A.program_path("polyctl-cwd-probe", path=kept) is None
+    assert A.resolve_binary("polyctl-cwd-probe", path=kept) == (None, "")
 
 
 # ---- what an adapter declares is a path within the folder it is read against -------------------------------------
@@ -149,11 +149,11 @@ def test_options_that_are_no_object_are_named_by_the_validator_and_raise_nowhere
     assert A.validate_adapter(dict(SOUND, options=options)) == ["`options` must be an object"]
 
 
-def test_no_shipped_command_ends_its_options_before_what_ao_appends():
+def test_no_shipped_command_ends_its_options_before_what_polyctl_appends():
     """Lead bc56605c8d8939c5, wrong as a way past a grant: carries_scope decides a grant only for the implementer's
-    nudge, composed from a shipped adapter's resume, with ao's prompt in one argument and a session that reads as a
+    nudge, composed from a shipped adapter's resume, with polyctl's prompt in one argument and a session that reads as a
     flag refused (TURN-ARGV); a command an agent writes - an architect's, a reviewer's - is audited with no options,
-    where a scope flag changes no answer. What ao appends goes after a command's arguments, which holds while no
+    where a scope flag changes no answer. What polyctl appends goes after a command's arguments, which holds while no
     shipped send or resume ends its options with `--`."""
     for ident, adapter in sorted(A.package_adapters().items()):
         for capability in ("send", "resume"):
@@ -274,14 +274,14 @@ def test_two_acceptances_at_once_keep_both(project, monkeypatch):
 
     with monkeypatch.context() as patch:
         patch.setattr(A, "turn_record", another_acceptance_meanwhile)
-        assert A._keep_turns(root, {"architect": ("a" * 64, {"argv": ["claude"]})}, "ao init") == ["architect"]
+        assert A._keep_turns(root, {"architect": ("a" * 64, {"argv": ["claude"]})}, "polyctl init") == ["architect"]
         other[0].join(30)
 
-    assert {role: entry["by"] for role, entry in A.turn_record(root).items()} == {"architect": "ao init",
+    assert {role: entry["by"] for role, entry in A.turn_record(root).items()} == {"architect": "polyctl init",
                                                                                  "reviewer": "Ayşe"}
 
 
-# ---- ao init writes in the project alone, and never over what stands ---------------------------------------------
+# ---- polyctl init writes in the project alone, and never over what stands ---------------------------------------------
 
 def test_init_writes_nothing_through_a_folder_on_its_way_that_is_a_link_out_of_the_project(tmp_path, monkeypatch,
                                                                                             capsys):
@@ -298,7 +298,7 @@ def test_init_writes_nothing_through_a_folder_on_its_way_that_is_a_link_out_of_t
     assert os.listdir(str(outside)) == []
     out = capsys.readouterr().out
     assert "not written" in out and "agent-mail is a link or a file where" in out
-    assert (root / ".ao" / "board.md").is_file()               # the rest is written
+    assert (root / ".polyctl" / "board.md").is_file()               # the rest is written
 
 
 def test_init_keeps_a_link_made_between_its_look_and_its_write_and_never_writes_through_it(tmp_path, monkeypatch):
@@ -308,8 +308,8 @@ def test_init_keeps_a_link_made_between_its_look_and_its_write_and_never_writes_
     root = _fresh_repository(tmp_path, monkeypatch)
     victim = tmp_path / "the-person-s-file"
     victim.write_text("kept as it was\n", encoding="utf-8")
-    (root / ".ao").mkdir()
-    link = root / ".ao" / "backlog.md"
+    (root / ".polyctl").mkdir()
+    link = root / ".polyctl" / "backlog.md"
     os.symlink(str(victim), str(link))
     lexists = os.path.lexists
     monkeypatch.setattr(os.path, "lexists", lambda path: False if os.path.abspath(path) == str(link) else lexists(path))
@@ -323,7 +323,7 @@ def test_init_keeps_a_link_made_between_its_look_and_its_write_and_never_writes_
 @pytest.mark.parametrize("kind", ["symbolic", "hard"])
 def test_init_adds_its_lines_to_no_gitignore_but_the_project_s_own(tmp_path, monkeypatch, capsys, kind):
     """The same lead: a `.gitignore` that was a link, or a second name of a file of the person's, took init's lines -
-    `.ao/hold` among them, a command that runs the agent's file of that name in a shell started in the tree."""
+    `.polyctl/hold` among them, a command that runs the agent's file of that name in a shell started in the tree."""
     if kind == "symbolic":
         _can_link(tmp_path)
     root = _fresh_repository(tmp_path, monkeypatch)
@@ -334,47 +334,47 @@ def test_init_adds_its_lines_to_no_gitignore_but_the_project_s_own(tmp_path, mon
     assert cli.cmd_init({"root": str(root)}, _init_args(profile=None)) == 1
 
     assert startup.read_text(encoding="utf-8") == "export EDITOR=vi\n"
-    assert json.loads((root / ".ao" / "init-manifest.json").read_text(encoding="utf-8"))["gitignore"] is False
+    assert json.loads((root / ".polyctl" / "init-manifest.json").read_text(encoding="utf-8"))["gitignore"] is False
     out = capsys.readouterr().out
-    assert "not written" in out and ".gitignore: it is" in out and ".ao/hold" in out
+    assert "not written" in out and ".gitignore: it is" in out and ".polyctl/hold" in out
 
 
 def test_init_replaces_a_link_where_it_writes_its_manifest_and_writes_nothing_through_it(tmp_path, monkeypatch):
-    """The same lead: `.ao/init-manifest.json` was opened to write through whatever stood there."""
+    """The same lead: `.polyctl/init-manifest.json` was opened to write through whatever stood there."""
     _can_link(tmp_path)
     root = _fresh_repository(tmp_path, monkeypatch)
     victim = tmp_path / "notes.json"
     victim.write_text("{}\n", encoding="utf-8")
-    (root / ".ao").mkdir()
-    os.symlink(str(victim), str(root / ".ao" / "init-manifest.json"))
+    (root / ".polyctl").mkdir()
+    os.symlink(str(victim), str(root / ".polyctl" / "init-manifest.json"))
 
     code = cli.cmd_init({"root": str(root)}, _init_args(profile=None))
     assert code == (0 if storage.folders_held_open() else 1)
     assert victim.read_text(encoding="utf-8") == "{}\n"
     if not storage.folders_held_open():
-        assert os.path.islink(str(root / ".ao" / "init-manifest.json"))
+        assert os.path.islink(str(root / ".polyctl" / "init-manifest.json"))
         return
-    assert not os.path.islink(str(root / ".ao" / "init-manifest.json"))
-    assert "wrote" in json.loads((root / ".ao" / "init-manifest.json").read_text(encoding="utf-8"))
+    assert not os.path.islink(str(root / ".polyctl" / "init-manifest.json"))
+    assert "wrote" in json.loads((root / ".polyctl" / "init-manifest.json").read_text(encoding="utf-8"))
 
 
-def test_init_refuses_a_project_whose_ao_folder_is_a_link(tmp_path, monkeypatch, capsys):
-    """The same lead: `.ao`, a link to a folder of the person's, had init write the configuration, the board and the
+def test_init_refuses_a_project_whose_polyctl_folder_is_a_link(tmp_path, monkeypatch, capsys):
+    """The same lead: `.polyctl`, a link to a folder of the person's, had init write the configuration, the board and the
     manifest there."""
     _can_link(tmp_path)
     root = _fresh_repository(tmp_path, monkeypatch)
     outside = tmp_path / "outside"
     outside.mkdir()
-    os.symlink(str(outside), str(root / ".ao"), target_is_directory=True)
+    os.symlink(str(outside), str(root / ".polyctl"), target_is_directory=True)
 
     assert cli.cmd_init({"root": str(root)}, _init_args(profile=None)) == 1
 
     assert os.listdir(str(outside)) == []
-    assert ".ao is a link or a file" in capsys.readouterr().out
+    assert ".polyctl is a link or a file" in capsys.readouterr().out
 
 
 def test_init_refuses_a_configuration_that_appeared_after_it_planned_without_one(tmp_path, monkeypatch, capsys):
-    """Lead 0ac6730fae1b8cb6: a .ao/config.json made after init's last look was kept, beside files and records init
+    """Lead 0ac6730fae1b8cb6: a .polyctl/config.json made after init's last look was kept, beside files and records init
     made from a plan that had none."""
     root = _fresh_repository(tmp_path, monkeypatch)
     real, looks = cli._worktree_project_marker_document, []
@@ -383,7 +383,7 @@ def test_init_refuses_a_configuration_that_appeared_after_it_planned_without_one
     def an_agent_writes_one_after_the_last_look(where):
         looks.append(where)
         if len(looks) == 2:
-            _write(where, ".ao/config.json", theirs)
+            _write(where, ".polyctl/config.json", theirs)
         return real(where)
 
     monkeypatch.setattr(cli, "_worktree_project_marker_document", an_agent_writes_one_after_the_last_look)
@@ -391,16 +391,16 @@ def test_init_refuses_a_configuration_that_appeared_after_it_planned_without_one
     assert cli.cmd_init({"root": str(root)}, _init_args(profile=None)) == 1
 
     assert len(looks) == 2
-    assert (root / ".ao" / "config.json").read_text(encoding="utf-8") == theirs
-    assert not (root / ".ao" / "board.md").exists()
+    assert (root / ".polyctl" / "config.json").read_text(encoding="utf-8") == theirs
+    assert not (root / ".polyctl" / "board.md").exists()
     assert "appeared while init ran" in capsys.readouterr().out
 
 
 # ---- an imported item is one board line ---------------------------------------------------------------------------
 
 def _inbox(root, items):
-    _write(root, ".ao/sources.json", json.dumps({"bound_root": root, "sources": [{"id": "tracker", "kind": "mcp"}]}))
-    return _write(root, ".ao/inbox/tracker.json", json.dumps({"source": "tracker", "bound_root": root,
+    _write(root, ".polyctl/sources.json", json.dumps({"bound_root": root, "sources": [{"id": "tracker", "kind": "mcp"}]}))
+    return _write(root, ".polyctl/inbox/tracker.json", json.dumps({"source": "tracker", "bound_root": root,
                                                               "items": items}))
 
 
@@ -457,9 +457,9 @@ def test_a_release_writes_its_note_before_the_hold_goes(project, monkeypatch):
 
 
 def test_a_board_that_holds_only_inbox_items_says_so(project):
-    """Lead 01dca4c1e31a7f17: `ao board` printed neither the items held in the inbox nor that nothing was admitted -
+    """Lead 01dca4c1e31a7f17: `polyctl board` printed neither the items held in the inbox nor that nothing was admitted -
     nothing at all - and the status panel drew a `Board:` line naming nothing."""
-    _write(project["root"], ".ao/board.md", "# Board\n\n## queued\n\n## inbox\n"
+    _write(project["root"], ".polyctl/board.md", "# Board\n\n## queued\n\n## inbox\n"
                                             "- [T-1] a pull · needs: no acceptance boundary written\n")
 
     assert any("1 wait(s) in the inbox" in line for line in cli._board_lines(project))
@@ -478,9 +478,9 @@ def test_a_panel_a_few_columns_wide_is_drawn_and_one_with_no_line_draws_none(pro
 
 def test_the_fleet_reads_a_workspace_s_adapter_as_its_status_panel_does(project, monkeypatch):
     """Lead f867396f1d4d6b93: the fleet loaded each workspace's adapter without its root, so the project's own layer,
-    which `ao status` reads there, was not read."""
+    which `polyctl status` reads there, was not read."""
     root = project["root"]
-    _write(root, ".ao/adapters/kiro.json", json.dumps(dict(A.load_adapter("kiro"), name="the project's kiro")))
+    _write(root, ".polyctl/adapters/kiro.json", json.dumps(dict(A.load_adapter("kiro"), name="the project's kiro")))
     monkeypatch.setattr(A, "all_workspaces", lambda: [{"path": root, "mtime": time.time()}])
     read = []
     monkeypatch.setattr(A, "busy", lambda cfg, adapter: read.append(adapter.get("name")) or ("idle", None, ""))
@@ -505,11 +505,11 @@ def _callers():
     return names
 
 
-def _a_link_in_place_of_ao_once_it_is_looked_at(monkeypatch, root, target):
-    """Put a link to `target` where `root/.ao` stands just after init's last look at it, as an agent racing that look
+def _a_link_in_place_of_polyctl_once_it_is_looked_at(monkeypatch, root, target):
+    """Put a link to `target` where `root/.polyctl` stands just after init's last look at it, as an agent racing that look
     would, a folder there moved aside first; what was swapped is listed once it was."""
     real, swapped = os.lstat, []
-    looked = os.path.join(str(root), ".ao")
+    looked = os.path.join(str(root), ".polyctl")
 
     def lstat(path, *args, **kwargs):
         try:
@@ -543,15 +543,15 @@ def _a_link_once_looked_at_by(monkeypatch, caller, path, target):
     return done
 
 
-def test_init_writes_no_configuration_through_an_ao_folder_swapped_for_a_link_after_its_look(tmp_path, monkeypatch,
+def test_init_writes_no_configuration_through_an_polyctl_folder_swapped_for_a_link_after_its_look(tmp_path, monkeypatch,
                                                                                               capsys):
-    """From the review: `.ao/config.json` was written by its path after init's last look at `.ao`, so a link an agent
+    """From the review: `.polyctl/config.json` was written by its path after init's last look at `.polyctl`, so a link an agent
     put there in between took the configuration - and after it the playbook and the manifest - where it led."""
     _can_link(tmp_path)
     root = _fresh_repository(tmp_path, monkeypatch)
     outside = tmp_path / "outside"
     outside.mkdir()
-    swapped = _a_link_in_place_of_ao_once_it_is_looked_at(monkeypatch, root, outside)
+    swapped = _a_link_in_place_of_polyctl_once_it_is_looked_at(monkeypatch, root, outside)
 
     assert cli.cmd_init({"root": str(root)}, _init_args(profile=None)) == 1
 
@@ -559,9 +559,9 @@ def test_init_writes_no_configuration_through_an_ao_folder_swapped_for_a_link_af
     assert "init refused" in capsys.readouterr().out
 
 
-def test_init_writes_no_added_setting_through_an_ao_folder_swapped_for_a_link_after_its_look(tmp_path, monkeypatch,
+def test_init_writes_no_added_setting_through_an_polyctl_folder_swapped_for_a_link_after_its_look(tmp_path, monkeypatch,
                                                                                               capsys):
-    """The same for a configuration init adds to: `ao init --language tr` on a project init set up."""
+    """The same for a configuration init adds to: `polyctl init --language tr` on a project init set up."""
     _can_link(tmp_path)
     root = _fresh_repository(tmp_path, monkeypatch)
     assert cli.cmd_init({"root": str(root)}, _init_args(profile=None)) == 0
@@ -569,19 +569,19 @@ def test_init_writes_no_added_setting_through_an_ao_folder_swapped_for_a_link_af
     outside.mkdir()
     theirs = outside / "config.json"
     theirs.write_text('{"project": "the person\'s own"}\n', encoding="utf-8")
-    swapped = _a_link_in_place_of_ao_once_it_is_looked_at(monkeypatch, root, outside)
+    swapped = _a_link_in_place_of_polyctl_once_it_is_looked_at(monkeypatch, root, outside)
 
     assert cli.cmd_init({"root": str(root)}, _init_args(profile=None, language="tr")) == 1
 
     assert swapped and os.listdir(str(outside)) == ["config.json"]
     assert theirs.read_text(encoding="utf-8") == '{"project": "the person\'s own"}\n'
-    assert ".ao is a link" in capsys.readouterr().out
+    assert ".polyctl is a link" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("name, rules", [(".ao/PLAYBOOK.md", False), ("AGENTS.md", True)])
+@pytest.mark.parametrize("name, rules", [(".polyctl/PLAYBOOK.md", False), ("AGENTS.md", True)])
 def test_init_adds_its_playbook_through_no_link(tmp_path, monkeypatch, capsys, name, rules):
-    """From the review: the playbook went through `_write_marked`, which followed a `.ao/PLAYBOOK.md` - or, with
-    --rules, a rule file - that was a link, and added ao's block to the file of the person's it led to."""
+    """From the review: the playbook went through `_write_marked`, which followed a `.polyctl/PLAYBOOK.md` - or, with
+    --rules, a rule file - that was a link, and added polyctl's block to the file of the person's it led to."""
     _can_link(tmp_path)
     root = _fresh_repository(tmp_path, monkeypatch)
     startup = tmp_path / "zshrc"
@@ -597,28 +597,28 @@ def test_init_adds_its_playbook_through_no_link(tmp_path, monkeypatch, capsys, n
 
 
 def test_skill_install_writes_its_playbook_through_no_link_and_says_so(project, tmp_path, capsys):
-    """The same for `ao skill install`, which writes the playbook as init does."""
+    """The same for `polyctl skill install`, which writes the playbook as init does."""
     _can_link(tmp_path)
     startup = tmp_path / "zshrc"
     startup.write_text("export EDITOR=vi\n", encoding="utf-8")
-    os.symlink(str(startup), os.path.join(project["root"], ".ao", "PLAYBOOK.md"))
+    os.symlink(str(startup), os.path.join(project["root"], ".polyctl", "PLAYBOOK.md"))
 
     assert cli.cmd_skill(project, SimpleNamespace(action="install", agent="generic")) == 1
 
     assert startup.read_text(encoding="utf-8") == "export EDITOR=vi\n"
-    assert "not written  .ao/PLAYBOOK.md: .ao/PLAYBOOK.md is a link" in _plain(capsys.readouterr().out)
+    assert "not written  .polyctl/PLAYBOOK.md: .polyctl/PLAYBOOK.md is a link" in _plain(capsys.readouterr().out)
 
 
 def test_init_records_no_opt_in_through_a_ledger_folder_that_is_a_link(tmp_path, monkeypatch, capsys):
     """The opt-in `--review-tier same-family` records is a ledger row, appended by its path as every ledger row is: a
-    `.ao/ledger` that was a link took it - and the ledger's lock - out of the project. A link there is refused before
+    `.polyctl/ledger` that was a link took it - and the ledger's lock - out of the project. A link there is refused before
     the append, and the opt-in is not in force."""
     _can_link(tmp_path)
     root = _fresh_repository(tmp_path, monkeypatch)
     outside = tmp_path / "outside"
     outside.mkdir()
-    (root / ".ao").mkdir()
-    os.symlink(str(outside), str(root / ".ao" / "ledger"), target_is_directory=True)
+    (root / ".polyctl").mkdir()
+    os.symlink(str(outside), str(root / ".polyctl" / "ledger"), target_is_directory=True)
 
     assert cli.cmd_init({"root": str(root)}, _init_args(profile=None, review_tier="same-family", by="Ayşe")) == 1
 
@@ -626,22 +626,22 @@ def test_init_records_no_opt_in_through_a_ledger_folder_that_is_a_link(tmp_path,
     assert "the opt-in into same-family review could not be recorded" in capsys.readouterr().out
 
 
-def test_a_playbook_that_appears_while_ao_writes_it_is_not_written_over(project, monkeypatch):
-    """A playbook made where none stood is made only where none stands still: one that appeared after ao looked is
+def test_a_playbook_that_appears_while_polyctl_writes_it_is_not_written_over(project, monkeypatch):
+    """A playbook made where none stood is made only where none stands still: one that appeared after polyctl looked is
     named, and kept as it is."""
     root = project["root"]
-    theirs = _write(root, ".ao/PLAYBOOK.md", "an agent's\n")
+    theirs = _write(root, ".polyctl/PLAYBOOK.md", "an agent's\n")
     monkeypatch.setattr(storage, "read_in_tree", lambda *args, **kwargs: None)      # looked before it appeared
 
     written = skillkit.install_playbook(root, {"generic"})
 
-    assert written[".ao/PLAYBOOK.md"].startswith("not written: ")
+    assert written[".polyctl/PLAYBOOK.md"].startswith("not written: ")
     with open(theirs, encoding="utf-8") as fh:
         assert fh.read() == "an agent's\n"
 
 
-def test_init_writes_no_manifest_through_an_ao_folder_swapped_for_a_link_as_it_ends(tmp_path, monkeypatch, capsys):
-    """From the review: the manifest, written last, went through a `.ao` made a link after everything before it."""
+def test_init_writes_no_manifest_through_an_polyctl_folder_swapped_for_a_link_as_it_ends(tmp_path, monkeypatch, capsys):
+    """From the review: the manifest, written last, went through a `.polyctl` made a link after everything before it."""
     _can_link(tmp_path)
     root = _fresh_repository(tmp_path, monkeypatch)
     outside = tmp_path / "outside"
@@ -650,8 +650,8 @@ def test_init_writes_no_manifest_through_an_ao_folder_swapped_for_a_link_as_it_e
 
     def then_a_link(*args, **kwargs):
         written = real(*args, **kwargs)
-        os.rename(str(root / ".ao"), str(root / ".ao-moved"))
-        os.symlink(str(outside), str(root / ".ao"), target_is_directory=True)
+        os.rename(str(root / ".polyctl"), str(root / ".polyctl-moved"))
+        os.symlink(str(outside), str(root / ".polyctl"), target_is_directory=True)
         return written
 
     monkeypatch.setattr(skillkit, "install_playbook", then_a_link)
@@ -659,7 +659,7 @@ def test_init_writes_no_manifest_through_an_ao_folder_swapped_for_a_link_as_it_e
     assert cli.cmd_init({"root": str(root)}, _init_args(profile=None)) == 1
 
     assert os.listdir(str(outside)) == []
-    assert "not written  .ao/init-manifest.json: .ao is a link" in _plain(capsys.readouterr().out)
+    assert "not written  .polyctl/init-manifest.json: .polyctl is a link" in _plain(capsys.readouterr().out)
 
 
 def test_init_names_for_the_project_s_gitignore_every_line_it_lacks_whatever_a_link_there_leads_to(tmp_path,
@@ -669,13 +669,13 @@ def test_init_names_for_the_project_s_gitignore_every_line_it_lacks_whatever_a_l
     _can_link(tmp_path)
     root = _fresh_repository(tmp_path, monkeypatch)
     theirs = tmp_path / "global-ignore"
-    theirs.write_text(".ao/hold\n", encoding="utf-8")
+    theirs.write_text(".polyctl/hold\n", encoding="utf-8")
     os.symlink(str(theirs), str(root / ".gitignore"))
 
     assert cli.cmd_init({"root": str(root)}, _init_args(profile=None)) == 1
 
     named = _plain(capsys.readouterr().out).split(".gitignore yourself: ", 1)[1].split("\n", 1)[0]
-    assert ".ao/hold" in named.split() and theirs.read_text(encoding="utf-8") == ".ao/hold\n"
+    assert ".polyctl/hold" in named.split() and theirs.read_text(encoding="utf-8") == ".polyctl/hold\n"
 
 
 def test_init_names_a_harness_folder_that_leads_out_of_the_project_and_exits_1(tmp_path, monkeypatch, capsys):
@@ -691,16 +691,16 @@ def test_init_names_a_harness_folder_that_leads_out_of_the_project_and_exits_1(t
 
     assert os.listdir(str(outside)) == []
     out = _plain(capsys.readouterr().out)
-    for rel in (".kiro/steering/ao-coordination.md", ".kiro/steering/ao-playbook.md"):
+    for rel in (".kiro/steering/polyctl-coordination.md", ".kiro/steering/polyctl-playbook.md"):
         assert f"not written  {rel}: {rel} leads out of the project through a link" in out
 
 
-def test_init_registers_ao_in_no_mcp_file_that_is_a_link(tmp_path, monkeypatch, capsys):
+def test_init_registers_polyctl_in_no_mcp_file_that_is_a_link(tmp_path, monkeypatch, capsys):
     """From the review: an MCP file that was a link leading out of the project was named as lying outside it, and init
     exited 0 as if nothing stood there. It is named as the link it is, and init exits 1."""
     _can_link(tmp_path)
     root = _fresh_repository(tmp_path, monkeypatch)
-    monkeypatch.setattr(A, "ao_program", lambda: "/x/ao")
+    monkeypatch.setattr(A, "polyctl_program", lambda: "/x/polyctl")
     theirs = tmp_path / "claude.json"
     theirs.write_text('{"oauthAccount": "the person\'s", "mcpServers": {}}', encoding="utf-8")
     os.symlink(str(theirs), str(root / ".mcp.json"))
@@ -714,7 +714,7 @@ def test_init_registers_ao_in_no_mcp_file_that_is_a_link(tmp_path, monkeypatch, 
 
 def test_a_registration_is_written_through_no_link_put_in_its_place_after_its_look(project, tmp_path, monkeypatch):
     """From the review: the MCP entry was merged by its path after `_local` had looked where its file resolves, so a
-    link put there in between had the person's file read, and written over with it and ao's entry."""
+    link put there in between had the person's file read, and written over with it and polyctl's entry."""
     _can_link(tmp_path)
     root = project["root"]
     monkeypatch.setattr(A, "program_path", lambda name, *args, **kwargs: None)
@@ -723,7 +723,7 @@ def test_a_registration_is_written_through_no_link_put_in_its_place_after_its_lo
     done = _a_link_once_looked_at_by(monkeypatch, "register_mcp", os.path.join(root, ".kiro", "settings", "mcp.json"),
                                      theirs)
 
-    registered = skillkit.register_mcp(root, {"kiro"}, exe="/x/ao")
+    registered = skillkit.register_mcp(root, {"kiro"}, exe="/x/polyctl")
 
     assert done and registered["kiro"].startswith("not written: .kiro/settings/mcp.json is a link")
     assert json.loads(theirs.read_text(encoding="utf-8")) == {"mcpServers": {"theirs": {"command": "x"}}}
@@ -743,7 +743,7 @@ def test_a_harness_s_own_register_command_runs_only_where_no_link_stands(project
     done = _a_link_once_looked_at_by(monkeypatch, "register_mcp", os.path.join(root, ".kiro", "settings", "mcp.json"),
                                      nowhere)
 
-    registered = skillkit.register_mcp(root, {"kiro"}, exe="/x/ao")
+    registered = skillkit.register_mcp(root, {"kiro"}, exe="/x/polyctl")
 
     assert done and registered["kiro"].startswith("not written: .kiro/settings/mcp.json is a link")
     assert not os.path.lexists(str(nowhere))
@@ -758,8 +758,8 @@ def test_a_folder_swapped_for_a_link_after_it_was_opened_moves_nothing(tmp_path,
     the last of them: a link put in a folder's place once it is open leads nowhere."""
     _can_link(tmp_path)
     root = tmp_path / "repo"
-    (root / ".ao").mkdir(parents=True)
-    (root / ".ao" / "board.md").write_bytes(b"the project's\n")
+    (root / ".polyctl").mkdir(parents=True)
+    (root / ".polyctl" / "board.md").write_bytes(b"the project's\n")
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "board.md").write_bytes(b"the person's\n")
@@ -768,18 +768,18 @@ def test_a_folder_swapped_for_a_link_after_it_was_opened_moves_nothing(tmp_path,
     def swap():
         if not swapped:
             swapped.append(True)
-            os.rename(str(root / ".ao"), str(root / ".ao-moved"))
-            os.symlink(str(outside), str(root / ".ao"), target_is_directory=True)
+            os.rename(str(root / ".polyctl"), str(root / ".polyctl-moved"))
+            os.symlink(str(outside), str(root / ".polyctl"), target_is_directory=True)
 
     def opened(path, flags, *args, **kwargs):
         fd = real_open(path, flags, *args, **kwargs)
-        if os.fspath(path) == ".ao":
+        if os.fspath(path) == ".polyctl":
             swap()
         return fd
 
     def looked(path, *args, **kwargs):
         answer = real_lstat(path, *args, **kwargs)
-        if os.fspath(path) == str(root / ".ao"):
+        if os.fspath(path) == str(root / ".polyctl"):
             swap()
         return answer
 
@@ -788,13 +788,13 @@ def test_a_folder_swapped_for_a_link_after_it_was_opened_moves_nothing(tmp_path,
     monkeypatch.setattr(os, "lstat", looked)
 
     if operation == "create":
-        assert storage.create_in_tree(str(root), ".ao/new.md", b"made\n") == "wrote"
-        assert (root / ".ao-moved" / "new.md").read_bytes() == b"made\n"
+        assert storage.create_in_tree(str(root), ".polyctl/new.md", b"made\n") == "wrote"
+        assert (root / ".polyctl-moved" / "new.md").read_bytes() == b"made\n"
     elif operation == "replace":
-        storage.replace_in_tree(str(root), ".ao/board.md", b"replaced\n")
-        assert (root / ".ao-moved" / "board.md").read_bytes() == b"replaced\n"
+        storage.replace_in_tree(str(root), ".polyctl/board.md", b"replaced\n")
+        assert (root / ".polyctl-moved" / "board.md").read_bytes() == b"replaced\n"
     else:
-        assert storage.read_in_tree(str(root), ".ao/board.md") == b"the project's\n"
+        assert storage.read_in_tree(str(root), ".polyctl/board.md") == b"the project's\n"
     assert swapped and os.listdir(str(outside)) == ["board.md"]
     assert (outside / "board.md").read_bytes() == b"the person's\n"
 
@@ -802,7 +802,7 @@ def test_a_folder_swapped_for_a_link_after_it_was_opened_moves_nothing(tmp_path,
 @pytest.mark.parametrize("held", [True, False])
 def test_a_file_replaced_in_the_tree_holds_its_old_bytes_or_its_new_ones_and_keeps_its_mode(tmp_path, monkeypatch,
                                                                                               held):
-    """What replaces `.ao/config.json` now keeps replace_file_durably's promise (#56) where a folder is held open and
+    """What replaces `.polyctl/config.json` now keeps replace_file_durably's promise (#56) where a folder is held open and
     where it is not: a write that fails before the rename leaves the old bytes and no temporary beside them, and a
     file replaced keeps its mode."""
     if not held:
@@ -810,8 +810,8 @@ def test_a_file_replaced_in_the_tree_holds_its_old_bytes_or_its_new_ones_and_kee
             pytest.skip("native Windows backend is covered on Windows")
         monkeypatch.setattr(os, "supports_dir_fd", set())
     root = tmp_path / "repo"
-    (root / ".ao").mkdir(parents=True)
-    config = root / ".ao" / "config.json"
+    (root / ".polyctl").mkdir(parents=True)
+    config = root / ".polyctl" / "config.json"
     config.write_bytes(b'{"capability_matrix": {"version": 1}}')
     os.chmod(str(config), 0o600)
 
@@ -819,11 +819,11 @@ def test_a_file_replaced_in_the_tree_holds_its_old_bytes_or_its_new_ones_and_kee
         raise OSError(5, "disk gone")
 
     with pytest.raises(OSError, match="disk gone"):
-        storage.replace_in_tree(str(root), ".ao/config.json", b'{"features": {}}', _fsync=disk_gone)
+        storage.replace_in_tree(str(root), ".polyctl/config.json", b'{"features": {}}', _fsync=disk_gone)
 
     assert config.read_bytes() == b'{"capability_matrix": {"version": 1}}'
-    assert os.listdir(str(root / ".ao")) == ["config.json"]
-    storage.replace_in_tree(str(root), ".ao/config.json", b'{"features": {}}')
+    assert os.listdir(str(root / ".polyctl")) == ["config.json"]
+    storage.replace_in_tree(str(root), ".polyctl/config.json", b'{"features": {}}')
     assert config.read_bytes() == b'{"features": {}}'
     if os.name != "nt":                                                  # Windows keeps no file mode (WINDOWS-SAY-WHY)
         assert os.stat(str(config)).st_mode & 0o777 == 0o600
@@ -836,7 +836,7 @@ def test_where_no_safe_folder_backend_exists_init_refuses(tmp_path, monkeypatch,
     monkeypatch.setattr(storage, "_windows_tree_available", lambda: False)
     assert cli.cmd_init({"root": str(root)}, _init_args(profile=None)) == 1
     assert "cannot hold folders through no link" in capsys.readouterr().out
-    assert not (root / ".ao").exists()
+    assert not (root / ".polyctl").exists()
 
 
 def test_an_import_refuses_an_item_with_no_id_and_keeps_its_file(project, capsys):

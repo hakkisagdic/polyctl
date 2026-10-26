@@ -1,0 +1,29 @@
+{
+  "project_config": [".cursor", ".cursorrules", "AGENTS.md"],
+  "id": "cursor-agent", "name": "Cursor Agent CLI", "verified": "documented",
+  "verified_source": "cursor.com/docs/cli (headless + using), Aug 2026 changelog; headless and reference/parameters re-read 2026-10-16, which still name the invoked command `agent` (install script at cursor.com/install), -p/--print, --force, --resume [chatId], --output-format (text, json, stream-json) and --model as declared here",
+  "detect": { "binaries": ["agent", "cursor-agent"], "processes": ["cursor-agent"], "headless": ["-p", "--print"] },
+  "important": "The invoked command is `agent`, not `cursor-agent`. The npm/binary is installed as cursor-agent but the CLI you run is `agent`. `-f`/`--force` (auto-approve) is REQUIRED for it to modify files in a headless run; without it the agent plans but changes nothing — a silent no-op that looks like failure.",
+  "send":   { "argv": ["agent", "-p", "{prompt}", "--output-format", "json", "-f"] },
+  "resume": { "argv": ["agent", "--resume", "{session}", "-p", "{prompt}", "--output-format", "json", "-f"] },
+  "list_sessions": { "argv": ["agent", "ls"] },
+  "quota": { "provider": "cursor" },
+  "options": {
+    "trust_none": null,
+    "trust_none_why": "no documented flag denies tools in print mode",
+    "model": ["--model", "{model}"], "effort": null,
+    "output_text": ["--output-format", "text"],
+    "output_json": ["--output-format", "json"],
+    "output_stream": ["--output-format", "stream-json"],
+    "auto_approve": ["-f"],
+    "bypass": {
+      "-f": { "roles": ["implementer", "architect"],
+        "why": "Kept in every command: the headless page says print mode applies no change without --force, and the narrower approvals (permissions.allow in .cursor/cli.json or ~/.cursor/cli-config.json) live only in files polyctl does not write, cannot be given on the command line, and match a shell command by its first word, so Shell(git) admits a push. Read on 2026-09-17 from cursor.com/docs/cli/headless, cursor.com/docs/cli/reference/parameters and cursor.com/docs/cli/reference/permissions." }
+    }
+  },
+  "transcript": { "kind": "call-return", "note": "--output-format json returns a structured final result; also `agent ls` lists prior chats.",
+                  "candidates_for_store": ["~/.cursor/cli","~/.config/cursor"] },
+  "busy": { "kind": "orchestrator-owned", "note": "print mode synchronous; Aug 2026 build retries wedged uploads on long headless sessions instead of hanging." },
+  "directives": { "steering_files": [".cursor/rules","AGENTS.md"], "mcp": ".cursor/mcp.json" },
+  "telemetry": { "cost": {"from":"call-return","todo":"confirm usage fields in json result"}, "balance": {"from":"none"} }
+}

@@ -1,11 +1,11 @@
-"""What the landing page states about ao is checked against the tree that ships it (LANDING-REFRESH).
+"""What the landing page states about polyctl is checked against the tree that ships it (LANDING-REFRESH).
 
 `.github/workflows/pages.yml` publishes `index.html` on every push to main, and until this module the
 suite never read it. The page carried its facts as prose, so a release could ship a page naming a
 command the parser has never had or an adapter level its adapter file no longer declares - the drift
 tests/test_readme_adapters.py exists for, on the one surface a stranger reads first. The page at 4cb79d7
-was itself such a page: it still sold ao as "attach to the agent you are already running", named codex
-and qoder untested after their adapters moved to partial, listed 15 of the 28 adapters ao ships, and
+was itself such a page: it still sold polyctl as "attach to the agent you are already running", named codex
+and qoder untested after their adapters moved to partial, listed 15 of the 28 adapters polyctl ships, and
 showed no command at all.
 
 The workflow catches one fact about the page - that it loads nothing from another host - and catches it
@@ -15,7 +15,7 @@ A fifth is a property of the page rather than a claim about the code: every stri
 both languages, since a page half-translated reads as a page abandoned. A sixth reads the sentence the
 page opens with against the three other places the package states what it is - the build metadata, the
 imported module, the formula a tap publishes from - because the page was not the only surface still
-selling the positioning ao grew out of.
+selling the positioning polyctl grew out of.
 """
 import contextlib
 import io
@@ -23,7 +23,7 @@ import re
 import shlex
 from pathlib import Path
 
-from ao import __version__, cli, lib as A
+from polyctl import __version__, cli, lib as A
 
 ROOT = Path(__file__).resolve().parent.parent
 PAGE = ROOT / "index.html"
@@ -34,11 +34,11 @@ TERM_PAIR = re.compile(
     r'<pre class="term" lang-en>(.*?)</pre>\s*<pre class="term" lang-tr>(.*?)</pre>', re.S
 )
 UNTAGGED = re.compile(r'<(?:pre class="term"|span class="c"|th\b)(?![^>]*\blang-(?:en|tr)\b)[^>]*>')
-CODE = re.compile(r'<(?:code|span class="k")>ao ([a-z][a-z-]*)')
+CODE = re.compile(r'<(?:code|span class="k")>polyctl ([a-z][a-z-]*)')
 LANGUAGE = re.compile(r'<(\w+)[^>]*?\blang-(en|tr)\b')
 EXTERNAL = re.compile(r'<(?:script|link|img)[^>]+(?:src|href)="https?://')
 EMPTY = re.compile(r'<(\w+)[^>]*?\blang-(?:en|tr)\b[^>]*>\s*</\1>')
-TITLE = re.compile(r"<title>agent-orchestrator — (.+?)</title>")
+TITLE = re.compile(r"<title>polyctl — (.+?)</title>")
 H1 = re.compile(r"<h1>\s*<span lang-en>(.*?)</span\s*>\s*<span lang-tr>(.*?)</span>\s*</h1>", re.S)
 RETIRED = re.compile(r"attach to the (?:coding )?agent you (?:are )?already running", re.I)
 OVERSTATED_HOOK = re.compile(
@@ -65,8 +65,8 @@ INLINE_CODE = re.compile(r"<code>([^<]+)</code>")
 FORMULA_VERSION = re.compile(r"/refs/tags/v(\d+\.\d+\.\d+)\.tar\.gz")
 IDENTITY = {                      # the other places the package says what it is
     "pyproject.toml": ROOT / "pyproject.toml",
-    "src/ao/__init__.py": ROOT / "src" / "ao" / "__init__.py",
-    "packaging/homebrew/agent-orchestrator.rb": ROOT / "packaging" / "homebrew" / "agent-orchestrator.rb",
+    "src/polyctl/__init__.py": ROOT / "src" / "polyctl" / "__init__.py",
+    "packaging/homebrew/polyctl.rb": ROOT / "packaging" / "homebrew" / "polyctl.rb",
 }
 
 
@@ -75,7 +75,7 @@ def _page():
 
 
 def _typed_commands(text):
-    """Each `ao …` line of the page's code blocks, as the words a reader would type. A block's own
+    """Each `polyctl …` line of the page's code blocks, as the words a reader would type. A block's own
     output lines are not commands, and neither is a comment."""
     for block in BLOCK.findall(text):
         for line in TAG.sub("", block).splitlines():
@@ -86,13 +86,13 @@ def _typed_commands(text):
                 words = shlex.split(line, comments=True)
             except ValueError:
                 continue
-            if words[:1] == ["ao"]:
+            if words[:1] == ["polyctl"]:
                 yield words
 
 
 def _declared_support():
-    """Group packaged adapters by how ao observes them, by verification status, and by stand-in
-    measurement qualification, directly from `src/ao/adapters/*.json`."""
+    """Group packaged adapters by how polyctl observes them, by verification status, and by stand-in
+    measurement qualification, directly from `src/polyctl/adapters/*.json`."""
     observed = {
         "session_store": set(),
         "call_return": set(),
@@ -147,7 +147,7 @@ def test_the_landing_page_names_the_version_the_package_is_built_at():
 def test_the_landing_page_groups_each_adapter_as_its_adapter_declares_it():
     """LANDING-REFRESH-3: the table is the README's table in another shape - each level naming the adapters
     whose adapter declares that level, and no level missing. A cloud agent's adapter is left out as
-    `ao adapters` leaves it out: it names no harness this page can review with."""
+    `polyctl adapters` leaves it out: it names no harness this page can review with."""
     _, declared, _ = _declared_support()
     shown = {level: {name.strip() for name in TAG.sub("", cell).split("·") if name.strip()}
              for level, cell in PILL.findall(_page())}
@@ -158,7 +158,7 @@ def test_the_landing_page_groups_each_adapter_as_its_adapter_declares_it():
 
 def test_the_landing_page_support_intro_states_how_each_adapter_is_observed_and_measured():
     """LANDING-REFRESH-2, LANDING-REFRESH-3: the support section's opening paragraph must state how each
-    group of packaged adapters is observed (a reachable session store read, call-return data that ao keeps
+    group of packaged adapters is observed (a reachable session store read, call-return data that polyctl keeps
     itself, a declared transcript shape without a resolved session store, an unknown transcript, a
     stateless reviewer/model backend, or a cloud template observed through pull-request polling and Git
     results) and which levels are measured (`full`, `partial`, with stand-in-tested adapters qualified),
@@ -199,12 +199,12 @@ def test_the_landing_page_support_intro_states_how_each_adapter_is_observed_and_
 def test_the_landing_page_support_intro_describes_how_cloud_adapters_are_observed():
     """LANDING-REFRESH-3: `Each adapter` at the start of the support intro promises every packaged adapter is
     covered, so `cloud-generic` cannot be omitted while the table below leaves cloud templates out; the
-    intro must name every cloud adapter from `src/ao/adapters/*.json` and state that its declaration
+    intro must name every cloud adapter from `src/polyctl/adapters/*.json` and state that its declaration
     observes work through pull-request polling (`poll`) and Git results (`result`)."""
     match = SUPPORT_INTRO.search(_page())
     assert match, "the Agent support section carries no bilingual intro paragraph"
     observed, _, _ = _declared_support()
-    assert observed["cloud"], "no cloud adapter declared in src/ao/adapters/*.json"
+    assert observed["cloud"], "no cloud adapter declared in src/polyctl/adapters/*.json"
 
     for lang, intro in zip(("en", "tr"), match.groups()):
         sentences = [part.strip() for part in intro.strip().split(".") if part.strip()]
@@ -221,14 +221,14 @@ def test_the_landing_page_support_intro_describes_how_cloud_adapters_are_observe
 
 def test_the_landing_page_does_not_claim_standin_tested_adapters_were_measured_against_an_install():
     """LANDING-REFRESH-3: `openai-api` sits in the `partial` row, but its declaration in
-    `src/ao/adapters/openai-api.json` states that `ao-api-review` was run against a stand-in of the
+    `src/polyctl/adapters/openai-api.json` states that `polyctl-api-review` was run against a stand-in of the
     chat-completions endpoint on this machine while a provider's own answer is proven on a local candidate
     by the owner. Claiming that the `full` and `partial` rows were measured against an install without
     qualifying `openai-api` overstates that evidence."""
     match = SUPPORT_INTRO.search(_page())
     assert match, "the Agent support section carries no bilingual intro paragraph"
     _, _, standin = _declared_support()
-    assert standin, "no stand-in-measured adapter found in src/ao/adapters/*.json"
+    assert standin, "no stand-in-measured adapter found in src/polyctl/adapters/*.json"
 
     for lang, intro in zip(("en", "tr"), match.groups()):
         meas_clause = intro.strip().split(".")[2].split(";")[0]
@@ -244,9 +244,9 @@ def regex_collapse(text):
     return " ".join(TAG.sub("", text).split())
 
 
-def test_every_command_name_on_the_landing_page_is_one_ao_has():
-    """LANDING-REFRESH-4: the page names commands in prose - `ao catchup` here, `ao gain` there - and in the
-    panel that walks a change through them, and a name ao does not have is a reader hitting an error on
+def test_every_command_name_on_the_landing_page_is_one_polyctl_has():
+    """LANDING-REFRESH-4: the page names commands in prose - `polyctl catchup` here, `polyctl gain` there - and in the
+    panel that walks a change through them, and a name polyctl does not have is a reader hitting an error on
     the first try."""
     commands = next(action.choices for action in cli.build_parser()._actions if isinstance(action.choices, dict))
 
@@ -255,7 +255,7 @@ def test_every_command_name_on_the_landing_page_is_one_ao_has():
 
 def test_every_command_the_landing_page_shows_a_reader_type_parses():
     """LANDING-REFRESH-5: the setup block and the sample run are the page's promise - five minutes to the
-    first grant - so each line goes through ao's own parser, which also holds `--profile` to the
+    first grant - so each line goes through polyctl's own parser, which also holds `--profile` to the
     profiles that exist and `hooks` to the subcommands it has."""
     problems = []
     for words in _typed_commands(_page()):
@@ -293,7 +293,7 @@ def test_every_string_on_the_landing_page_ships_in_both_languages():
 def test_the_package_sells_what_the_landing_page_sells():
     """LANDING-REFRESH-7: the sentence the page opens with is the package's own description, in the build
     metadata, in the module every command imports, and in the formula a tap publishes from. Those four
-    drifted together: at 4cb79d7 all of them still sold ao as attaching to a running agent, so fixing the
+    drifted together: at 4cb79d7 all of them still sold polyctl as attaching to a running agent, so fixing the
     page alone would have left the same stale claim one surface further down. Each states the page's
     headline sentence, and none states the retired one."""
     tagline = TITLE.search(_page()).group(1)
@@ -313,7 +313,7 @@ def test_the_package_sells_what_the_landing_page_sells():
 
 def test_the_landing_page_does_not_claim_the_hook_alone_stops_an_ungranted_commit():
     """LANDING-REFRESH-8: an in-scope implementer whose harness allows git commands can run
-    `git commit --no-verify`; the pre-commit hook refuses a plain `git commit`, and `ao doctor` and the
+    `git commit --no-verify`; the pre-commit hook refuses a plain `git commit`, and `polyctl doctor` and the
     watchdog flag a commit that went around it. Neither the page nor the package metadata may state that
     only a granted change lands."""
     page = _page()
@@ -336,7 +336,7 @@ def test_every_install_route_on_the_landing_page_ships_the_version_the_page_name
     published (`docs/release.md` step 7), so at release time its archive URL still points at the previous
     tag. The page must not tell a reader to run `brew install` while the formula is pinned to an older
     version than the one the page announces."""
-    formula = IDENTITY["packaging/homebrew/agent-orchestrator.rb"].read_text(encoding="utf-8")
+    formula = IDENTITY["packaging/homebrew/polyctl.rb"].read_text(encoding="utf-8")
     pinned = FORMULA_VERSION.findall(formula)
 
     assert pinned, "the Homebrew formula names no tagged archive"

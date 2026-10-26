@@ -2,12 +2,12 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 
 def _project_adapter(project):
     adapter = dict(A.load_adapter("kiro"), send={"argv": ["fixture-harness", "{prompt}"]})
-    folder = Path(project["root"], ".ao", "adapters")
+    folder = Path(project["root"], ".polyctl", "adapters")
     folder.mkdir()
     (folder / "kiro.json").write_text(json.dumps(adapter), encoding="utf-8")
     return adapter
@@ -15,7 +15,7 @@ def _project_adapter(project):
 
 def test_c9_hold_reads_project_adapter(project, monkeypatch, capsys):
     _project_adapter(project)
-    from ao import procs
+    from polyctl import procs
     monkeypatch.setattr(procs, "all_pids", lambda: [321])
     monkeypatch.setattr(procs, "argv", lambda pid: ["fixture-harness", "prompt"])
     monkeypatch.setattr(procs, "cwd", lambda pid: project["root"])

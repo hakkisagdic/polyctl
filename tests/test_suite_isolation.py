@@ -1,11 +1,11 @@
 """A test runs on a machine of the suite's own: not the person's home, PATH, variables or agent CLIs (TRUST-HYGIENE).
 
-ao binds what it keeps on a machine when a module is imported - telegram.CONF, email.CONF, the
+polyctl binds what it keeps on a machine when a module is imported - telegram.CONF, email.CONF, the
 watchdog's STATE_DIR - and those were the person's own files: a test that did not point them away
 could reach their phone and their mail. A program a test started by name was looked for on their
-PATH, where their agent CLIs are, ao read the files their AO_ variables name, and ao's own search
+PATH, where their agent CLIs are, polyctl read the files their POLYCTL_ variables name, and polyctl's own search
 looks in shared package-manager and adapter-declared directories whatever PATH says. tests/conftest.py gives the suite a
-home, a PATH and an environment of its own before ao is imported, and keeps every search of ao's in
+home, a PATH and an environment of its own before polyctl is imported, and keeps every search of polyctl's in
 this process out of those directories. These hold it to that.
 """
 import ast
@@ -19,17 +19,17 @@ from pathlib import Path
 
 import pytest
 
-from ao import cli, email, lib as A, telegram, watchdog as W
+from polyctl import cli, email, lib as A, telegram, watchdog as W
 from tests import conftest
 
 POSIX_SYSTEM = {"/usr/bin", "/bin", "/usr/sbin", "/sbin"}
 # The variables the suite's own fixtures set for each test (tests/conftest.py).
-SET_FOR_EACH_TEST = {"AO_SETTINGS", "AO_PROJECT_REGISTRY", "AO_LEDGER_CHECKPOINTS", "AO_EVENTS"}
-# Places in ao's source that name _BIN_DIRS or a shared install directory without looking there for an agent CLI.
+SET_FOR_EACH_TEST = {"POLYCTL_SETTINGS", "POLYCTL_PROJECT_REGISTRY", "POLYCTL_LEDGER_CHECKPOINTS", "POLYCTL_EVENTS"}
+# Places in polyctl's source that name _BIN_DIRS or a shared install directory without looking there for an agent CLI.
 NOT_A_SEARCH_FOR_AN_AGENT = {
-    "src/ao/parts/lib_mail.py:<module>": "binds _BIN_DIRS, which the searches read",
-    "src/ao/parts/lib_mail.py:_SearchDirs._dirs": "names the directories _BIN_DIRS holds",
-    "src/ao/parts/lib_gates.py:_find_git_binary": "looks there for git alone",
+    "src/polyctl/parts/lib_mail.py:<module>": "binds _BIN_DIRS, which the searches read",
+    "src/polyctl/parts/lib_mail.py:_SearchDirs._dirs": "names the directories _BIN_DIRS holds",
+    "src/polyctl/parts/lib_gates.py:_find_git_binary": "looks there for git alone",
 }
 
 
@@ -59,9 +59,9 @@ def _names_a_shared_directory(node):
 
 
 def _places_that_look_past_path():
-    """`file:scope` for each place in ao's source that names _BIN_DIRS or a shared install directory."""
+    """`file:scope` for each place in polyctl's source that names _BIN_DIRS or a shared install directory."""
     found = set()
-    for path in sorted(Path(conftest.SRC, "ao").rglob("*.py")):
+    for path in sorted(Path(conftest.SRC, "polyctl").rglob("*.py")):
         relative = path.relative_to(conftest.REPO).as_posix()
         for scope, node in _scopes(ast.parse(path.read_text(encoding="utf-8"), relative)):
             if _names_a_shared_directory(node):
@@ -69,23 +69,23 @@ def _places_that_look_past_path():
     return found
 
 
-def test_the_home_is_the_suites_and_every_machine_file_ao_bound_at_import_is_inside_it():
+def test_the_home_is_the_suites_and_every_machine_file_polyctl_bound_at_import_is_inside_it():
     assert os.path.expanduser("~") == conftest.SESSION_HOME != conftest.REAL_HOME
     for bound in (A.HOME, W.STATE_DIR, email.CONF, telegram.CONF):
         assert conftest._within(bound, conftest.SESSION_HOME), bound
 
 
 def test_no_variable_of_aos_or_one_pointing_home_is_taken_from_the_environment_the_suite_started_in():
-    started_in = {"AO_USER_ADAPTERS": "/x/adapters", "AO_SETTINGS": "/x/settings.json", "AO_GIT": "/x/git",
-                  "AO_ROLE": "implementer", "AO_A_VARIABLE_AO_HAS_NOT_NAMED_YET": "/x", "AO_FUZZ_SEED": "7",
-                  "AO_FUZZ_SEEDS": "80", "XDG_CONFIG_HOME": "/x/.config", "GIT_CONFIG_GLOBAL": "/x/.gitconfig",
+    started_in = {"POLYCTL_USER_ADAPTERS": "/x/adapters", "POLYCTL_SETTINGS": "/x/settings.json", "POLYCTL_GIT": "/x/git",
+                  "POLYCTL_ROLE": "implementer", "POLYCTL_A_VARIABLE_POLYCTL_HAS_NOT_NAMED_YET": "/x", "POLYCTL_FUZZ_SEED": "7",
+                  "POLYCTL_FUZZ_SEEDS": "80", "XDG_CONFIG_HOME": "/x/.config", "GIT_CONFIG_GLOBAL": "/x/.gitconfig",
                   "HOME": "/x", "USERPROFILE": "/x", "LANG": "C.UTF-8"}
 
     conftest._own_environment(started_in)
 
-    assert started_in == {"AO_FUZZ_SEED": "7", "AO_FUZZ_SEEDS": "80", "HOME": conftest.SESSION_HOME,
+    assert started_in == {"POLYCTL_FUZZ_SEED": "7", "POLYCTL_FUZZ_SEEDS": "80", "HOME": conftest.SESSION_HOME,
                           "USERPROFILE": conftest.SESSION_HOME, "LANG": "C.UTF-8"}
-    assert {name for name in os.environ if name.startswith("AO_")} <= SET_FOR_EACH_TEST | set(conftest.SUITE_SWITCHES)
+    assert {name for name in os.environ if name.startswith("POLYCTL_")} <= SET_FOR_EACH_TEST | set(conftest.SUITE_SWITCHES)
 
 
 def test_git_reads_the_suites_home_so_a_commit_that_names_nobody_is_the_suites():
@@ -118,7 +118,7 @@ def _blocked_in_a_child():
 
 @pytest.mark.skipif(not hasattr(signal, "pthread_sigmask"), reason="Windows keeps no signal mask")
 def test_a_stop_signal_blocked_where_the_suite_started_is_unblocked_for_every_process_a_test_starts():
-    """A landing daemon's shell had come to block SIGINT, and each `ao` a lane test started inherited the block:
+    """A landing daemon's shell had come to block SIGINT, and each `polyctl` a lane test started inherited the block:
     the test's SIGINT never arrived (SUITE-SIGMASK)."""
     stop = {int(signal.SIGINT), int(signal.SIGTERM), int(signal.SIGHUP)}
     assert not _blocked_in_a_child() & stop
@@ -133,9 +133,9 @@ def test_a_stop_signal_blocked_where_the_suite_started_is_unblocked_for_every_pr
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows has no SIGHUP, and no signal a parent ignores passes an exec")
-def test_an_ao_a_test_starts_hears_the_stop_signals_a_shell_or_nohup_started_the_suite_ignoring():
-    """A shell runs a command it puts in the background with SIGINT ignored and nohup ignores SIGHUP; an ao keeps
-    what it was set to ignore, so CALM_AO starts it as a terminal does (SUITE-SIGMASK)."""
+def test_an_polyctl_a_test_starts_hears_the_stop_signals_a_shell_or_nohup_started_the_suite_ignoring():
+    """A shell runs a command it puts in the background with SIGINT ignored and nohup ignores SIGHUP; a polyctl keeps
+    what it was set to ignore, so CALM_POLYCTL starts it as a terminal does (SUITE-SIGMASK)."""
     report = ("import signal; print(signal.getsignal(signal.SIGINT) is signal.default_int_handler, "
               "signal.getsignal(signal.SIGTERM) is signal.SIG_DFL, signal.getsignal(signal.SIGHUP) is signal.SIG_DFL)")
     ignoring = ("import os, signal, sys\n"
@@ -148,7 +148,7 @@ def test_an_ao_a_test_starts_hears_the_stop_signals_a_shell_or_nohup_started_the
 
     assert started_ignoring(report)[::2] == ["False", "False"]              # what was ignored stays ignored
     assert started_ignoring(conftest.AS_A_TERMINAL_STARTS_IT + report) == ["True", "True", "True"]
-    assert conftest.CALM_AO[2].startswith(conftest.AS_A_TERMINAL_STARTS_IT)
+    assert conftest.CALM_POLYCTL[2].startswith(conftest.AS_A_TERMINAL_STARTS_IT)
 
 
 def test_path_is_the_suites_bin_then_the_directory_that_holds_git_alone_then_the_systems_own():
@@ -156,7 +156,7 @@ def test_path_is_the_suites_bin_then_the_directory_that_holds_git_alone_then_the
     git = [conftest.GIT_DIRECTORY] if conftest.GIT_DIRECTORY else []
 
     assert entries == [conftest.SESSION_BIN] + git + [d for d in conftest.SYSTEM_DIRS if d not in git]
-    if git:                                   # the git ao measures with, and the one a test starts by name
+    if git:                                   # the git polyctl measures with, and the one a test starts by name
         assert os.path.dirname(conftest.GIT) == conftest.GIT_DIRECTORY
         assert conftest._within(shutil.which("git"), conftest.GIT)
 
@@ -200,7 +200,7 @@ def test_no_agent_cli_is_within_a_tests_reach_outside_the_temporary_and_the_syst
     assert reached == {}
 
 
-def test_ao_finds_no_program_in_a_shared_install_directory_on_path_or_off_it(tmp_path, monkeypatch):
+def test_polyctl_finds_no_program_in_a_shared_install_directory_on_path_or_off_it(tmp_path, monkeypatch):
     # Only looked for, never run: a resolve would ask each copy it found for its --version.
     shared, own = tmp_path / "shared", tmp_path / "own"
     _executable(shared / "claude")
@@ -213,13 +213,13 @@ def test_ao_finds_no_program_in_a_shared_install_directory_on_path_or_off_it(tmp
     handed = W.child_path().split(os.pathsep)
     assert str(own) in handed and str(shared) not in handed
 
-    monkeypatch.setattr(A, "_BIN_DIRS", (str(shared),))    # off PATH: where ao looks after it
+    monkeypatch.setattr(A, "_BIN_DIRS", (str(shared),))    # off PATH: where polyctl looks after it
     monkeypatch.setenv("PATH", "")
     assert A.binary_candidates("claude") == []
     assert cli._reviewer_candidate_paths("claude") == []
 
 
-def test_every_place_ao_looks_past_path_for_a_program_is_run_with_the_shared_directories_left_out():
+def test_every_place_polyctl_looks_past_path_for_a_program_is_run_with_the_shared_directories_left_out():
     kept_off = conftest.KEPT_OFF_SHARED
 
     assert _places_that_look_past_path() == set(kept_off) | set(NOT_A_SEARCH_FOR_AN_AGENT)
@@ -230,10 +230,10 @@ def test_every_place_ao_looks_past_path_for_a_program_is_run_with_the_shared_dir
         assert getattr(module, name) is in_its_place, place
 
 
-def test_the_directories_kept_out_of_reach_are_the_ones_ao_names_past_path_outside_every_home(monkeypatch):
+def test_the_directories_kept_out_of_reach_are_the_ones_polyctl_names_past_path_outside_every_home(monkeypatch):
     searched = {d for d in A._SearchDirs() if not d.startswith("~")}
     monkeypatch.setenv("PATH", "")
-    handed = {d for d in conftest._AO_CHILD_PATH().split(os.pathsep)
+    handed = {d for d in conftest._POLYCTL_CHILD_PATH().split(os.pathsep)
               if d and not conftest._within(d, conftest.SESSION_HOME)} - POSIX_SYSTEM
 
     assert searched == handed == set(conftest.SHARED_INSTALL_DIRS)
@@ -249,7 +249,7 @@ def test_a_new_package_install_directory_reaches_children_and_is_kept_off_tests(
 
     assert directory in A._SearchDirs()
     assert A.binary_candidates("newcomer") == [os.path.join(directory, "newcomer")]
-    assert directory in conftest._AO_CHILD_PATH().split(os.pathsep)
+    assert directory in conftest._POLYCTL_CHILD_PATH().split(os.pathsep)
     monkeypatch.setattr(conftest, "SHARED_INSTALL_DIRS", conftest._shared_install_dirs())
     assert directory in conftest.SHARED_INSTALL_DIRS
     assert A.binary_candidates("newcomer") == []

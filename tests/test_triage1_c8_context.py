@@ -1,6 +1,6 @@
 """Test-only review context resolves committed definitions within its budget (TRIAGE-1-MEDIUM)."""
 import pytest
-from ao import lib as A
+from polyctl import lib as A
 from tests import test_slice_boundary as boundary
 
 
@@ -33,13 +33,13 @@ def test_c8_context_headers_obey_budget(project, budget):
 
 def test_c8_dotted_import_finds_a_definition_in_a_loaded_part(project):
     root = project["root"]
-    boundary._write(root, "src/ao/lib.py", '_part("lib_context", globals())\n')
-    boundary._write(root, "src/ao/parts/lib_context.py", 'def review_context():\n    return "context"\n')
+    boundary._write(root, "src/polyctl/lib.py", '_part("lib_context", globals())\n')
+    boundary._write(root, "src/polyctl/parts/lib_context.py", 'def review_context():\n    return "context"\n')
     boundary._git(root, "add", "src")
     boundary._git(root, "commit", "-qm", "module split into a part")
-    boundary._write(root, "tests/test_context.py", 'import ao.lib\nassert ao.lib.review_context() == "context"\n')
+    boundary._write(root, "tests/test_context.py", 'import polyctl.lib\nassert polyctl.lib.review_context() == "context"\n')
     boundary._git(root, "add", "tests/test_context.py")
     candidate = A.index_candidate(root)
     result = A.review_context(root, ["tests/test_context.py"], candidate["index_tree"], candidate["head"])
-    assert result["paths"] == ["src/ao/parts/lib_context.py"]
+    assert result["paths"] == ["src/polyctl/parts/lib_context.py"]
     assert "def review_context():" in result["text"]

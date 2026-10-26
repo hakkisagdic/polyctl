@@ -2,7 +2,7 @@ import os
 import re
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 HOSTILE = 'a/b\\c:d*e?f"g<h>i|j k\tl'
 

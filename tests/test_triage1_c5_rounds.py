@@ -4,7 +4,7 @@ import os
 import time
 from pathlib import Path
 import pytest
-from ao import lib as A, storage, watchdog as W
+from polyctl import lib as A, storage, watchdog as W
 from tests import test_criteria_verdicts as criteria
 from tests import test_round_ledger as rounds
 from tests.test_round_ledger import _review, _running

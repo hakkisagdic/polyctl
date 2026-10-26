@@ -2,8 +2,8 @@
 import os
 from types import SimpleNamespace
 
-from ao import email, lib as A, telegram
-from ao import watchdog as W
+from polyctl import email, lib as A, telegram
+from polyctl import watchdog as W
 
 
 def test_dry_cycle_is_traced_and_not_recorded(project):
@@ -32,7 +32,7 @@ def test_expired_alarm_is_returned_once(project):
 
 
 def test_stale_sibling_heartbeats(project, tmp_path):
-    d = os.path.join(A.HOME, ".ao")
+    d = os.path.join(A.HOME, ".polyctl")
     os.makedirs(d, exist_ok=True)
     for name, age in (("heartbeat-proj", 10), ("heartbeat-other", 2000), ("heartbeat-fresh", 30)):
         p = os.path.join(d, name)
@@ -246,7 +246,7 @@ def test_omitted_audience_retains_legacy_title_inference(project, monkeypatch):
 def test_dry_cycle_escalation_has_no_alarm_or_channel_side_effects(
     project, tmp_path, monkeypatch,
 ):
-    from ao import features as F
+    from polyctl import features as F
 
     root = project["root"]
     transcript = tmp_path / "transcript.jsonl"
@@ -381,7 +381,7 @@ def test_credit_sampler_raises_exhaustion_on_the_first_reading(project, monkeypa
 
 
 def test_doctor_pages_a_blind_credit_check_only_while_the_implementer_is_driven(project):
-    from ao import cli, features as F
+    from polyctl import cli, features as F
     root = project["root"]
     W.save_state(root, {"credit_check_problem": {"at": 1, "reason": "kiro-cli is not on PATH", "adapter": "kiro"}})
 
@@ -391,7 +391,7 @@ def test_doctor_pages_a_blind_credit_check_only_while_the_implementer_is_driven(
 
 
 def test_launchd_path_keeps_stable_dirs_and_drops_shell_bound_ones(tmp_path, monkeypatch):
-    from ao import cli
+    from polyctl import cli
     first, second = tmp_path / "a", tmp_path / "b"
     shell_bound = tmp_path / ".local" / "state" / "fnm_multishells" / "123_456" / "bin"
     for d in (first, second, shell_bound):
@@ -403,10 +403,10 @@ def test_launchd_path_keeps_stable_dirs_and_drops_shell_bound_ones(tmp_path, mon
 
 
 def test_launchd_job_templates_carry_the_path():
-    from ao import cli
+    from polyctl import cli
     watchdog = cli.PLIST.format(label="l", python_arg="", script="s", root="r", idle=6,
                                 interval=120, log="x", path="/p")
-    doctor = cli.PLIST_CMD.format(label="l", args="<string>ao</string>", interval=900, log="x", path="/p")
+    doctor = cli.PLIST_CMD.format(label="l", args="<string>polyctl</string>", interval=900, log="x", path="/p")
     for body in (watchdog, doctor):
         assert "<key>EnvironmentVariables</key><dict><key>PATH</key><string>/p</string></dict>" in body
 

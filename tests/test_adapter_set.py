@@ -4,7 +4,7 @@ import re
 import shutil
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.standin import program
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

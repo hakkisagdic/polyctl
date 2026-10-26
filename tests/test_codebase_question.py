@@ -3,7 +3,7 @@ import os
 import sys
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 CITED = ("import json, sys\n"
          "print(json.dumps({'answer': 'the journal is written in src/a.py before admission: ' + sys.argv[1],\n"

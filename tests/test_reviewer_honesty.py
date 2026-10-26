@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_review_chain import _args, _fake, _repo_with_change
 from tests.test_reviewer_identity import _commit_ok
 

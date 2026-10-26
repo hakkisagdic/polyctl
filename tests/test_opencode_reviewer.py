@@ -1,4 +1,4 @@
-"""An opencode reviewer runs as an agent of ao's whose permission denies every tool but reading (OPENCODE-REVIEWER).
+"""An opencode reviewer runs as an agent of polyctl's whose permission denies every tool but reading (OPENCODE-REVIEWER).
 
 Measured on opencode 1.18.27 on 2026-10-07 with EVREN's DeepSeek V4 Flash. No flag denies opencode a tool - `--auto`
 only approves - so its adapter was ineligible to review. Run as an agent whose permission denies `*` and allows read,
@@ -8,7 +8,7 @@ model's text alone on stdout.
 """
 import pytest
 
-from ao import allowlist, cli, lib as A
+from polyctl import allowlist, cli, lib as A
 from tests.standin import program
 
 OPENCODE = ["opencode", "run", "{prompt}", "--model", "evren/deepseek-v4-flash", "--pure"]
@@ -46,7 +46,7 @@ def test_an_opencode_reviewer_runs_only_on_the_release_its_agent_was_measured_on
 
 
 def _harness(tmp_path, stdout, stderr):
-    """A stand-in opencode: it checks the agent ao named allows reading alone, and prints as opencode run does. A
+    """A stand-in opencode: it checks the agent polyctl named allows reading alone, and prints as opencode run does. A
     program on Windows too (WINDOWS-LANE-PARITY)."""
     harness = program(tmp_path, "opencode", f"""import os, sys
 name = sys.argv[sys.argv.index("--agent") + 1]
@@ -62,7 +62,7 @@ sys.stdout.write({stdout!r})
 
 def test_an_opencode_review_is_the_text_it_prints_on_stdout(project, tmp_path):
     verdict = "VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0\n"
-    argv = _harness(tmp_path, verdict, "> ao-reviewer · deepseek-v4-flash\n* Read candidate/x.py\n")
+    argv = _harness(tmp_path, verdict, "> polyctl-reviewer · deepseek-v4-flash\n* Read candidate/x.py\n")
 
     attempt = cli._run_reviewer(project["root"], argv, 30)
 
@@ -71,7 +71,7 @@ def test_an_opencode_review_is_the_text_it_prints_on_stdout(project, tmp_path):
 
 def test_an_opencode_run_that_printed_only_its_progress_answered_nothing(project, tmp_path):
     """Its progress is no answer: read as one, a tool call's line was a reviewer's text."""
-    argv = _harness(tmp_path, "", "> ao-reviewer · deepseek-v4-flash\n* Glob candidate/**\nVERDICT: APPROVED\n")
+    argv = _harness(tmp_path, "", "> polyctl-reviewer · deepseek-v4-flash\n* Glob candidate/**\nVERDICT: APPROVED\n")
 
     attempt = cli._run_reviewer(project["root"], argv, 30)
 

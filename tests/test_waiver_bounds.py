@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, storage
+from polyctl import cli, lib as A, storage
 from tests.test_switches_and_bypass import _allow_candidate_verification
 
 WAIVE = dict(gate="review", slice="B7", why="reviewer at quota", by="alice (owner)", hours=24.0)
@@ -16,7 +16,7 @@ NAMED = SimpleNamespace(boundary=None, author_family="author-family", by="A. Per
 
 
 def _running(root, *slices):
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     text = open(board, encoding="utf-8").read()
     items = "".join(f"- [{s}] slice {s} · since: 2026-09-05 10:00\n" for s in slices)
     open(board, "w", encoding="utf-8").write(text.replace("## running\n", "## running\n" + items))
@@ -51,7 +51,7 @@ def _commit_ok(project, capsys):
     ({"hours": 0.0}, "--hours must be above 0"),
     ({"hours": 169.0}, "--hours must be above 0"),
 ])
-def test_ao_waive_refuses_a_waiver_without_bounds(project, capsys, change, message):
+def test_polyctl_waive_refuses_a_waiver_without_bounds(project, capsys, change, message):
     assert cli.cmd_waive(project, SimpleNamespace(**{**WAIVE, **change})) == 2
     assert message in capsys.readouterr().out
     assert not os.path.exists(A.waivers_path(project["root"]))
@@ -148,7 +148,7 @@ def test_catchup_reviews_exactly_the_commit_granted_under_a_bounded_waiver(proje
     waiver, parent, landed = _landed_under_a_waiver(project, monkeypatch, capsys)
     seen = []
     monkeypatch.setattr(cli, "cmd_review", lambda cfg, ns: seen.append(ns.commits) or 3)
-    from ao import watchdog as W
+    from polyctl import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: 0)
 
     assert cli.cmd_catchup(project, NAMED) == 3
@@ -158,7 +158,7 @@ def test_catchup_reviews_exactly_the_commit_granted_under_a_bounded_waiver(proje
 
 def test_catchup_does_not_close_a_waiver_when_no_review_was_recorded(project, monkeypatch, capsys):
     waiver, _, _ = _landed_under_a_waiver(project, monkeypatch, capsys)
-    from ao import watchdog as W
+    from polyctl import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: 0)
     mailed = []
     monkeypatch.setattr(A, "write_mail", lambda *args, **kwargs: mailed.append(args))
@@ -171,10 +171,10 @@ def test_catchup_does_not_close_a_waiver_when_no_review_was_recorded(project, mo
 
 
 def test_catchup_closes_a_waiver_on_its_own_review_not_on_another_of_the_same_range(project, monkeypatch, capsys):
-    """CATCHUP-READY-2: an `ao review --commits` of the same range that ran meanwhile, judged against the implementer
+    """CATCHUP-READY-2: a `polyctl review --commits` of the same range that ran meanwhile, judged against the implementer
     configured now and recording no author, was the review the waiver closed on."""
     waiver, _, _ = _landed_under_a_waiver(project, monkeypatch, capsys)
-    from ao import watchdog as W
+    from polyctl import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: 0)
 
     def concurrent(cfg, ns):
@@ -193,7 +193,7 @@ def test_a_close_that_cannot_be_written_fails_catchup(project, monkeypatch, caps
     _commit(root, "base")
     empty = A.waive(root, "review", "B7", "quota", by="alice (owner)", hours=0.0002)
     time.sleep(1)
-    from ao import watchdog as W
+    from polyctl import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: 0)
     path = os.path.abspath(A.waivers_path(root))
     append = storage.append_chained_jsonl

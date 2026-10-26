@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_commit_authority import _allow_commit_prerequisites
 from tests.test_review_chain import _args, _fake, _repo_with_change
 
@@ -41,7 +41,7 @@ def _margin(body):
 
 
 def _running(root, item):
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     text = open(board, encoding="utf-8").read()
     open(board, "w", encoding="utf-8").write(text.replace("## running\n", f"## running\n- {item}\n"))
 

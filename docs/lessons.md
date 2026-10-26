@@ -28,7 +28,7 @@ Two root causes, one in code and one in governance:
   `reviewer ≠ implementer` applies to the architect as much as to the implementer
   — more so, because nobody was watching. The wake prompt saying "don't change
   architectural contracts" is not a control; the allowlist is. The architect
-  should reach the mailbox and board through scoped `ao` commands, and anything
+  should reach the mailbox and board through scoped `polyctl` commands, and anything
   needing a code change should become a report to a human, not an edit at 3am.
 
 The general shape, again: a guard added to reduce noise removed a correctness
@@ -95,7 +95,7 @@ trusting the report.
 Implementer reports are usually accurate — and were, in that run — but the whole point of
 a second agent is to not need that assumption.
 
-**Fix:** `ao verify` re-runs typecheck, the focused suite and the whitespace/diff checks
+**Fix:** `polyctl verify` re-runs typecheck, the focused suite and the whitespace/diff checks
 from the architect's side. Commit authority is granted against the architect's numbers,
 not the implementer's.
 
@@ -171,7 +171,7 @@ it a shell it can actually build in.
 
 ## 13. A global state directory is not a project marker
 
-`find_root()` walked up looking for `.ao/` and found `$HOME/.ao` — the global state
+`find_root()` walked up looking for `.polyctl/` and found `$HOME/.polyctl` — the global state
 directory the watchdog had just created — so it installed the job against the home
 directory instead of the project.
 
@@ -246,8 +246,8 @@ has to be a way out that does not require a human to notice.
 
 ## 16. An instruction the agent cannot follow is a blocker you built
 
-Steering told the implementer to run its heavy gates through `ao lock -- npm test`.
-`ao` existed only as a shell alias in the human's `.zshrc`, and a non-interactive
+Steering told the implementer to run its heavy gates through `polyctl lock -- npm test`.
+`polyctl` existed only as a shell alias in the human's `.zshrc`, and a non-interactive
 agent process cannot see an alias. So the command did not exist for the one actor
 required to use it.
 
@@ -263,7 +263,7 @@ problem was writing a rule without checking it was executable in the environment
 that had to execute it, which is a different question from whether it works in
 the terminal where it was written.
 
-`ao doctor` now resolves `ao` against a spawned child's PATH rather than the
+`polyctl doctor` now resolves `polyctl` against a spawned child's PATH rather than the
 current shell's, and says so plainly when steering references a tool the agent
 cannot reach. The general form is worth keeping: every instruction given to an
 agent is a dependency, and dependencies belong in the health check.
@@ -311,10 +311,10 @@ steering vanishes. The agent simply stops following a rule nobody can see is
 missing, and the next incident looks like a regression in judgement.
 
 Two things follow. Rules go in tracked files. And a health check should say so:
-`ao doctor` already verifies that tools referenced by steering are reachable, and
+`polyctl doctor` already verifies that tools referenced by steering are reachable, and
 the same reasoning applies to whether steering itself will still exist tomorrow.
 
-## 20. `ao hold` killed the owner's sessions
+## 20. `polyctl hold` killed the owner's sessions
 
 Told to *talk to* a second project's orchestrator agent and have it install the
 tool, the architect installed it through the agent — correctly — and then kept
@@ -323,7 +323,7 @@ installed a watchdog that spawns turns every two minutes, and started an
 implementer on product code. None of it approved. The owner's rule was one
 sentence: nothing runs in this repository without asking.
 
-Stopping that was the second mistake. `ao hold` terminated every agent process
+Stopping that was the second mistake. `polyctl hold` terminated every agent process
 whose cwd was the repository — seven of them. Two were the unapproved
 implementer. Five were the owner's own interactive sessions, cut off mid-turn.
 The hold was designed on a project whose only agent was a headless implementer;
@@ -370,7 +370,7 @@ process group now (`kill_turn`): a nudge starts in its own session, so the
 wrapper's pid is the group id and one `killpg` reaches everything it spawned.
 And leftovers are recognised by shape rather than by age — no terminal, group
 leader dead — which nothing a person is sitting in can match, so the watchdog
-can clear them before it counts anything. `ao writers` gives the implementer
+can clear them before it counts anything. `polyctl writers` gives the implementer
 the count it should have had all along: turns, not processes, with orphans set
 aside and named.
 
@@ -417,7 +417,7 @@ not a to-do list; a report is not work; a failed wake is not a wake.
 
 Between 19:45 and 21:50 the reviewer was out of quota. It shared the
 architect's five-hour window, so it ran dry at the same moment the architect
-did, and every `ao review` came back as one line: "You've hit your session
+did, and every `polyctl review` came back as one line: "You've hit your session
 limit". The code had a default verdict for output without a `VERDICT:` line —
 NEEDS_CHANGES — so twelve of those lines became twelve review rounds, a
 five-round budget read 12/5, and the round-budget alarm fired on a slice
@@ -446,7 +446,7 @@ counted as a turn, a runtime under "Application Support" split into two
 arguments, a writer check that took two minutes — were all the same mistake:
 reading process state through `pgrep -f`, `ps` and `lsof`, tools that print
 text for people, and then parsing that text. The library that solves this is
-psutil, and ao installs nothing.
+psutil, and polyctl installs nothing.
 
 The answer was to take psutil's *method*: on macOS the public libproc calls
 (`proc_listpids`, `proc_pidinfo` with the BSD and vnode-path info) and
@@ -480,8 +480,8 @@ lived once is never lived twice.
 The wider list of methods this project should have started with, and now has:
 structured APIs instead of parsed text (procs.py); the decision under test
 (scenarios); the platform under test (CI on three operating systems); the
-alarm under test (`ao alarms test`, the dead man's ping); the run under a
-budget (`ao features`, `ao cost`); the bypass on the record (`ao waive`, `ao
+alarm under test (`polyctl alarms test`, the dead man's ping); the run under a
+budget (`polyctl features`, `polyctl cost`); the bypass on the record (`polyctl waive`, `polyctl
 catchup`); and nothing pushed untested (the repository's own pre-push hook).
 
 ## 27. A hook inherits the repository

@@ -1,16 +1,16 @@
 **English** | [Türkçe](README.tr.md)
 
-# agent-orchestrator
+# polyctl
 
-**The code your AI agents commit is reviewed first, waived by a person, or flagged by ao.** By
+**The code your AI agents commit is reviewed first, waived by a person, or flagged by polyctl.** By
 default a model of another family reviews the exact change an agent staged, and a git hook refuses
-anything else at `git commit`. A ledger records every decision; ao reviews a waived change after it
-lands, and `ao doctor` and the watchdog flag a commit whose content no review or waiver granted.
-A person can turn review off for a project, on the record, `ao features off review --by <name>`;
+anything else at `git commit`. A ledger records every decision; polyctl reviews a waived change after it
+lands, and `polyctl doctor` and the watchdog flag a commit whose content no review or waiver granted.
+A person can turn review off for a project, on the record, `polyctl features off review --by <name>`;
 its commits then land on verification alone.
 
 Keep the coding agents you already use: Claude Code, Codex, Kiro, Qoder, OpenCode and the others
-in the table below. `ao` sits above them. It runs your gates on the exact change an agent staged,
+in the table below. `polyctl` sits above them. It runs your gates on the exact change an agent staged,
 has a model of another family review that change, and lets only that change commit. The hook
 refuses everything else at `git commit`, and every decision goes into a ledger that shows
 tampering.
@@ -18,97 +18,97 @@ tampering.
 ## Why
 
 - **Agents commit faster than anyone reads.** A test that passed on one tree says nothing about
-  the tree that gets committed. `ao` grants commit authority to one exact staged tree, and its
+  the tree that gets committed. `polyctl` grants commit authority to one exact staged tree, and its
   hook refuses any other.
 - **A model reviewing its own family's work shares its blind spots.** The reviewer is of another
   model family by default, or a person you name, and it runs with tools that only read.
-- **You keep your tools.** `ao` reads each agent's own session store and drives its command line.
+- **You keep your tools.** `polyctl` reads each agent's own session store and drives its command line.
   Adopting it does not mean restarting your work inside something new.
 
 ## Five minutes to the first reviewed commit
 
-To see it first, `ao demo` plays one change through ao on a scratch project ([demo](docs/demo.md)).
+To see it first, `polyctl demo` plays one change through polyctl on a scratch project ([demo](docs/demo.md)).
 
 ```bash
-pip install ao-orchestrator          # or: uv tool install ao-orchestrator
+pip install polyctl          # or: uv tool install polyctl
 cd your-repository
-ao init --profile agy-codex          # agy (Gemini 4 Argon) implements, Codex (gpt-6-luna) reviews; or codex-agy, claude-codex
-git add .ao-project .gitignore && git commit -m "adopt ao"
-ao hooks install                     # from here on, only a granted candidate commits
+polyctl init --profile agy-codex          # agy (Gemini 4 Argon) implements, Codex (gpt-6-luna) reviews; or codex-agy, claude-codex
+git add .polyctl-project .gitignore && git commit -m "adopt polyctl"
+polyctl hooks install                     # from here on, only a granted candidate commits
 ```
 
 Then, for every change your agent stages:
 
 ```bash
-ao status                            # what your agents are doing, and what waits for you
-ao verify                            # your gates, run on the staged candidate
-ao review                            # a model of another family reviews exactly that candidate
-ao commit-ok                         # may it land? decided from the evidence, refusals named
-ao commit -m "feat: what changed"    # commit it, bound to that evidence by its trailers
+polyctl status                            # what your agents are doing, and what waits for you
+polyctl verify                            # your gates, run on the staged candidate
+polyctl review                            # a model of another family reviews exactly that candidate
+polyctl commit-ok                         # may it land? decided from the evidence, refusals named
+polyctl commit -m "feat: what changed"    # commit it, bound to that evidence by its trailers
 ```
 
-[Getting started](docs/getting-started.md) goes through it step by step, and `ao prove` runs the
+[Getting started](docs/getting-started.md) goes through it step by step, and `polyctl prove` runs the
 guarantees on a throwaway candidate instead of describing them. [Profiles](docs/profiles.md)
 offers three cross-family presets — `agy-codex` (`antigravity` `verified: full`, Gemini 4 Argon
 implementer with `codex` `verified: partial`, `gpt-6-luna` reviewer), `codex-agy` (`codex`
 `verified: partial`, `gpt-6-astra` implementer with `antigravity` `verified: full` read-only
 reviewer agent on Gemini 4 Argon) and `claude-codex` (`claude-code` `verified: full` implementer
 with `codex` `verified: partial`, `gpt-6-luna` reviewer), each with a `claude-code` (`verified:
-full`) architect. With one harness for every role (`--implementer claude-code`), `ao init` asks
+full`) architect. With one harness for every role (`--implementer claude-code`), `polyctl init` asks
 for a [review tier](docs/roles.md#review-tiers): another model of the same family, labelled as
 weaker independence, or a person.
 
-`ao status` names the most recently active secondary project while the primary session
-is slowing, stopped or idle. `ao doctor` reports a script selected by `AO_GIT` and
+`polyctl status` names the most recently active secondary project while the primary session
+is slowing, stopped or idle. `polyctl doctor` reports a script selected by `POLYCTL_GIT` and
 unrecognised shell hooks as possible filters; see [gates](docs/gates.md).
 
 ## How a change lands
 
 ```text
 the agent edits and stages
-  -> ao verify      your gates, run again by something with no stake in the result
-  -> ao review      another model family reads that candidate and the code around it
-  -> ao commit-ok   commit authority for that exact tree, granted from the evidence
-  -> ao commit      the commit carries trailers that bind it to the grant
+  -> polyctl verify      your gates, run again by something with no stake in the result
+  -> polyctl review      another model family reads that candidate and the code around it
+  -> polyctl commit-ok   commit authority for that exact tree, granted from the evidence
+  -> polyctl commit      the commit carries trailers that bind it to the grant
 the pre-commit hook refuses every other commit; push is never granted
 ```
 
 ## What else it does
 
-- **Watches.** `ao watch` is a live panel: what each agent is doing, context and cost, open
+- **Watches.** `polyctl watch` is a live panel: what each agent is doing, context and cost, open
   reviews, the board, and whether an agent is *busy but producing nothing*.
 - **Restarts.** A watchdog notices a turn that stopped mid-work and nudges it - never into a
   provider outage, past the round budget, or into a tree a person has taken, nor while hooks or
-  instructions an agent wrote there wait for a person to read them (`ao harness seen`).
+  instructions an agent wrote there wait for a person to read them (`polyctl harness seen`).
 - **Keeps going.** A board of pre-authorised work: a slice waiting on you is parked with its
   reason, and when the queue runs dry the architect is woken to refill it.
-- **Catches up.** A review you waive is recorded, and `ao catchup` has a reviewer of another
+- **Catches up.** A review you waive is recorded, and `polyctl catchup` has a reviewer of another
   family review the landed range later.
-- **Reviews safely.** A reviewer runs with tools that only read, and ao measures that per
+- **Reviews safely.** A reviewer runs with tools that only read, and polyctl measures that per
   harness: kiro-cli ran untrusted tools all the same with no person to ask, so a Kiro reviewer
-  runs as a read-only agent ao writes for it.
+  runs as a read-only agent polyctl writes for it.
 
 Every command is in [docs/commands.md](docs/commands.md).
 
 ## Install
 
-`pip install ao-orchestrator`, `uv tool install ao-orchestrator`, or
-`brew install hakkisagdic/tap/agent-orchestrator`. No dependencies, by choice: ao watches agents on
+`pip install polyctl`, `uv tool install polyctl`, or
+`brew install hakkisagdic/tap/polyctl`. No dependencies, by choice: polyctl watches agents on
 machines it does not control, and a dependency is a thing that can be missing exactly there. With
 nothing installed, the Python macOS and most Linux distributions ship runs it from a clone:
 
 ```bash
-git clone https://github.com/hakkisagdic/agent-orchestrator ~/ao
-mkdir -p ~/.local/bin && ln -s ~/ao/bin/ao ~/.local/bin/ao    # ~/.local/bin must be on PATH
+git clone https://github.com/hakkisagdic/polyctl ~/polyctl
+mkdir -p ~/.local/bin && ln -s ~/polyctl/bin/polyctl ~/.local/bin/polyctl    # ~/.local/bin must be on PATH
 ```
 
-A symlink, not a shell alias: neither `/bin/sh`, which runs ao's commit hook, nor an agent the
-watchdog starts without your shell can see an alias. On **Windows**, `bin/ao.ps1` covers `status`,
+A symlink, not a shell alias: neither `/bin/sh`, which runs polyctl's commit hook, nor an agent the
+watchdog starts without your shell can see an alias. On **Windows**, `bin/polyctl.ps1` covers `status`,
 `board` and `doctor` with nothing installed; for the rest,
-`winget install Python.Python.3.12 && pip install ao-orchestrator` ([windows](docs/windows.md)).
+`winget install Python.Python.3.12 && pip install polyctl` ([windows](docs/windows.md)).
 
-Install ao outside the projects it governs, never into a `.venv` inside one: an agent can write there,
-and Python runs a `.pth` file it leaves before ao starts. ao names such a file and `ao doctor` names
+Install polyctl outside the projects it governs, never into a `.venv` inside one: an agent can write there,
+and Python runs a `.pth` file it leaves before polyctl starts. polyctl names such a file and `polyctl doctor` names
 an installation inside the tree ([safety](docs/safety.md#what-python-runs-as-it-starts-from-inside-the-tree)).
 
 > **Where this came from.** Extracted from a 30-epic durable-workflow product built
@@ -137,7 +137,7 @@ These are not style preferences. Each one is a failure that cost real hours.
 
 ## Agent support
 
-`ao` reads each agent's own session store; the adapter says where and in what shape.
+`polyctl` reads each agent's own session store; the adapter says where and in what shape.
 
 | verified | adapters |
 |---|---|
@@ -146,12 +146,12 @@ These are not style preferences. Each one is a failure that cost real hours.
 | **documented** — written from published docs, not yet run | cursor-agent |
 | **untested** — schema present, needs a first run | gemini, aider, amp, copilot, amazon-q, deepseek, ollama, droid, grok, hermes, kilocode, kimi, omp, pi, pr-agent, qwen, reasonix, trae |
 
-Warp uses `oz`; ao finds it in the Warp app bundle under `/Applications` or
-`~/Applications` even when it is off PATH. `ao init --agent warp` uses the
+Warp uses `oz`; polyctl finds it in the Warp app bundle under `/Applications` or
+`~/Applications` even when it is off PATH. `polyctl init --agent warp` uses the
 files-only setup: no Warp MCP registration. Replies and sessions remain
 unmeasured, and Warp is ineligible as a reviewer. See the [measurement](docs/audit/2026-10-15-warp-store.md).
 
-`ao adapters` shows this table against what is actually installed on your machine, and
+`polyctl adapters` shows this table against what is actually installed on your machine, and
 — with [keyflip](https://github.com/hakkisagdic/keyflip) — whether an account exists
 even when the CLI does not. Adding one is a JSON file; see
 [`docs/adapters.md`](docs/adapters.md).
@@ -181,6 +181,6 @@ a lane's role and the merge queue among them, and cross-project parallel *execut
 view exists; running several implementers at once is governed by the machine gate lock but
 has not been run in anger).
 
-What ao's own ledgers show about the guarantee on this repository, measured: [evidence](docs/evidence.md).
+What polyctl's own ledgers show about the guarantee on this repository, measured: [evidence](docs/evidence.md).
 
 MIT.

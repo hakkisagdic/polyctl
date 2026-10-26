@@ -1,7 +1,7 @@
-"""A merge after the first commit that carries Ao- trailers matches nothing, and nothing is merged to say so
+"""A merge after the first commit that carries Polyctl- trailers matches nothing, and nothing is merged to say so
 (LEADS-GATE-MERGE).
 
-`ao commit-check --range` passed a merge whatever its tree held: a conflict resolved by hand, or an edit made while
+`polyctl commit-check --range` passed a merge whatever its tree held: a conflict resolved by hand, or an edit made while
 merging, landed unreviewed and passed the check CI runs. A grant binds one parent, so trailers on a merge say
 nothing of what else it merges; a lane lands squashed.
 """
@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ao import lib as A
+from polyctl import lib as A
 from tests.test_commit_trailer import _check, _git, _landed
 
 def _run(cwd, *argv):
@@ -34,12 +34,12 @@ def test_a_merge_without_trailers_does_not_match_whatever_its_tree_holds(project
     _git(root, "update-ref", "HEAD", clean)
 
     # git's own merge: no review looked at what its two parents do together, so it is no grant's either - a merge
-    # lands through ao commit, as any commit does, and a passing merge-check, which runs gates, is no review.
+    # lands through polyctl commit, as any commit does, and a passing merge-check, which runs gates, is no review.
     A.record_merge_check(root, {"id": "MC-1", "at": 1, "into": landed, "branch": base,
                                 "tree": _git(root, "rev-parse", "HEAD^{tree}").strip(), "profile": "quick",
                                 "gates_digest": "x", "passed": True, "gates": [], "conflict": None})
     code, out = _check(root, capsys, f"{landed}..HEAD")
-    assert code == 1 and "NO MATCH" in out and "a grant binds one: ao lands no merge" in out, out
+    assert code == 1 and "NO MATCH" in out and "a grant binds one: polyctl lands no merge" in out, out
 
     # The same two parents, and a file neither of them holds, written into the merge: refused the same way.
     _write(root, "src/unreviewed.py", "unreviewed = True\n")
@@ -48,7 +48,7 @@ def test_a_merge_without_trailers_does_not_match_whatever_its_tree_holds(project
     _git(root, "update-ref", "HEAD", evil)
 
     code, out = _check(root, capsys, f"{landed}..HEAD")
-    assert code == 1 and "NO MATCH" in out and "ao lands no merge" in out, out
+    assert code == 1 and "NO MATCH" in out and "polyctl lands no merge" in out, out
 
 
 def test_a_conflict_resolved_by_hand_does_not_match_and_the_check_runs_no_merge_driver(project, monkeypatch, capsys,
@@ -80,7 +80,7 @@ def test_a_conflict_resolved_by_hand_does_not_match_and_the_check_runs_no_merge_
     assert not ran.exists()
     assert code == 1 and _git(root, "count-objects", "-v") == objects, out
     merge = [commit for commit in A.trailer_audit(root, f"{landed}..HEAD")["commits"] if commit["merge"]]
-    assert len(merge) == 1 and "ao lands no merge" in merge[0]["problems"][0]
+    assert len(merge) == 1 and "polyctl lands no merge" in merge[0]["problems"][0]
 
 
 def test_a_merge_with_copied_trailers_and_the_granted_tree_does_not_match(project, monkeypatch, capsys):
@@ -98,4 +98,4 @@ def test_a_merge_with_copied_trailers_and_the_granted_tree_does_not_match(projec
 
     code, out = _check(root, capsys, f"{landed}..{copied}")
 
-    assert code == 1 and "ao lands no merge" in out, out
+    assert code == 1 and "polyctl lands no merge" in out, out

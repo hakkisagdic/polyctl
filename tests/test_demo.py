@@ -1,12 +1,12 @@
-"""`ao demo` plays the guarantee on a project of its own and leaves nothing behind (DEMO).
+"""`polyctl demo` plays the guarantee on a project of its own and leaves nothing behind (DEMO).
 
-The README states what ao guarantees and `ao prove` checks it on a project that has ao already, so
-the first refusal anyone saw was on their own repository. `ao demo` plays one change through the
+The README states what polyctl guarantees and `polyctl prove` checks it on a project that has polyctl already, so
+the first refusal anyone saw was on their own repository. `polyctl demo` plays one change through the
 command line a person types, in a scratch folder with a home of its own: a `divide` whose tests pass
 and which does not handle b == 0 is found by a stand-in reviewer of another family, and neither
-`ao commit-ok` nor a plain `git commit` lets it land; its fix is reviewed, granted and committed with
-the Ao- trailers that name its grant. These tests run it end to end, as `ao demo` and as
-`ao demo --keep`, in a temporary directory of the test's own, and once with a reviewer that approves
+`polyctl commit-ok` nor a plain `git commit` lets it land; its fix is reviewed, granted and committed with
+the Polyctl- trailers that name its grant. These tests run it end to end, as `polyctl demo` and as
+`polyctl demo --keep`, in a temporary directory of the test's own, and once with a reviewer that approves
 everything, which the demo must name as the step that did not behave.
 """
 import json
@@ -16,8 +16,8 @@ import subprocess
 import sys
 import tempfile
 
-from ao import cli, demo
-from tests.conftest import CALM_AO
+from polyctl import cli, demo
+from tests.conftest import CALM_POLYCTL
 
 # A reviewer that answers the probe and approves whatever it is shown: the bug then lands nowhere
 # only if the demo notices that the review did not find it.
@@ -32,8 +32,8 @@ APPROVES_EVERYTHING = (
 
 
 class _CalmChildren:
-    """The demo's subprocess module, except that each ao it starts finds the machine calm, as every test's ao does
-    (MACHINE-PRESSURE): its two `ao verify` runs would sample the machine's paging for four seconds each."""
+    """The demo's subprocess module, except that each polyctl it starts finds the machine calm, as every test's polyctl does
+    (MACHINE-PRESSURE): its two `polyctl verify` runs would sample the machine's paging for four seconds each."""
 
     def __init__(self):
         self.started = []
@@ -42,14 +42,14 @@ class _CalmChildren:
         return getattr(subprocess, name)
 
     def run(self, argv, *args, **kwargs):
-        if list(argv[:3]) == [sys.executable, "-m", "ao"]:
-            argv = CALM_AO + list(argv[3:])
-            self.started.append(argv[len(CALM_AO)])
+        if list(argv[:3]) == [sys.executable, "-m", "polyctl"]:
+            argv = CALM_POLYCTL + list(argv[3:])
+            self.started.append(argv[len(CALM_POLYCTL)])
         return subprocess.run(argv, *args, **kwargs)
 
 
 def _play(tmp_path, monkeypatch, capsys, *words):
-    """`ao <words>` as the parser reads it, with the temporary directory the test's own; (exit, what it printed)."""
+    """`polyctl <words>` as the parser reads it, with the temporary directory the test's own; (exit, what it printed)."""
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     children = _CalmChildren()
     monkeypatch.setattr(demo, "subprocess", children)
@@ -82,15 +82,15 @@ def test_a_change_with_a_bug_is_refused_three_ways_and_its_fix_lands_naming_its_
     assert "DEMO PASSED" in out
     # In the order the demo plays them: the review finds the bug, commit-ok and the hook refuse, the fix lands.
     marks = ["NEEDS_CHANGES  BLOCKER 0 · HIGH 1", "- [HIGH] calc.py:9 - divide(1, 0) raises ZeroDivisionError",
-             "$ ao commit-ok\n     REFUSED", "$ git commit -m \"add divide\"\n     COMMIT REFUSED", "HEAD is still",
-             "APPROVED  BLOCKER 0 · HIGH 0", "GRANTED  C-", "Ao-Grant: C-", "TRAILERS MATCH  1 commit(s)"]
+             "$ polyctl commit-ok\n     REFUSED", "$ git commit -m \"add divide\"\n     COMMIT REFUSED", "HEAD is still",
+             "APPROVED  BLOCKER 0 · HIGH 0", "GRANTED  C-", "Polyctl-Grant: C-", "TRAILERS MATCH  1 commit(s)"]
     at = [out.find(mark) for mark in marks]
     assert -1 not in at and at == sorted(at), dict(zip(marks, at))
     # Nothing is left behind: the scratch folder is gone, the home the suite runs in is as it was, and the
-    # event log ao's variable names for this test was never written - the demo's commands had a home of their own.
+    # event log polyctl's variable names for this test was never written - the demo's commands had a home of their own.
     assert "removed " in out and os.listdir(tmp_path) == []
     assert _home() == home
-    assert not os.path.exists(os.environ["AO_EVENTS"])
+    assert not os.path.exists(os.environ["POLYCTL_EVENTS"])
 
 
 def test_keep_leaves_the_project_with_its_commit_its_reviews_and_its_ledger(tmp_path, monkeypatch, capsys):
@@ -102,9 +102,9 @@ def test_keep_leaves_the_project_with_its_commit_its_reviews_and_its_ledger(tmp_
     assert folder.startswith(demo.PREFIX) and f"kept: {scratch}" in out
     project = os.path.join(scratch, "project")
     assert _git(project, "log", "--format=%s").splitlines() == [
-        "feat: add divide, which refuses b == 0", "adopt ao", "calc: add(a, b) and its test"]
+        "feat: add divide, which refuses b == 0", "adopt polyctl", "calc: add(a, b) and its test"]
     message = _git(project, "log", "-1", "--format=%B")
-    assert "Ao-Grant: C-" in message and "Ao-Review: " in message
+    assert "Polyctl-Grant: C-" in message and "Polyctl-Review: " in message
     # The stand-in reviewed as another model family through the project's own configuration, both times...
     reviews = os.path.join(project, "semantic-review")
     bodies = [open(os.path.join(reviews, name), encoding="utf-8").read()
@@ -113,7 +113,7 @@ def test_keep_leaves_the_project_with_its_commit_its_reviews_and_its_ledger(tmp_
         ["APPROVED", "NEEDS_CHANGES"]
     assert all("family: `stand-in`" in body and "- tier: another model family" in body for body in bodies)
     # ...and the authority ledger holds the refusal, then the grant.
-    with open(os.path.join(project, ".ao", "ledger", "authority.jsonl"), encoding="utf-8") as fh:
+    with open(os.path.join(project, ".polyctl", "ledger", "authority.jsonl"), encoding="utf-8") as fh:
         assert [json.loads(line)["granted"] for line in fh if line.strip()] == [False, True]
 
 
@@ -123,9 +123,9 @@ def test_a_step_that_does_not_behave_is_named_and_the_demo_fails(tmp_path, monke
     code, out = _play(tmp_path, monkeypatch, capsys, "demo")
 
     assert code == 1
-    assert ("DEMO STOPPED at step 3, the agent stages a change with a bug: ao review exited 0, where the review was "
+    assert ("DEMO STOPPED at step 3, the agent stages a change with a bug: polyctl review exited 0, where the review was "
             "to find the bug and say NEEDS_CHANGES") in out
-    assert "ao demo --keep" in out and "GRANTED" not in out and "DEMO PASSED" not in out
+    assert "polyctl demo --keep" in out and "GRANTED" not in out and "DEMO PASSED" not in out
     assert os.listdir(tmp_path) == []
 
 
@@ -153,7 +153,7 @@ def test_only_a_folder_the_demo_made_in_the_temporary_directory_is_removed(tmp_p
 
 def test_the_demo_sets_each_variable_once_whatever_case_it_came_in(monkeypatch, tmp_path):
     """DEMO-2, from the review of DEMO: a person's `Path` stayed beside the `PATH` the demo set, and Windows reads both
-    as one name, so git could run the hook with the PATH that holds no demo `ao`."""
+    as one name, so git could run the hook with the PATH that holds no demo `polyctl`."""
     monkeypatch.setenv("Path", os.environ.get("PATH", ""))
     monkeypatch.setenv("Home", str(tmp_path / "elsewhere"))
 

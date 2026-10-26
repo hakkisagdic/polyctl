@@ -1,0 +1,2091 @@
+"""Measurement and gates: unfiltered git, size, gate coverage, review artefacts, merge checks.
+
+A part of src/polyctl/lib.py (#44): moved out byte for byte and run in its namespace by `_part`,
+where it stood; it is not importable on its own.
+"""
+
+
+# ---- polyctl's own measurements are not read through a filter (#51) ------------------------
+
+# ELF, Mach-O (fat and thin, either byte order) and PE: a compiled program, not a script.
+_NATIVE_MAGIC = (b"\x7fELF", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca", b"\xcf\xfa\xed\xfe",
+                 b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce", b"MZ")
+# What polyctl treats as evidence; the doctor names them when something could filter them.
+MEASUREMENTS = ("candidate size and paths", "git status", "rev-parse", "write-tree", "hash-object",
+                "gate output")
+_REWRITING_HOOK = re.compile(r"\brtk\b|\bproxy\b|rewrit|compress|condens", re.I)
+_GIT_BINARIES = {}
+
+
+def _native_executable(path):
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(4)
+    except OSError:
+        return False
+    return any(head.startswith(magic) for magic in _NATIVE_MAGIC)
+
+
+# The one git that is an xcrun stub: macOS's own. An xcrun beside any other compiled git was run once a process
+# on every platform but Windows, a program polyctl had no reason to start (SUITE-SPEED-2).
+_XCRUN_STUB = "/usr/bin/git"
+
+
+def _xcrun_git(candidate):
+    """The git an xcrun stub runs, or None when `candidate` is not such a stub.
+
+    /usr/bin/git on macOS is a compiled stub: on every call it asks xcrun for the
+    selected developer directory and runs the git there, which costs more than
+    git's own start, and a hook or a gate makes hundreds of git calls. The stub is
+    told from a real git by the xcrun beside it, and `xcrun --find git` names the
+    binary it would run. That answer is taken only when it is itself a compiled
+    git, so it can never put a script in front of git.
+    """
+    stub = os.path.realpath(candidate)
+    if stub != _XCRUN_STUB:
+        return None
+    xcrun = os.path.join(os.path.dirname(stub), "xcrun")
+    if not (_native_executable(stub) and os.path.isfile(xcrun) and os.access(xcrun, os.X_OK)):
+        return None
+    import errno
+    result = None
+    for attempt in range(5):
+        try:
+            result = subprocess.run([xcrun, "--find", "git"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, timeout=60)
+            break
+        except subprocess.TimeoutExpired:
+            return None
+        except OSError as exc:
+            if attempt == 4 or exc.errno not in (errno.EAGAIN, errno.ENOMEM, getattr(errno, "ETXTBSY", None)):
+                return None
+            time.sleep(0.02)
+    found = result.stdout.decode(UTF8, "replace").strip()
+    if result.returncode == 0 and os.path.isabs(found) and os.path.basename(found) == "git" \
+            and os.path.isfile(found) and os.access(found, os.X_OK) \
+            and os.path.realpath(found) != stub and _native_executable(os.path.realpath(found)):
+        return found
+    return None
+
+
+def _find_git_binary():
+    explicit = os.environ.get("POLYCTL_GIT")
+    if explicit and os.path.isfile(explicit) and os.access(explicit, os.X_OK):
+        return explicit
+    names = ("git.exe", "git") if os.name == "nt" else ("git",)
+    directories = search_directories()
+    installed = os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "cmd")
+    if os.name == "nt":
+        directories.append(installed)
+    else:
+        directories += ["/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin"]
+    for directory in directories:
+        for name in names:
+            candidate = os.path.join(directory, name)
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK) \
+                    and _native_executable(os.path.realpath(candidate)):
+                return _xcrun_git(candidate) or candidate
+    # With no compiled git, the git PATH holds, of whatever kind. Never the bare name: Windows looks for it in the
+    # current directory first, and POSIX's execvp through every PATH entry, an empty one - the current directory -
+    # among them. The last resort is where git is installed, which fails to start rather than start a git an agent
+    # left in the tree (WINDOWS-NO-CWD-EXEC, and its review for POSIX).
+    return program_path("git") or (os.path.join(installed, "git.exe") if os.name == "nt" else "/usr/bin/git")
+
+
+def git_binary():
+    """The git polyctl measures with (#51).
+
+    A token-saving proxy in an agent's shell reported a 5,844-line staged diff as
+    533 lines, and the number nearly sized a decision. polyctl reads its measurements
+    itself, never from an agent's terminal, and it does not take a wrapper for git
+    either: POLYCTL_GIT when that names an executable, otherwise the first git on PATH,
+    then in the system directories, that is a compiled program rather than a
+    script in front of one; the first git PATH holds of any kind only when there
+    is none, and where git is installed when PATH holds none either - never the
+    bare name, which Windows looks for in the current directory first and POSIX
+    through an empty PATH entry (WINDOWS-NO-CWD-EXEC).
+    When that git is macOS's xcrun stub, the git xcrun names instead, asked once
+    per process.
+    """
+    key = (os.environ.get("POLYCTL_GIT"), os.environ.get("PATH", ""), os.name, os.environ.get("DEVELOPER_DIR"), _XCRUN_STUB)
+    found = _GIT_BINARIES.get(key)
+    if found is None or (found != "git" and not os.path.isfile(found)):
+        found = _GIT_BINARIES[key] = _find_git_binary()
+    return found
+
+
+def measured_by():
+    """How the measurements in a record were taken: which git, no shell, read by polyctl (#51)."""
+    return {"git": git_binary(), "candidate_via_shell": False, "captured_by": "polyctl"}
+
+
+def command_hook_sources(root):
+    """(settings file, the adapter's declaration, whether the file is user-level) for each hook file (#76, #52).
+
+    A user-level file is one an adapter names under `~`, outside every repository. The
+    project's own files are writable by the agents polyctl governs, so the filter probe runs
+    no command they name.
+    """
+    out, seen = [], set()
+    for adapter in package_adapters().values():
+        hooks = (adapter.get("directives") or {}).get("command_hooks") or {}
+        if hooks.get("format") != "pre-tool-use":
+            continue
+        for rel in hooks.get("files") or []:
+            user = str(rel).startswith("~")
+            path = _home_path(rel) if user else os.path.join(root, *str(rel).split("/"))
+            if path not in seen:
+                seen.add(path)
+                out.append((path, hooks, user))
+    return out
+
+
+def command_hook_files(root):
+    """Settings files whose pre-tool-use hooks can rewrite an agent's shell commands, as adapters declare them (#76)."""
+    return [path for path, _, _ in command_hook_sources(root)]
+
+
+def _matcher_matches(matcher, tool):
+    """A hook matcher read as the harness reads it: empty or `*` is every tool, plain words exact names, else a regex."""
+    text = "" if matcher is None else str(matcher)
+    if text in ("", "*"):
+        return True
+    if re.fullmatch(r"[A-Za-z0-9_\- ,|]+", text):
+        return tool in {name.strip() for name in re.split(r"[|,]", text)}
+    try:
+        return re.search(text, tool) is not None
+    except re.error:
+        return True             # a matcher polyctl cannot read is counted, not passed over
+
+
+def _shell_hooks(path, declaration):
+    """The command hooks a settings file runs before the harness's shell tool, in the order it declares them."""
+    try:
+        with open(path, encoding=UTF8) as fh:
+            hooks = json.load(fh).get("hooks")
+    except (OSError, ValueError, AttributeError):
+        return []
+    tool = str(declaration.get("shell_tool") or "Bash")
+    entries = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
+    return [hook for entry in (entries if isinstance(entries, list) else [])
+            if isinstance(entry, dict) and _matcher_matches(entry.get("matcher"), tool)
+            for hook in (entry.get("hooks") if isinstance(entry.get("hooks"), list) else [])
+            if isinstance(hook, dict) and hook.get("type", "command") == "command"]
+
+
+def _hook_text(hook):
+    """A command hook as one line: its command, and its arguments when it declares them apart."""
+    args = hook.get("args") if isinstance(hook.get("args"), list) else []
+    return " ".join(word for word in [str(hook.get("command") or ""), *map(str, args)] if word)
+
+
+def measurement_filters(root):
+    """What could stand between a number and its source, one sentence each (#51).
+
+    A script named git ahead of any compiled git on PATH, POLYCTL_GIT naming no compiled
+    executable, and shell PreToolUse hooks. Unknown hooks are unverified: a command
+    without the recognised keywords used to disappear here (TRIAGE-2-LOW).
+    `probe_filters` asks eligible hooks what they do (#52).
+    """
+    found = []
+    explicit = os.environ.get("POLYCTL_GIT")
+    if explicit and not (os.path.isfile(explicit) and os.access(explicit, os.X_OK)):
+        found.append(f"POLYCTL_GIT names {explicit}, which is not an executable file; polyctl measures with {git_binary()}")
+    elif explicit and not _native_executable(os.path.realpath(explicit)):
+        found.append(f"POLYCTL_GIT names {explicit}, which is not a compiled program; polyctl measures through it: "
+                     "set POLYCTL_GIT to a compiled git for unfiltered measurements")
+    first = program_path("git")
+    if first and not _native_executable(os.path.realpath(first)):
+        chosen = git_binary()
+        found.append(f"git on PATH is {first}, a script in front of git; " + (
+            f"polyctl measures with {chosen}" if _native_executable(os.path.realpath(chosen)) else
+            "no compiled git was found, so polyctl's own measurements go through it too: set POLYCTL_GIT"))
+    for path, declaration, _ in command_hook_sources(root):
+        for hook in _shell_hooks(path, declaration):
+            command = _hook_text(hook)
+            if _REWRITING_HOOK.search(command):
+                found.append(f"{path}: the PreToolUse hook `{command}` can rewrite the shell commands an "
+                             f"agent runs, so what an agent reads of {', '.join(MEASUREMENTS)} may be "
+                             "compressed; take such numbers from polyctl's records, which do not pass through it")
+            else:
+                found.append(f"{path}: the PreToolUse shell hook `{command}` is unverified; inspect it before "
+                             "trusting measurements read through the agent's shell")
+    return found
+
+
+# ---- a filter's exclusions are proved by asking it, not read from its configuration (#52) --
+
+# The shell commands through which an agent reads a measurement - candidate size and paths, git
+# status, history, rev-parse, write-tree, hash-object and polyctl's own records - that a filter's
+# exclusion list must leave alone. `measurement_commands` adds the project's gate commands.
+MEASUREMENT_COMMANDS = ("git diff", "git diff --cached", "git diff --stat", "git diff --numstat",
+                        "git diff --cached --numstat", "git diff --name-only", "git status",
+                        "git status --porcelain", "git log", "git log --oneline", "git show --stat",
+                        "git rev-parse HEAD", "git write-tree", "git hash-object --stdin",
+                        "polyctl status", "polyctl verify", "polyctl review", "polyctl board")
+# All a probed hook sees of polyctl's environment: where programs, its home and its own configuration
+# are. No credential, no GIT_* binding, no loader or interpreter start-up variable.
+_PROBE_ENVIRONMENT = ("PATH", "HOME", "USER", "LOGNAME", "USERNAME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+                      "XDG_CONFIG_HOME", "XDG_DATA_HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL",
+                      "SYSTEMROOT", "WINDIR", "PATHEXT")
+_PROBE_OUTPUT_BYTES = 65_536
+_PROBE_GATE_COMMANDS = 12
+# What makes a command more than words to split: expansion, substitution, redirection, globs,
+# chaining and escapes. Such a command needs a shell, and the probe runs none.
+_SHELL_SYNTAX = re.compile(r"[$`|&;<>(){}\[\]*?!#\\\r\n]")
+
+
+def measurement_commands(root):
+    """The commands the filter probe asks a hook about: MEASUREMENT_COMMANDS, then the project's gates (#52).
+
+    The gate commands are what an agent runs to read a count. They come from a file the
+    agents can write, so they are taken as data only - the payload a hook reads - and
+    at most _PROBE_GATE_COMMANDS of them.
+    """
+    commands = list(MEASUREMENT_COMMANDS)
+    try:
+        with open(os.path.join(root, ".polyctl", "gates.json"), encoding=UTF8) as fh:
+            gates = json.load(fh).get("gates")
+    except (OSError, ValueError, AttributeError):
+        gates = None
+    for gate in (gates.values() if isinstance(gates, dict) else []):
+        run = gate.get("run").strip() if isinstance(gate, dict) and isinstance(gate.get("run"), str) else ""
+        if run and len(run) <= 1000 and run not in commands:
+            commands.append(run)
+        if len(commands) >= len(MEASUREMENT_COMMANDS) + _PROBE_GATE_COMMANDS:
+            break
+    return commands
+
+
+def _within(path, root):
+    """Whether a path, followed through its links, lies inside root."""
+    real, top = (os.path.normcase(os.path.realpath(p)) for p in (path, root))
+    try:
+        return os.path.commonpath([real, top]) == top
+    except ValueError:
+        return False            # another drive
+
+
+def _hook_argv(hook):
+    """The argument vector a command hook runs as without a shell, or (None, why only a shell could run it)."""
+    import shlex
+    command = hook.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return None, "it names no command"
+    if "args" in hook:
+        # Exec form: the harness runs `command` with `args`, no shell, placeholders filled in.
+        args = hook["args"]
+        if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
+            return None, "its args are not a list of strings"
+        if any("${" in word for word in [command, *args]):
+            return None, "it names a placeholder only the harness fills in"
+        return [command, *args], None
+    if str(hook.get("shell") or "bash").lower() not in ("bash", "sh"):
+        return None, f"it runs under {hook['shell']}, which polyctl does not imitate"
+    words = None
+    if not _SHELL_SYNTAX.search(command):
+        try:
+            words = shlex.split(command)
+        except ValueError:
+            words = None
+    if not words or "=" in words[0] or any("~" in word and word != "~" and not word.startswith("~/")
+                                           for word in words):
+        return None, "it needs a shell to run, and polyctl runs none; declare it as command and args"
+    return [_home_path(word) for word in words], None
+
+
+# A word that names a file whether or not it is there yet: a separator in it, or a name with an extension
+# (FILTER-EXCLUSIONS-2). A decimal or a version - 1.5, v2 - is no file name.
+_PATH_WORD = re.compile(r"[/\\]")
+_FILE_WORD = re.compile(r"[\w.-]*\.[A-Za-z]\w*")
+# An address on another host names no file here; a file: URL names the path after it.
+_URL_WORD = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+# A file address with no authority, `file:/C:/x` or `file:x`, which Node and Rust read as a path (FILTER-EXCLUSIONS-5).
+_FILE_URL_BARE = re.compile(r"file:(?!//)", re.I)
+# What a URL reader drops before it reads the scheme, as the WHATWG URL standard says and Node, Rust's url and
+# Python's urlsplit do: C0 controls and spaces at either end, and a tab, CR or LF anywhere (FILTER-EXCLUSIONS-8).
+_URL_READER_DROPS = re.compile(r"\A[\x00-\x20]+|[\x00-\x20]+\Z|[\t\r\n]")
+
+
+def _probe_program(argv, root, programs, search_path):
+    """The argv polyctl may run for a user-level hook, its program resolved, or (None, the rule it fails) (#52).
+
+    A filter is itself a program that runs commands, so the rule is about who chose the
+    words as much as which program they name: the program must be one the machine
+    allows, found where the agents' PATH finds it, outside the project, and no argument
+    may name a path the agents can write.
+    """
+    name = _program_name(argv[0])
+    if name not in programs:
+        return None, f"{name} is not in filters.probe_programs, the programs polyctl may run to ask"
+    if os.path.isabs(argv[0]):
+        found = argv[0] if os.path.isfile(argv[0]) and os.access(argv[0], os.X_OK) else None
+    elif "/" in argv[0] or os.sep in argv[0]:
+        return None, f"its program {argv[0]} is named relative to the directory it runs in, the project"
+    else:
+        found = program_path(argv[0], path=search_path)
+    if not found:
+        return None, f"{argv[0]} is not an executable on the agents' PATH"
+    if os.path.splitext(found)[1].lower() in (".bat", ".cmd"):
+        return None, f"{found} is a batch file, which only a shell runs"
+    for word in [found, *argv[1:]]:
+        for piece in {word, word.split("=", 1)[-1]}:
+            # `<TAB>file:///repo/.polyctl/filter.toml#/../..` is the project's file to a URL reader, and to polyctl it was a
+            # relative path climbing out of the project (FILTER-EXCLUSIONS-8).
+            read = _URL_READER_DROPS.sub("", piece)
+            if read != piece and (_URL_WORD.match(read) or _FILE_URL_BARE.match(read)):
+                return None, (f"{word!r} is an address once a URL reader drops its spaces and control characters, "
+                              "and a path to a program that keeps them, which programs read differently")
+            url = _URL_WORD.match(piece) or _FILE_URL_BARE.match(piece)
+            if url and piece[:url.end()].lower() not in ("file://", "file:"):
+                continue
+            if url:
+                # The path a file address names, as a program opening it reads it: percent-decoded, and on
+                # Windows `/C:/x` as `C:\x`; the text after the scheme alone let an encoded project path pass
+                # (FILTER-EXCLUSIONS-3).
+                from urllib.request import url2pathname
+                address = piece[url.end():]
+                # A program reading the address as a URL - Node's fileURLToPath, Rust's url, url2pathname from
+                # Python 3.14 - drops a query and a fragment, reads a `\` as `/` and drops a tab, CR or LF; one
+                # decoding the text after the scheme, as url2pathname did before 3.14, keeps them as path, `?/../..`
+                # and all. polyctl cannot tell which reads it, and judged whichever its own Python is (FILTER-EXCLUSIONS-6).
+                # `file:x/y` names no root: a URL reader takes it from the root, and polyctl took it under the project
+                # (FILTER-EXCLUSIONS-7).
+                bare = piece[:url.end()].lower() == "file:"
+                if bare and not address.startswith("/") \
+                        or any(mark in address for mark in ("?", "#", "\\", "\t", "\r", "\n")):
+                    return None, (f"{word!r} is a file address with no root, or holding a query or fragment, a "
+                                  "backslash or a control character, which programs read differently")
+                if address[:10].lower() == "localhost/":
+                    address = address[9:]           # this machine, as a program reads it: no directory of the path
+                try:
+                    piece = url2pathname(address)
+                except (OSError, ValueError):
+                    return None, f"{word} is a file address polyctl cannot read as a path"
+                # url2pathname looks for a drive before it decodes: `/C%3A/x` is `\C:\x` to it and C:\x to Node's
+                # fileURLToPath and Rust's url, which decode first. A NUL ends the path a C program opens short of
+                # the one polyctl would judge (FILTER-EXCLUSIONS-4).
+                if os.name == "nt" and re.match(r"[\\/][A-Za-z]:", piece):
+                    piece = piece[1:]
+                if "\0" in piece:
+                    return None, f"{word} is a file address polyctl cannot read as a path"
+            candidate = piece if os.path.isabs(piece) else os.path.join(root, piece)
+            # A path inside the project counts whether or not it exists yet: an agent could write it between this
+            # check and the hook's run, once per command measured, and remove it again (FILTER-EXCLUSIONS-2). An
+            # option is read by its program, not opened: its value after `=` is the piece that can name a file.
+            looks = not piece.startswith("-") and bool(_PATH_WORD.search(piece) or _FILE_WORD.fullmatch(piece))
+            named = os.path.isabs(piece) or os.path.lexists(candidate) or looks
+            if not (piece and named):
+                continue
+            # A path that cannot be followed to an absolute one is not known to lie outside: Windows' realpath of
+            # `f::$DATA`, the stream of a file not yet written, came back relative to the drive (FILTER-EXCLUSIONS-5).
+            try:
+                followed = os.path.realpath(candidate)
+            except (OSError, ValueError):
+                followed = None
+            if not followed or not os.path.isabs(followed):
+                return None, f"{piece} names a path polyctl cannot follow to where it lies"
+            if _within(candidate, root):
+                return None, f"{piece} lies inside the project, where the agents polyctl governs can write"
+    return [found, *argv[1:]], None
+
+
+def _probe_environment(root, declaration, search_path):
+    """What a probed hook is given: _PROBE_ENVIRONMENT, the agents' PATH and the project directory variable."""
+    env = {name: os.environ[name] for name in _PROBE_ENVIRONMENT if os.environ.get(name)}
+    env["PATH"] = search_path
+    variable = declaration.get("project_dir_env")
+    if isinstance(variable, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", variable):
+        env[variable] = root
+    return env
+
+
+def _run_hook(argv, payload, cwd, env, timeout):
+    """Run one hook with one payload as the harness would, inside a time and an output bound (#52).
+
+    Returns (exit code, stdout, stderr, None), or (None, b"", b"", what cut it off). The hook
+    leads its own process group, so a timeout ends whatever it started; a child still
+    holding its output open is still answering.
+    """
+    import signal
+    import threading
+    group = ({"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)} if os.name == "nt"
+             else {"start_new_session": True})
+    try:
+        proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, **group)
+    except OSError as exc:
+        return None, b"", b"", f"it could not be started ({exc.strerror or exc})"
+    output, flooded = {"out": bytearray(), "err": bytearray()}, threading.Event()
+
+    def feed():
+        try:
+            proc.stdin.write(payload)
+        except OSError:
+            pass                # a hook may exit without reading what it was given
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+
+    def drain(stream, into):
+        try:
+            for block in iter(lambda: stream.read1(65536), b""):
+                into.extend(block)
+                if len(into) > _PROBE_OUTPUT_BYTES:
+                    flooded.set()
+                    return
+        except (OSError, ValueError):
+            pass
+
+    readers = [threading.Thread(target=drain, args=(proc.stdout, output["out"]), daemon=True),
+               threading.Thread(target=drain, args=(proc.stderr, output["err"]), daemon=True)]
+    for thread in [threading.Thread(target=feed, daemon=True), *readers]:
+        thread.start()
+    deadline, cut = time.monotonic() + timeout, None
+    while cut is None and (proc.poll() is None or any(reader.is_alive() for reader in readers)):
+        if flooded.is_set():
+            cut = f"it wrote more than {_PROBE_OUTPUT_BYTES} bytes"
+        elif time.monotonic() >= deadline:
+            cut = f"it did not answer within {timeout}s"
+        else:
+            time.sleep(0.01)
+    if cut is None and flooded.is_set():
+        cut = f"it wrote more than {_PROBE_OUTPUT_BYTES} bytes"
+    if cut and (proc.poll() is None or any(reader.is_alive() for reader in readers)):
+        if os.name == "nt":
+            left = stop_windows_tree(proc.pid)
+            if left:
+                # What taskkill left of it is named, not taken as stopped (WINDOWS-STOP-PROVEN).
+                cut += f" - and {len(left)} process(es) of it still run after it was stopped, {left} -"
+        else:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        for reader in readers:
+            reader.join(1)
+    if not any(reader.is_alive() for reader in readers):
+        for stream in (proc.stdout, proc.stderr):
+            stream.close()
+    if cut:
+        return None, b"", b"", cut
+    return proc.returncode, bytes(output["out"]), bytes(output["err"]), None
+
+
+def _hook_answer(command, code, out, err):
+    """What a pre-tool-use hook's answer does to one command, read as the harness reads it (#52).
+
+    (None, None) passes it through unchanged. ("rewrites", the new command or None) and
+    ("blocks", how) change what an agent reads; ("unreadable", why) is an answer polyctl can
+    vouch for neither way. A rewrite counts whether or not the answer also allows the
+    command: harness versions have differed on applying a rewrite that carries no decision,
+    and keeping measurements out of the filter is its exclusion list's job, not theirs.
+    """
+    if code == 2:
+        lines = err.decode(UTF8, "replace").strip().splitlines()
+        return "blocks", "is blocked" + (f" ({lines[0][:160]})" if lines else "")
+    text = out.decode(UTF8, "replace").strip()
+    answer = None
+    if text.startswith("{") and text.endswith("}"):
+        try:
+            answer = json.loads(text)
+        except ValueError:
+            return "unreadable", "its answer is not JSON"
+    if isinstance(answer, dict):
+        specific = answer.get("hookSpecificOutput") if isinstance(answer.get("hookSpecificOutput"), dict) else {}
+        decision = specific.get("permissionDecision")
+        reason = str(specific.get("permissionDecisionReason") or answer.get("reason")
+                     or answer.get("stopReason") or "")[:160]
+        why = f" ({reason})" if reason else ""
+        if answer.get("continue") is False:
+            return "blocks", "stops the agent before it runs" + why
+        if decision == "deny" or answer.get("decision") == "block":
+            return "blocks", "is blocked" + why
+        if "updatedInput" in specific:
+            updated = specific["updatedInput"]
+            rewritten = updated.get("command") if isinstance(updated, dict) else None
+            if rewritten != command:
+                return "rewrites", rewritten if isinstance(rewritten, str) else None
+        if decision == "ask":
+            return "blocks", "is held for a person's approval" + why
+    if code != 0:
+        return "unreadable", f"it exited {code}"
+    return None, None
+
+
+def probe_filters(root):
+    """Ask each hook that could filter an agent's shell what it does to every measurement command (#52).
+
+    #51 names such a hook by its command. #52 installs one on purpose, with an exclusion
+    list covering every measurement path, and asks the doctor to prove the list is in
+    force rather than trust it: a release of one such filter kept rewriting what its
+    exclusion list named, the list being read on only one of its two rewrite paths. So
+    each hook is run as the harness runs it, once per command in `measurement_commands`,
+    with the payload the harness sends, and its answer is read as the harness reads it.
+    The command it answers with is never run.
+
+    `polyctl doctor --check` runs unattended, and a settings file the agents can write would
+    make this a way to run anything. A hook is run only when it is declared in a
+    user-level file outside the project and `_probe_program` allows its program; then
+    without a shell, in the project directory as the harness runs it, with
+    `_probe_environment`, `filters.probe_timeout_seconds` for each answer and bounded
+    output. Any other hook that could filter is reported unverified, with the rule it
+    fails. Returns a dict per hook: file, user, command, program, verdict (in-force,
+    filters, unverified), changed [(command, "rewrites" or "blocks", detail)], why, asked.
+    """
+    root = os.path.abspath(root)
+    programs = {_program_name(name) for name in settings.get(None, "filters.probe_programs")}
+    timeout = settings.get(None, "filters.probe_timeout_seconds")
+    results, search_path, commands = [], None, None
+    for path, declaration, user in command_hook_sources(root):
+        for hook in _shell_hooks(path, declaration):
+            shown = _hook_text(hook)
+            argv, why = _hook_argv(hook)
+            program = _program_name(argv[0] if argv else (shown.split() or ["hook"])[0])
+            if not (_REWRITING_HOOK.search(shown) or program in programs):
+                continue
+            result = {"file": path, "user": user, "command": shown, "program": program, "verdict": "unverified",
+                      "changed": [], "why": None, "asked": 0}
+            results.append(result)
+            if not user or _within(path, root):
+                result["why"] = ("it is declared in the project's own settings, which the agents polyctl governs can "
+                                 "write, and polyctl runs no command such a file names")
+                continue
+            if argv:
+                if search_path is None:
+                    from .watchdog import child_path
+                    search_path = os.pathsep.join(d for d in child_path().split(os.pathsep)
+                                                  if d and os.path.isabs(d) and not _within(d, root))
+                argv, why = _probe_program(argv, root, programs, search_path)
+            if why:
+                result["why"] = why
+                continue
+            env = _probe_environment(root, declaration, search_path)
+            tool = str(declaration.get("shell_tool") or "Bash")
+            commands = measurement_commands(root) if commands is None else commands
+            for index, command in enumerate(commands):
+                payload = json.dumps({
+                    "session_id": "polyctl-filter-probe", "transcript_path": "", "cwd": root,
+                    "permission_mode": "default", "hook_event_name": "PreToolUse", "tool_name": tool,
+                    "tool_input": {"command": command, "description": "polyctl doctor: does a filter change this?"},
+                    "tool_use_id": f"polyctl-filter-probe-{index}"}).encode(UTF8)
+                code, out, err, cut = _run_hook(argv, payload, root, env, timeout)
+                result["asked"] += 1
+                kind, detail = (None, cut) if cut else _hook_answer(command, code, out, err)
+                if cut or kind == "unreadable":
+                    result["why"] = f"{detail} when asked about `{_clip(command)}`"
+                    break
+                if kind:
+                    result["changed"].append((command, kind, detail))
+            result["verdict"] = "filters" if result["changed"] else "unverified" if result["why"] else "in-force"
+    return results
+
+
+def _clip(text, limit=200):
+    """Text a settings file or a hook supplied, on one line and no longer than limit, for a doctor line."""
+    line = " ".join(str(text).split())
+    return line if len(line) <= limit else line[:limit - 3] + "..."
+
+
+def filter_probe_text(result):
+    """One sentence for one probed hook: in force, every measurement command it changes, or why it is unverified."""
+    where = f"`{_clip(result['command'])}` ({result['file']})"
+    if result["verdict"] == "in-force":
+        return f"{where} passes all {result['asked']} measurement commands through unchanged: its exclusions are in force"
+    changes = [(f"`{_clip(command)}` becomes `{_clip(detail)}`" if detail is not None
+                else f"`{_clip(command)}` loses its command")
+               if kind == "rewrites" else f"`{_clip(command)}` {detail}" for command, kind, detail in result["changed"]]
+    parts = [f"changes {len(changes)} of the {result['asked']} measurement commands it was asked about: "
+             + "; ".join(changes)] if changes else []
+    if result["why"]:
+        parts.append(f"is not verified: {result['why']}")
+    return f"{where} " + ", and ".join(parts)
+
+
+# A check holds one repository for its whole lifetime, including a nested call; no process-wide environment
+# is changed and a planted project .git cannot move a later measurement (NESTED-GIT).
+from contextlib import contextmanager as _git_contextmanager
+from contextvars import ContextVar as _GitContextVar
+
+_COMMIT_GIT_CONTEXT = _GitContextVar("polyctl_commit_git", default=None)
+
+
+@_git_contextmanager
+def bound_git_repository(top, git_dir, index):
+    """Pin the hook's repository and active index until the check returns, even on failure (NESTED-GIT)."""
+    token = _COMMIT_GIT_CONTEXT.set((top, git_dir, index))
+    try:
+        yield
+    finally:
+        _COMMIT_GIT_CONTEXT.reset(token)
+
+
+def bound_git_environment(env):
+    """Git reads the pinned repository, never a .git rediscovered from the project cwd (NESTED-GIT)."""
+    binding = _COMMIT_GIT_CONTEXT.get()
+    if binding is None:
+        return env
+    top, git_dir, index = binding
+    clean = {name: value for name, value in env.items()
+             if name not in _GIT_BINDING and not name.startswith("GIT_CONFIG")}
+    clean.update(GIT_DIR=git_dir, GIT_WORK_TREE=top, GIT_INDEX_FILE=index)
+    return clean
+
+
+def _git_output(root, *args, timeout=60, env=None):
+    """Run git without a shell and return bytes, failing closed on an unreadable tree.
+
+    In a process group of its own, as every Git query of authority's is: a timeout stops git with what it started -
+    a hook or a filter a repository configures - where it stopped git alone (LEADS-GATE-RUNS).
+    """
+    try:
+        merged = dict(os.environ, **env) if env else os.environ.copy()
+        result = run_as_group([git_binary(), *args], timeout, cwd=root, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, env=bound_git_environment(merged))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        left, unasked = getattr(exc, "left", None), getattr(exc, "unasked", None)
+        raise RuntimeError(f"cannot measure git tree: {exc}"
+                           + (f"; {len(left)} process(es) it started still run after it was stopped: {left}"
+                              if left else "") + (f"; {unasked}" if unasked else "")) from exc
+    if result.returncode:
+        detail = result.stderr.decode(UTF8, "replace").strip()[:240]
+        raise RuntimeError(f"cannot measure git tree: {detail or 'git failed'}")
+    return result.stdout
+
+
+def _git_text(cwd, *args, timeout=20, env=None):
+    """What `sh("git …", cwd=cwd)` returned, from the same git without a shell started in front of it.
+
+    A status read and every watchdog cycle asked the shell for their git queries, and each
+    paid for a shell before git ran. The answer is unchanged: standard output decoded as
+    UTF-8 with replacement, newlines normalised and stripped, whatever a failing git
+    printed there, and "" when git cannot be started or runs past the timeout.
+    """
+    argv = [git_binary(), *args]
+    try:
+        # In a process group of its own, as every Git query is: a timeout stops git with what it started (LEADS-GATE-RUNS).
+        merged = dict(os.environ, **env) if env else os.environ.copy()
+        merged.setdefault("GIT_OPTIONAL_LOCKS", "0")
+        result = run_as_group(argv, timeout, cwd=cwd, capture_output=True, text=True, encoding=UTF8,
+                              errors="replace", env=bound_git_environment(merged))
+    except Exception:
+        return ""
+    return result.stdout.strip()
+
+
+def _digest_field(digest, label, value):
+    """Length-frame one digest field so path/content boundaries cannot collide."""
+    digest.update(len(label).to_bytes(2, "big"))
+    digest.update(label)
+    digest.update(len(value).to_bytes(8, "big"))
+    digest.update(value)
+
+
+def tree_digest(root, cfg=None):
+    """A staging-independent fingerprint of tracked and untracked product state.
+
+    HEAD already identifies every unchanged tracked file. We therefore hash the
+    current bytes, type and executable bit of each path that differs from HEAD,
+    plus every non-ignored untracked path. The representation is identical before
+    and after `git add`, including for newly added files.
+
+    polyctl's own ledgers, reviews, mail and agent coordination directories are
+    deliberately excluded. Verification and review must be able to persist their
+    evidence without immediately making that evidence stale.
+    """
+    cfg = load_config(root) if cfg is None else cfg
+    changed = _git_output(
+        root, "diff", "--name-only", "-z", "--no-renames", "HEAD", "--"
+    ).split(b"\0")
+    untracked = _git_output(
+        root, "ls-files", "--others", "--exclude-standard", "-z", "--"
+    ).split(b"\0")
+    paths = {
+        os.fsdecode(raw)
+        for raw in changed + untracked
+        if raw and not _is_coordination_path(os.fsdecode(raw), cfg)
+    }
+
+    digest = hashlib.sha256()
+    _digest_field(digest, b"format", b"polyctl-product-tree-v2")
+    _digest_field(digest, b"head", _git_output(root, "rev-parse", "HEAD").strip())
+
+    for rel in sorted(paths, key=os.fsencode):
+        full = os.path.join(root, rel)
+        _digest_field(digest, b"path", os.fsencode(rel))
+        try:
+            st = os.lstat(full)
+        except OSError:
+            _digest_field(digest, b"entry", b"missing")
+            continue
+
+        if os.path.islink(full):
+            _digest_field(digest, b"entry", b"symlink")
+            _digest_field(digest, b"target", os.fsencode(os.readlink(full)))
+            continue
+        if os.path.isfile(full):
+            content = hashlib.sha256()
+            with open(full, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    content.update(chunk)
+            _digest_field(digest, b"entry", b"file")
+            _digest_field(digest, b"executable", b"1" if st.st_mode & 0o111 else b"0")
+            _digest_field(digest, b"content", content.digest())
+            continue
+        if os.path.isdir(full):
+            # A directory here is normally a changed gitlink. Recurse so a dirty
+            # submodule is measured by content rather than by index state.
+            try:
+                sub = tree_digest(full, {})
+            except RuntimeError:
+                sub = "unreadable-directory"
+            _digest_field(digest, b"entry", b"directory")
+            _digest_field(digest, b"content", sub.encode(UTF8, "surrogateescape"))
+            continue
+        _digest_field(digest, b"entry", f"special:{st.st_mode}".encode())
+
+    return "sha256:" + digest.hexdigest()
+
+
+CANDIDATE_FORMAT = "polyctl-index-candidate-v1"
+REVIEW_EVIDENCE_PREFIX = "<!-- polyctl-evidence: "
+
+
+def index_candidate(root):
+    """Measure the exact tree Git would commit from the active index.
+
+    ``git write-tree`` honors ``GIT_INDEX_FILE``, so this also measures the
+    temporary index exposed by ``git commit -a`` and path-limited commits. The
+    resulting tree object is immutable even if the live index changes later.
+    """
+    head = _git_output(root, "rev-parse", "HEAD").strip()
+    index_tree = _git_output(root, "write-tree").strip()
+    if not head or not index_tree:
+        raise RuntimeError("cannot measure index candidate: missing object id")
+    head_s = head.decode("ascii", "strict")
+    tree_s = index_tree.decode("ascii", "strict")
+    status = _git_output(
+        root, "diff-tree", "-r", "--no-commit-id", "--name-status", "-z",
+        "--no-renames", head_s, tree_s, "--",
+    )
+    names = _git_output(
+        root, "diff-tree", "-r", "--no-commit-id", "--name-only", "-z",
+        "--no-renames", head_s, tree_s, "--",
+    )
+    changed_paths = sorted(
+        {os.fsdecode(raw) for raw in names.split(b"\0") if raw}, key=os.fsencode
+    )
+    digest = hashlib.sha256()
+    _digest_field(digest, b"format", CANDIDATE_FORMAT.encode("ascii"))
+    _digest_field(digest, b"head", head)
+    _digest_field(digest, b"index-tree", index_tree)
+    _digest_field(digest, b"status", status)
+    return {
+        "format": CANDIDATE_FORMAT,
+        "digest": "sha256:" + digest.hexdigest(),
+        "head": head_s,
+        "index_tree": tree_s,
+        "changed_paths": changed_paths,
+        "changed_count": len(changed_paths),
+        "status_digest": "sha256:" + hashlib.sha256(status).hexdigest(),
+    }
+
+
+# ---- a tree written out of the repository, for a reader that must not run what it holds (REVIEW-TREE-3) ------------
+
+def working_tree_snapshot(root, index):
+    """The working tree as it stands, as a git tree object: each tracked file as it is now and each untracked one git
+    does not ignore, written through `index`, a file of the caller's, so the index git commits from is never touched
+    (CODEBASE-COPY).
+
+    A question about the code is about the code as it is, committed or not, and the index can hold a candidate the
+    implementer staged for review. The index's own entries are copied in first, so a tracked file that .gitignore
+    names is kept; `git add -A` then records every change, deletion and untracked file over them. Raises RuntimeError
+    naming the git step that failed.
+    """
+    entries = _git_output(root, "ls-files", "--stage", "-z")
+    env = dict(os.environ, GIT_INDEX_FILE=index)
+    written = b""
+    for args, given in ((("update-index", "-z", "--index-info"), entries), (("add", "-A"), b""),
+                        (("write-tree",), b"")):
+        try:
+            done = subprocess.run([git_binary(), *args], cwd=root, env=env, input=given, capture_output=True,
+                                  timeout=300)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"git {args[0]} could not run: {exc}") from exc
+        if done.returncode:
+            detail = done.stderr.decode(UTF8, "replace").strip()[:240]
+            raise RuntimeError(f"git {args[0]} failed: {detail or 'exit ' + str(done.returncode)}")
+        written = done.stdout.strip()
+    return written.decode("ascii", "strict")
+
+
+def _lands_inside(home, name, path=os.path):
+    """Whether a tar member called `name` lands inside `home` once the platform has read its separators.
+
+    Judged by where the name resolves, never by its spelling: on Windows `..\\x` climbs out of the
+    directory, and a check that splits on '/' reads it as one harmless word.
+    """
+    root = path.realpath(home)
+    return path.realpath(path.join(root, name)).startswith(root.rstrip(path.sep) + path.sep)
+
+
+def unpack_tree(root, tree, target):
+    """Write git tree `tree` of the repository at `root` into `target`, a folder this makes; `target` once the tree is
+    written whole, else None with nothing of `target` left (REVIEW-TREE-3).
+
+    `git archive` writes exactly the tree named, and what lands in `target` is a copy of it: no history, no index,
+    nothing a reader does there reaches the repository. A member naming an absolute path or a parent is dropped rather
+    than trusted, and so is a link, since what is unpacked comes from files an agent wrote. What any adapter declares
+    its harness reads from a project - `project_config` and its steering files - is not unpacked at all, wherever it
+    is: a harness started in a tree reads its hooks, plugins, MCP servers and instructions from there, and Claude Code
+    ran a SessionStart hook from a candidate's .claude/settings.json, agy the commands of its .agents/hooks.json and
+    OpenCode a plugin and an MCP server from .opencode/ and opencode.json, each though it only read. A member the
+    platform cannot write - a name longer than its file system takes, a name Windows reserves - can stop the
+    extraction after the members before it were written; `target` is then removed whole.
+
+    A review unpacks the candidate it pinned where its reviewer runs; `polyctl ask --codebase` unpacks the working tree
+    where its provider runs, and the unpacking moved here from the review's part so both make the same copy
+    (CODEBASE-COPY).
+    """
+    import shutil
+    if not tree:
+        return None
+    made = False
+    try:
+        archive = subprocess.run([git_binary(), "archive", "--format=tar", str(tree)], cwd=root,
+                                 capture_output=True, timeout=120)
+        if archive.returncode != 0 or not archive.stdout:
+            return None
+        import io
+        import tarfile
+        names = project_config_names()
+        with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+            safe = [member for member in tar.getmembers()
+                    if (member.isfile() or member.isdir()) and _lands_inside(target, member.name)
+                    and project_config_member(member.name, names) is None]
+            os.mkdir(target)
+            made = True
+            extra = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+            tar.extractall(target, members=safe, **extra)
+    except Exception:
+        if made:
+            shutil.rmtree(target, ignore_errors=True)
+        return None
+    return target
+
+
+def _normal_scope_paths(paths):
+    out = []
+    for value in paths or []:
+        raw = str(value or "").replace("\\", "/")
+        if not raw or raw.startswith("/") or re.match(r"^[A-Za-z]:/", raw):
+            raise ValueError(f"scope path must be repository-relative: {value}")
+        normal = os.path.normpath(raw).replace("\\", "/")
+        if normal in ("", ".", "..") or normal.startswith("../"):
+            raise ValueError(f"scope path escapes the repository: {value}")
+        if normal not in out:
+            out.append(normal)
+    return sorted(out, key=os.fsencode)
+
+
+def _path_in_scope(path, scope_paths):
+    return any(path == base or path.startswith(base.rstrip("/") + "/")
+               for base in scope_paths)
+
+
+def candidate_scope(candidate, paths=None):
+    """Bind a literal review scope to a candidate, rejecting staged extras."""
+    scope_paths = _normal_scope_paths(paths)
+    kind = "paths" if scope_paths else "full-index"
+    outside = [p for p in candidate["changed_paths"]
+               if scope_paths and not _path_in_scope(p, scope_paths)]
+    digest = hashlib.sha256()
+    _digest_field(digest, b"format", b"polyctl-candidate-scope-v1")
+    _digest_field(digest, b"candidate", candidate["digest"].encode("ascii"))
+    _digest_field(digest, b"kind", kind.encode("ascii"))
+    for path in scope_paths:
+        _digest_field(digest, b"path", os.fsencode(path))
+    return {
+        "kind": kind,
+        "paths": scope_paths,
+        "digest": "sha256:" + digest.hexdigest(),
+        "outside_paths": outside,
+    }
+
+
+def candidate_diff(root, candidate, scope=None):
+    """Render the immutable staged candidate, never the mutable worktree."""
+    scope = scope or candidate_scope(candidate)
+    args = [
+        "--literal-pathspecs", "diff-tree", "-p", "--binary", "--full-index",
+        "--no-ext-diff", "--no-renames", "--no-commit-id",
+        candidate["head"], candidate["index_tree"], "--",
+    ]
+    args.extend(scope.get("paths") or [])
+    return _git_output(root, *args, timeout=60)
+
+
+# ---- size is a tripwire that asks a question, not a gate that reshapes work (#34) ------
+
+SIZE_KINDS = ("product", "tests", "fixtures", "generated", "deletion")
+_GENERATED_PATH = re.compile(r"(^|/)(dist|build|generated|__generated__|vendor|node_modules)/|\.min\.(js|css)$|"
+                             r"\.pb\.go$|_pb2\.py$|(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|"
+                             r"poetry\.lock|Cargo\.lock|go\.sum|uv\.lock|Gemfile\.lock)$")
+_FIXTURE_PATH = re.compile(r"(^|/)(fixtures?|testdata|__snapshots__|snapshots)/|\.snap$")
+
+
+def size_kind(path):
+    """What a changed path is, for counting: generated, fixtures, tests or product."""
+    path = str(path).replace("\\", "/")
+    if _GENERATED_PATH.search(path):
+        return "generated"
+    if _FIXTURE_PATH.search(path):
+        return "fixtures"
+    name = path.rsplit("/", 1)[-1]
+    if _is_test_path(path) or "__tests__" in path.split("/") or "spec" in path.split("/")[:-1] \
+            or re.search(r"_test\.go$|\.(test|spec)\.[cm]?[jt]sx?$", name):
+        return "tests"
+    return "product"
+
+
+def candidate_size(root, candidate):
+    """The staged candidate's size by kind and by path, never as one number (#34).
+
+    A single total conflated 400 lines of fixtures with 400 lines of concurrency.
+    Lines are what git counts between HEAD and the pinned index tree; a file
+    whose change only removes lines is a deletion, whatever its path.
+    """
+    listed = _git_output(root, "diff-tree", "-r", "--numstat", "-z", "--no-renames",
+                         candidate["head"], candidate["index_tree"])
+    kinds = {kind: {"paths": 0, "added": 0, "deleted": 0} for kind in SIZE_KINDS}
+    for entry in listed.split(b"\0"):
+        added, _, rest = entry.partition(b"\t")
+        deleted, _, path = rest.partition(b"\t")
+        if not path:
+            continue
+        plus = int(added) if added.isdigit() else 0
+        minus = int(deleted) if deleted.isdigit() else 0
+        kind = "deletion" if plus == 0 and minus > 0 else size_kind(os.fsdecode(path))
+        kinds[kind]["paths"] += 1
+        kinds[kind]["added"] += plus
+        kinds[kind]["deleted"] += minus
+    return {"paths": sum(k["paths"] for k in kinds.values()), "kinds": kinds}
+
+
+def size_text(size):
+    """One line naming each kind that changed: paths and lines, product first."""
+    parts = [f"{kind} {k['paths']} path(s) +{k['added']}/-{k['deleted']}"
+             for kind, k in size["kinds"].items() if k["paths"]]
+    return ", ".join(parts) or "nothing changed"
+
+
+def size_tripwire(cfg, size):
+    """Where a candidate's size stands against the guideline, and what that asks for (#34).
+
+    Within it, nothing. Over it, a question: the boundary must say why the slice
+    is one invariant that cannot be split without leaving a seam unreviewed, and
+    that statement goes to the reviewer. Only far above it, where no review is
+    credible at any length, a refusal. Generated files and pure deletions count
+    toward no limit.
+    """
+    lines = size["kinds"]["product"]["added"] + size["kinds"]["product"]["deleted"]
+    paths = sum(size["kinds"][kind]["paths"] for kind in ("product", "tests", "fixtures"))
+    guide_lines = settings.get(cfg, "size.guideline_product_lines")
+    guide_paths = settings.get(cfg, "size.guideline_paths")
+    refuse_lines = settings.get(cfg, "size.refuse_product_lines")
+    measured = f"{lines} product line(s) across {paths} path(s)"
+    guideline = f"the guideline is {guide_lines} product lines and {guide_paths} paths"
+    if lines > refuse_lines:
+        return {"state": "refuse", "lines": lines, "paths": paths, "overshoot_pct": None,
+                "text": f"{measured} is far above what a review can credibly judge ({refuse_lines} product "
+                        f"lines, size.refuse_product_lines); {guideline}. Split it."}
+    if lines <= guide_lines and paths <= guide_paths:
+        return {"state": "within", "lines": lines, "paths": paths, "overshoot_pct": 0, "text": measured}
+    overshoot = max(100 * (lines - guide_lines) / guide_lines, 100 * (paths - guide_paths) / guide_paths)
+    return {"state": "over", "lines": lines, "paths": paths, "overshoot_pct": round(overshoot),
+            "text": f"{measured} is over the guideline ({guideline})"}
+
+
+def one_slice_statement(item, boundary=None):
+    """Why an oversized slice is one invariant, as its boundary states it (#34): a file section or `one slice:`."""
+    if boundary and (boundary.get("sections") or {}).get("why one slice", "").strip():
+        return boundary["sections"]["why one slice"].strip()
+    return ((((item or {}).get("notes") or {}).get("one slice")) or "").strip()
+
+
+# What a review prompt's claims and context may take together, as review.context_bytes defaults to (REVIEW-BUDGET).
+REVIEW_CONTEXT_BUDGET = settings.default("review.context_bytes")
+
+
+def _is_test_path(path):
+    parts = str(path).replace("\\", "/").split("/")
+    name = parts[-1]
+    return (any(part in ("tests", "test") for part in parts[:-1])
+            or name.startswith("test_") or name.endswith("_test.py") or name == "conftest.py")
+
+
+def _review_definitions(root, rev, path, cache):
+    """Committed definitions and static part loads: (lines, name -> (start, end), parts)."""
+    import ast
+    if path not in cache:
+        cache[path] = None
+        try:
+            source = _git_output(root, "show", f"{rev}:{path}", timeout=30).decode(UTF8, "replace")
+            tree = ast.parse(source)
+        except (RuntimeError, SyntaxError, ValueError):
+            return None
+        spans = {}
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                spans[node.name] = (min([node.lineno] + [d.lineno for d in node.decorator_list]),
+                                    node.end_lineno)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                for target in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                    if isinstance(target, ast.Name):
+                        spans[target.id] = (node.lineno, node.end_lineno)
+        cache[path] = (source.splitlines(), spans, top_level_statements(source)[2])
+    return cache[path]
+
+
+def review_context(root, paths, read_rev, context_rev, budget=REVIEW_CONTEXT_BUDGET):
+    """Committed source a test-only candidate exercises, for the reviewer to read (#97).
+
+    The candidate is what may land; this is what it is judged against. None of it
+    enters the diff or the candidate digest, so supplying it widens the authority
+    binding by nothing. Context is attached only when every Python file in the
+    candidate is a test: a test cannot be judged without the code it runs, while
+    a source change carries its own subject.
+
+    The tests are read at ``read_rev`` (the index tree for a staged candidate) and
+    the source at ``context_rev``. A definition the tests name through an import -
+    an attribute of an imported module, an imported name, or a name handed to
+    ``setattr`` as a string - is copied whole, in the order the tests first name
+    it, while the budget lasts. What does not fit is named, never cut, and the
+    whole text, including its header and names, stays within the budget. Python only.
+    """
+    import ast
+    if budget <= 0:
+        return None
+    py = [path for path in paths or [] if path.endswith(".py")]
+    if not py or not all(_is_test_path(path) for path in py):
+        return None
+    try:
+        listing = _git_output(root, "ls-tree", "-r", "--name-only", "-z", context_rev, "--")
+    except RuntimeError:
+        return None
+    committed = {os.fsdecode(raw) for raw in listing.split(b"\0") if raw}
+    refs = []
+    for path in py:
+        try:
+            tree = ast.parse(_git_output(root, "show", f"{read_rev}:{path}", timeout=30))
+        except (RuntimeError, SyntaxError, ValueError):
+            continue
+        modules, names = {}, {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    modules[alias.asname or alias.name] = alias.name
+            elif isinstance(node, ast.ImportFrom):
+                package = path.split("/")[:-1]
+                if package and package[0] == "src":
+                    package = package[1:]
+                if node.level > len(package):
+                    continue
+                relative = package[:len(package) - node.level + 1] if node.level else []
+                module = ".".join(relative + ([node.module] if node.module else []))
+                for alias in node.names:
+                    bound = alias.asname or alias.name
+                    modules[bound] = f"{module}.{alias.name}"
+                    names[bound] = (module, alias.name)
+        for node in ast.walk(tree):
+            at = (path, getattr(node, "lineno", 0), getattr(node, "col_offset", 0))
+            if isinstance(node, ast.Attribute):
+                parts, base = [], node
+                while isinstance(base, ast.Attribute):
+                    parts.insert(0, base.attr)
+                    base = base.value
+                if isinstance(base, ast.Name):
+                    parts.insert(0, base.id)
+                    for end in range(len(parts) - 1, 0, -1):
+                        prefix = ".".join(parts[:end])
+                        if prefix in modules:
+                            refs.append((at, modules[prefix], parts[end]))
+                            break
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in names:
+                refs.append((at, *names[node.id]))
+            elif (isinstance(node, ast.Call) and len(node.args) >= 2
+                  and isinstance(node.args[0], ast.Name) and node.args[0].id in modules
+                  and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str)):
+                refs.append((at, modules[node.args[0].id], node.args[1].value))
+    cache, seen, order, blocks = {}, set(), [], {}
+    for _, module, name in sorted(refs):
+        qualified = f"{module}.{name}"
+        if qualified in seen:
+            continue
+        seen.add(qualified)
+        base = module.replace(".", "/")
+        path = next((candidate for candidate in (f"src/{base}.py", f"{base}.py",
+                                                 f"src/{base}/__init__.py", f"{base}/__init__.py")
+                     if candidate in committed), None)
+        waiting, visited = [path] if path else [], set()
+        while waiting:
+            path = waiting.pop(0)
+            if path in visited or path not in committed:
+                continue
+            visited.add(path)
+            found = _review_definitions(root, context_rev, path, cache)
+            if not found:
+                continue
+            if name in found[1]:
+                break
+            # polyctl's own public definitions live in statically named parts (TRIAGE-1-MEDIUM).
+            waiting += [_part_file(path, part) for part in found[2]]
+        else:
+            continue
+        start, end = found[1][name]
+        order.append(qualified)
+        blocks[qualified] = (path, f"# {path}:{start}-{end}  {qualified}\n"
+                                   + "\n".join(found[0][start - 1:end]) + "\n")
+    files = list(dict.fromkeys(blocks[qualified][0] for qualified in order))
+
+    def render(kept):
+        omitted = [qualified for qualified in order if qualified not in kept]
+        lines = [f"committed at {context_rev[:12]}; read-only; not under review",
+                 "files: " + (", ".join(files) or "none resolved from the tests' imports")]
+        if omitted:
+            shown = []
+            for qualified in omitted:
+                if sum(len(name) + 2 for name in shown) + len(qualified) > 2_000:
+                    break
+                shown.append(qualified)
+            more = len(omitted) - len(shown)
+            lines.append("not inlined for size, read them from the committed tree: "
+                         + ", ".join(shown) + (f" and {more} more" if more else ""))
+        return {"rev": context_rev, "paths": files, "names": list(kept), "omitted": omitted,
+                "text": "\n".join(lines) + "".join("\n\n" + blocks[q][1] for q in kept)}
+
+    kept, spent = [], 0
+    for qualified in order:
+        size = len(blocks[qualified][1].encode(UTF8)) + 2
+        if spent + size <= budget:
+            kept.append(qualified)
+            spent += size
+    result = render(kept)
+    while kept and len(result["text"].encode(UTF8)) > budget:
+        kept.pop()
+        result = render(kept)
+    if len(result["text"].encode(UTF8)) > budget:
+        # Even the names can exceed a small remaining argument budget (TRIAGE-1-MEDIUM).
+        result["text"] = f"committed at {context_rev[:12]}; read-only; not under review"
+        if len(result["text"].encode(UTF8)) > budget:
+            return None
+    return result
+
+
+def range_end_tree(root, commits):
+    """The tree a retrospective range ends on, which its reviewer reads; None where there is none (REVIEW-RANGE-TREE)."""
+    if ".." not in str(commits or ""):
+        return None
+    end = str(commits).split("..", 1)[1].lstrip(".") or "HEAD"
+    if end.startswith("-"):
+        return None
+    try:
+        return _git_output(root, "rev-parse", "--verify", "--quiet", end + "^{tree}").decode("ascii").strip() or None
+    except (RuntimeError, UnicodeError):
+        return None
+
+
+def review_range_context(root, commits, budget=REVIEW_CONTEXT_BUDGET):
+    """The same context for a retrospective range, read at the range's end commit."""
+    if ".." not in commits:
+        return None
+    end = commits.split("..", 1)[1].lstrip(".") or "HEAD"
+    if end.startswith("-"):
+        return None
+    try:
+        rev = _git_output(root, "rev-parse", "--verify", "--quiet",
+                          end + "^{commit}").decode("ascii").strip()
+        names = _git_output(root, "diff", "--name-only", "-z", "--no-renames", commits, "--")
+    except (RuntimeError, UnicodeError):
+        return None
+    paths = sorted({os.fsdecode(raw) for raw in names.split(b"\0") if raw}, key=os.fsencode)
+    return review_context(root, paths, rev, rev, budget)
+
+
+def review_context_line(context):
+    files = review_header_value(", ".join(context["paths"])) \
+        or "none resolved from the tests' imports"
+    line = (f"- context: read-only at `{context['rev'][:12]}`: {files}; "
+            f"{len(context['names'])} definitions")
+    if context["omitted"]:
+        line += f", {len(context['omitted'])} not inlined for size"
+    return line
+
+
+REVIEW_CLAIMS_MAX_COMMITS = 500
+REVIEW_CLAIMS_INDENT = "    "
+
+
+def review_range_claims(root, commits, budget=REVIEW_CONTEXT_BUDGET):
+    """What the commits of a landed range say they did, for its retrospective review to verify.
+
+    A waived range's boundary is the owner's reason for waiving it, the same for every
+    slice, while each commit message states what was wrong, what changed and what the
+    tests prove. Oldest first, a message goes in whole while the budget lasts; one that
+    does not fit is named by its commit and subject, never cut. Each is scanned for
+    credentials as evidence is (#48). A subject is written as a review header value is
+    (#55) and every body line is indented, so no line of a message starts at the margin,
+    where the prompt's markers stand. The newest REVIEW_CLAIMS_MAX_COMMITS are read.
+
+    Returns None when `commits` is not a two-dot range git can list, otherwise commits
+    (how many the range holds), inlined, subjects, redacted (the rules that hit), text and
+    its digest.
+    """
+    commits = str(commits)
+    if commits.startswith("-") or "..." in commits or ".." not in commits:
+        return None
+    try:
+        total = int(_git_output(root, "rev-list", "--count", commits, "--").strip() or 0)
+        raw = _git_output(root, "log", f"--max-count={REVIEW_CLAIMS_MAX_COMMITS}", "-z",
+                          "--format=%H%n%B", commits, "--")
+    except (RuntimeError, ValueError):
+        return None
+    blocks, hits = [], set()               # (commit, how a list names it, the message as the prompt holds it)
+    for record in reversed(raw.split(b"\0")):
+        ident, _, message = record.decode(UTF8, "replace").lstrip("\n").partition("\n")
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", ident):
+            continue
+        message, found = scan_evidence(message)
+        hits.update(found)
+        lines = message.splitlines() or [""]
+        body = lines[1:]
+        while body and not body[0].strip():
+            body.pop(0)
+        while body and not body[-1].strip():
+            body.pop()
+        block = "\n".join([f"commit {ident[:12]}  {review_header_value(lines[0])}"]
+                          + [REVIEW_CLAIMS_INDENT + line if line.strip() else "" for line in body])
+        blocks.append((ident, f"{ident[:12]} {review_header_value(lines[0][:120])}", block))
+
+    def render(kept, room=2_000):
+        named = [name for ident, name, _ in blocks if ident not in kept]
+        missing = len(named) + max(0, total - len(blocks))
+        parts = [block for ident, _, block in blocks if ident in kept]
+        shown = []
+        for name in named:
+            if sum(len(item) + 2 for item in shown) + len(name) > room:
+                break
+            shown.append(name)
+        if shown:
+            parts.append("not inlined for size: " + "; ".join(shown)
+                         + (f" and {missing - len(shown)} more commit(s)" if missing > len(shown) else ""))
+        elif missing:
+            parts.append(f"not inlined for size: {missing} commit(s)")
+        return "\n\n".join(parts)
+
+    def fits(text):
+        return len(text.encode(UTF8)) <= budget
+
+    kept = {ident for ident, _, _ in blocks}
+    if not fits(render(kept)):
+        kept = set()
+        for ident, _, _ in blocks:
+            if fits(render(kept | {ident})):
+                kept.add(ident)
+    text = render(kept)
+    if not fits(text):
+        text = render(kept, room=0)              # where even the names do not fit, their count stands for them
+    return {"commits": total, "inlined": len(kept), "subjects": [name for _, name, _ in blocks],
+            "redacted": sorted(hits), "text": text, "digest": "sha256:" + hashlib.sha256(text.encode(UTF8)).hexdigest()}
+
+
+def review_claims_line(claims):
+    """The header line of a review told what its range's commits claim: which, and what was left out."""
+    shown = claims["subjects"][:3]
+    line = (f"- claims: {claims['commits']} commit message(s), given to the reviewer as claims to verify: "
+            + "; ".join(shown))
+    if claims["commits"] > len(shown):
+        line += f" and {claims['commits'] - len(shown)} more"
+    if claims["inlined"] < claims["commits"]:
+        line += f"; {claims['commits'] - claims['inlined']} not inlined for size"
+    if claims["redacted"]:
+        line += "; redacted: " + ", ".join(claims["redacted"])
+    return line
+
+
+# ---- gate coverage: a source tree no gate exercises (#5) ------------------------------
+
+TOOLCHAINS = {
+    "python": {"ext": (".py",), "runners": ("pytest", "python", "python3", "ruff", "mypy", "tox", "uv")},
+    "node": {"ext": (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"),
+             "runners": ("npm", "npx", "pnpm", "yarn", "node", "vitest", "jest", "tsc", "bun", "deno")},
+    "dotnet": {"ext": (".cs", ".fs", ".vb"), "runners": ("dotnet", "msbuild")},
+    "go": {"ext": (".go",), "runners": ("go",)},
+    "rust": {"ext": (".rs",), "runners": ("cargo",)},
+    "jvm": {"ext": (".java", ".kt", ".scala"), "runners": ("mvn", "gradle", "gradlew", "sbt")},
+    "swift": {"ext": (".swift",), "runners": ("swift", "xcodebuild")},
+}
+
+
+def source_trees(root, minimum):
+    """{top-level tree: {toolchain: files}} for every tree holding at least `minimum` of one toolchain's files.
+
+    Tracked and untracked-but-not-ignored files, as git lists them; files at the top
+    level count as the tree ".".
+    """
+    try:
+        listed = _git_output(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+    except RuntimeError:
+        return {}
+    counts = {}
+    for raw in listed.split(b"\0"):
+        path = os.fsdecode(raw)
+        if not path:
+            continue
+        tree = path.split("/", 1)[0] if "/" in path else "."
+        chain = next((name for name, spec in TOOLCHAINS.items() if path.endswith(spec["ext"])), None)
+        if chain:
+            counts.setdefault(tree, {}).setdefault(chain, 0)
+            counts[tree][chain] += 1
+    return {tree: {chain: n for chain, n in chains.items() if n >= minimum}
+            for tree, chains in counts.items() if any(n >= minimum for n in chains.values())}
+
+
+# A word of a gate's command line that launches the program after it: `python -m pytest`, `npx vitest`, `uv run pytest`.
+_GATE_LAUNCHERS = {"python": "-m", "python3": "-m", "py": "-m", "npx": None, "pnpx": None, "bunx": None, "uv": "run",
+                   "poetry": "run", "pipenv": "run"}
+
+
+def _gate_programs(run):
+    """The programs a gate's command line starts: the first word of each command in it - after `&&`, `||`, `;`, `|`
+    or `&`, a `NAME=value` aside - and the one a launcher such as `python -m` or `npx` starts after it, each named as
+    a runner is (TRIAGE-HIGHS).
+
+    A runner was matched anywhere in the line, so `echo pytest` read as running pytest and covered every Python
+    tree."""
+    import shlex
+    # Tokenize before splitting commands: a quoted separator never starts a runner (TRIAGE-2-MEDIUM).
+    try:
+        lexer = shlex.shlex(str(run or ""), posix=False, punctuation_chars=";&|()\n")
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return set()
+    found = set()
+    commands, words = [], []
+    for token in tokens:
+        if token and all(char in ";&|()\n" for char in token):
+            commands.append(words)
+            words = []
+        else:
+            words.append(token)
+    commands.append(words)
+    for words in commands:
+        words = [word.strip("\"'") for word in words]
+        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+            words.pop(0)
+        names = [re.sub(r"\.(exe|cmd|bat)$", "", re.split(r"[\\/]", word)[-1].lower()) for word in words]
+        if not names:
+            continue
+        # A wrapper is itself a runner, including when flags precede its package (TRIAGE-2-MEDIUM).
+        found.add(names[0])
+        after = _GATE_LAUNCHERS.get(names[0], "")
+        if after is None and len(names) > 1:
+            found.add(names[1])
+        elif after and len(names) > 2 and names[1] == after:
+            found.add(names[2])
+    return found
+
+
+def _gate_covers(gate, tree, chain):
+    """Whether one gate exercises a toolchain's files in one tree: it runs that toolchain's
+    runner where a command starts and, when it declares inputs, one of them reaches into the tree."""
+    import fnmatch
+    if not isinstance(gate, dict):
+        return False                    # no gate polyctl reads; the doctor names the file (TRIAGE-HIGHS)
+    if not _gate_programs(gate.get("run")) & set(TOOLCHAINS[chain]["runners"]):
+        return False
+    inputs = gate.get("inputs")
+    if not isinstance(inputs, list) or not inputs:
+        return True
+    probe = "x" + TOOLCHAINS[chain]["ext"][0] if tree == "." else f"{tree}/x{TOOLCHAINS[chain]['ext'][0]}"
+    return any(fnmatch.fnmatchcase(probe, str(glob)) or str(glob).startswith(f"{tree}/") for glob in inputs)
+
+
+def gate_coverage_gaps(root, spec, minimum, names=None):
+    """(tree, toolchain, files) for every tree's toolchain that no gate - or none of `names` - exercises."""
+    gates = spec.get("gates") if isinstance(spec, dict) else None
+    gates = gates if isinstance(gates, dict) else {}
+    chosen = [gate for name, gate in gates.items() if isinstance(gate, dict)
+              and (names is None or name in names)]
+    gaps = []
+    for tree, chains in sorted(source_trees(root, minimum).items()):
+        for chain, files in sorted(chains.items()):
+            if not any(_gate_covers(gate, tree, chain) for gate in chosen):
+                gaps.append((tree, chain, files))
+    return gaps
+
+
+def gate_inputs(root):
+    """The paths the declared gates read, as globs, or None for the whole tree (#16).
+
+    A gate may name its `inputs`. Only when every gate in `.polyctl/gates.json` does can
+    a dirty path outside all of them be known not to reach a gate; one gate without
+    inputs reads the whole tree, and so does a file that cannot be read.
+    """
+    try:
+        with open(os.path.join(root, ".polyctl", "gates.json"), encoding=UTF8) as fh:
+            spec = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return gate_inputs_of(spec)
+
+
+def gate_inputs_of(spec):
+    """gate_inputs of one reading of `.polyctl/gates.json`, `spec`: the one `polyctl verify` runs its gates from (TRIAGE-HIGHS).
+
+    Verify judged isolation by the file read again after it had waited for the machine lock: inputs narrowed
+    in that wait, and put back once the run was recorded, left an untracked file a gate read out of the
+    check, and the recorded digest still matched the file."""
+    gates = spec.get("gates") if isinstance(spec, dict) else None
+    if not isinstance(gates, dict) or not gates:
+        return None
+    globs = set()
+    for gate in gates.values():
+        declared = gate.get("inputs") if isinstance(gate, dict) else None
+        if not isinstance(declared, list) or not declared \
+                or not all(isinstance(item, str) and item.strip() for item in declared):
+            return None
+        globs.update(item.strip() for item in declared)
+    return sorted(globs)
+
+
+def candidate_worktree_issues(root, cfg, candidate=None, inputs="declared"):
+    """State that would make gates execute bytes other than the staged candidate.
+
+    Only a dirty path that is part of the candidate or that a gate reads refuses (#16).
+    On 2026-09-06 seven untracked files outside the slice withheld commit authority
+    until a person moved them. A path no gate reads is listed as `worktree_noise`,
+    never fatal; while any gate declares no inputs, every dirty path counts.
+    """
+    candidate = candidate or index_candidate(root)
+    if inputs == "declared":
+        inputs = gate_inputs(root)
+    unstaged = {
+        os.fsdecode(raw)
+        for raw in _git_output(
+            root, "diff", "--name-only", "-z", "--no-renames", "--"
+        ).split(b"\0")
+        if raw and not _is_coordination_path(os.fsdecode(raw), cfg)
+    }
+    untracked = {
+        os.fsdecode(raw)
+        for raw in _git_output(
+            root, "ls-files", "--others", "--exclude-standard", "-z", "--"
+        ).split(b"\0")
+        if raw and not _is_coordination_path(os.fsdecode(raw), cfg)
+    }
+    coordination = {
+        path for path in candidate["changed_paths"] if _is_coordination_path(path, cfg)
+    }
+    if inputs is None:
+        noise = set()
+    else:
+        import fnmatch
+        mine = set(candidate["changed_paths"])
+        noise = {path for path in unstaged | untracked
+                 if path not in mine and not any(fnmatch.fnmatchcase(path, glob) for glob in inputs)}
+    return {
+        "unstaged": sorted(unstaged - noise, key=os.fsencode),
+        "untracked": sorted(untracked - noise, key=os.fsencode),
+        "staged_coordination": sorted(coordination, key=os.fsencode),
+        "worktree_noise": sorted(noise, key=os.fsencode),
+    }
+
+
+def candidate_issue_messages(issues):
+    labels = (
+        ("unstaged", "unstaged product changes differ from the index"),
+        ("untracked", "untracked product files are outside the index"),
+        ("staged_coordination", "coordination paths must not share a product commit"),
+    )
+    return [f"{label}: {', '.join(issues[key])}" for key, label in labels
+            if issues.get(key)]
+
+
+def review_evidence(body):
+    """Structured evidence embedded in a human-readable review artifact."""
+    for line in str(body or "").splitlines():
+        if line.startswith(REVIEW_EVIDENCE_PREFIX) and line.endswith(" -->"):
+            try:
+                value = json.loads(line[len(REVIEW_EVIDENCE_PREFIX):-4])
+            except (TypeError, ValueError):
+                return None
+            return value if isinstance(value, dict) else None
+    return None
+
+
+def review_evidence_line(value):
+    return REVIEW_EVIDENCE_PREFIX + json.dumps(
+        value, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    ) + " -->"
+
+
+def review_header_value(value):
+    """One header value on one line, whatever the implementer or the config supplied (#55).
+
+    A review artefact's header echoes the boundary, the commit range, labels and
+    file names. A value holding a line break, or any other character
+    ``str.splitlines`` breaks on (``\\x1c``, ``\\x85``, ``\\u2028`` ...), would start a
+    line of its own, and a line reading ``VERDICT: APPROVED`` there is a verdict to
+    every reader. Such a value is written as a JSON string; a printable one as it is.
+    """
+    text = str(value)
+    return text if text.isprintable() else json.dumps(text, ensure_ascii=True)
+
+
+REVIEWER_OUTPUT_HEADING = "## Reviewer output, verbatim"
+REVIEWER_OUTPUT_INDENT = "    "
+
+
+def review_verbatim_lines(text):
+    """The reviewer's own output for the artefact, below polyctl's adjudication (#54).
+
+    Indented, so none of its lines starts at the margin, where the verdict and the
+    evidence line are read. It is split with the ``splitlines`` those readers use,
+    so a separator inside a line cannot lift the rest of it back to the margin.
+    """
+    return ["", REVIEWER_OUTPUT_HEADING, ""] + [
+        REVIEWER_OUTPUT_INDENT + line if line else ""
+        for line in str(text or "").splitlines()
+    ]
+
+
+def candidate_review_integrity(root, candidate, evidence):
+    """Return the canonical reviewed scope and any exact-candidate refusals."""
+    reasons = []
+    if not isinstance(evidence, dict):
+        return None, ["review evidence is not a structured object"]
+    if evidence.get("candidate") != candidate:
+        reasons.append(
+            "review evidence candidate does not exactly match the current index candidate"
+        )
+
+    recorded_scope = evidence.get("scope")
+    if not isinstance(recorded_scope, dict):
+        reasons.append("review evidence has no structured candidate scope")
+        return None, reasons
+    paths = recorded_scope.get("paths")
+    if not isinstance(paths, list):
+        reasons.append("review evidence candidate scope paths must be a list")
+        return None, reasons
+    try:
+        scope = candidate_scope(candidate, paths)
+    except (KeyError, TypeError, ValueError, UnicodeError) as exc:
+        reasons.append(f"review evidence has an invalid candidate scope: {exc}")
+        return None, reasons
+
+    if scope["outside_paths"]:
+        reasons.append(
+            "review evidence scope excludes staged paths: "
+            + ", ".join(scope["outside_paths"])
+        )
+    if recorded_scope != scope:
+        reasons.append(
+            "review evidence scope does not exactly match the current candidate"
+        )
+
+    try:
+        diff_digest = "sha256:" + hashlib.sha256(
+            candidate_diff(root, candidate, scope)
+        ).hexdigest()
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError, UnicodeError) as exc:
+        reasons.append(f"review evidence candidate diff cannot be reproduced: {exc}")
+    else:
+        if evidence.get("diff_digest") != diff_digest:
+            reasons.append(
+                "review evidence diff digest does not match the exact candidate diff: "
+                f"expected {diff_digest}, got {evidence.get('diff_digest') or '<missing>'}"
+            )
+    return scope, reasons
+
+
+# ---- a boundary's criteria, each with a verdict of its own (CRITERIA-VERDICTS) ---------
+
+# The line a reviewer gives one criterion, spelled the same in every language because polyctl reads it back:
+# `CRITERION <n>: MET` or `CRITERION <n>: NOT MET`, then its evidence. A list bullet and bold are allowed.
+CRITERION_ANSWER = re.compile(r"""
+    (?:[-*][ \t]+)?                                         # a list bullet
+    (?:\*\*)?CRITERION[ \t]+(\d{1,3})[ \t]*:(?:\*\*)?[ \t]*
+    (?:\*\*)?(NOT[ \t]+MET|MET)(?:\*\*)?(?!\w)
+    [ \t]*[—–:-]*[ \t]*(.*)                                 # the evidence, after a dash or a colon
+""", re.I | re.X)
+CRITERION_EVIDENCE_CHARS = 300
+CRITERION_UNSUPPORTED = "it was said to be met with no evidence"
+
+
+def criterion_verdicts(criteria, answers):
+    """Each criterion with what a review's answers found of it: met, not met, or no verdict (None).
+
+    `answers` are the reviewer's own words: a review's one answer, or each of its
+    sections'. A criterion's line counts only at the margin, where the verdict and the
+    counts are read, so an indented line - a quotation, an example - decides nothing. A
+    MET line that gives no evidence is no verdict, since the evidence is what the line is
+    for, and the record says so. Across the sections of one review a criterion is met
+    when a section judged it and none found it not met: a scenario's section judges its
+    own, and one section's NOT MET stands however many others found it met.
+    """
+    from .verdicts import CriterionVerdict
+    said = {str(criterion.get("id")): [] for criterion in criteria}
+    for answer in answers:
+        for line in str(answer or "").splitlines():
+            found = None if line[:1].isspace() else CRITERION_ANSWER.fullmatch(line.rstrip())
+            if not found or str(int(found.group(1))) not in said:
+                continue
+            evidence = found.group(3).strip()[:CRITERION_EVIDENCE_CHARS]
+            if found.group(2).upper() != "MET":
+                verdict = CriterionVerdict.NOT_MET.value
+            elif evidence:
+                verdict = CriterionVerdict.MET.value
+            else:
+                verdict, evidence = None, CRITERION_UNSUPPORTED
+            said[str(int(found.group(1)))].append((verdict, evidence))
+    # Not met outranks met, and met outranks a line that was no verdict; among equals the first line said stands.
+    rank = (CriterionVerdict.NOT_MET.value, CriterionVerdict.MET.value, None)
+    out = []
+    for criterion in criteria:
+        heard = sorted(said[str(criterion.get("id"))], key=lambda entry: rank.index(entry[0]))
+        verdict, evidence = heard[0] if heard else (None, "")
+        out.append({"id": criterion.get("id"), "text": criterion.get("text"), "verdict": verdict,
+                    "evidence": evidence})
+    return out
+
+
+def criteria_refusals(evidence):
+    """Each criterion of a review that keeps it from authorising, named: not met, or with no verdict.
+
+    What the review recorded is read, never worked out again from the boundary, which
+    may have moved since. A review of a boundary that lists no criteria records none,
+    and nothing is refused here: a single sentence grants as it always did.
+    """
+    from .verdicts import CriterionVerdict
+    criteria = evidence.get("criteria") if isinstance(evidence, dict) else None
+    if criteria is None:
+        return []
+    if not isinstance(criteria, list) or not all(isinstance(criterion, dict) for criterion in criteria):
+        return ["review evidence records criteria that are not a list of criteria"]
+    out = []
+    for criterion in criteria:
+        verdict = criterion.get("verdict")
+        if verdict == CriterionVerdict.MET.value:
+            continue
+        state = "is not met" if verdict == CriterionVerdict.NOT_MET.value else "has no verdict"
+        why = f" — {criterion['evidence']}" if criterion.get("evidence") else ""
+        out.append(review_header_value(f"criterion {criterion.get('id')} {state}: {criterion.get('text')}{why}"))
+    return out
+
+
+def review_criteria_lines(criteria):
+    """The artefact's header line for each criterion: its number and words, its verdict, the reviewer's evidence."""
+    return [f"- criterion {criterion['id']} ({review_header_value(criterion['text'])}): "
+            + review_header_value((criterion["verdict"] or "no verdict")
+                                  + (f" — {criterion['evidence']}" if criterion["evidence"] else ""))
+            for criterion in criteria or []]
+
+
+REVIEW_CHAIN = "polyctl-review-row-v1"
+
+
+def review_requests_dir(root, key=None):
+    """Where a project's stand-in review requests are kept: ~/.polyctl/review-requests/<project>/, outside the tree an agent
+    writes, named by `key` or the project's key (REVIEW-PATH-HIGHS).
+
+    A request binds a person's carried answer to the candidate it was made for, and holds the text the person carries
+    to a session. In .polyctl/review-requests/ both were the implementer's to rewrite: a `candidate` turned to bytes it
+    staged after had a person's genuine approval recorded for bytes no session was shown, emptied `criteria` let it
+    land past a criterion the session found not met, and a text changed while a person copied it had the session judge
+    another diff than the one polyctl bound.
+    """
+    return os.path.join(HOME, ".polyctl", "review-requests", key or project_key(root))
+
+
+def tree_review_request(root, nonce):
+    """Whether the tree holds a request by this nonce where polyctl kept them before REVIEW-PATH-HIGHS; one found there is
+    named, never read."""
+    return bool(re.fullmatch(r"[0-9a-f]{32}", str(nonce or ""))) and os.path.lexists(
+        os.path.join(root, ".polyctl", "review-requests", f"{nonce}.json"))
+
+
+STANDIN_LIMITS = (
+    "polyctl cannot verify which model wrote this answer; it records the model the person declared",
+    "a same-user actor could have written the answer; the nonce binds it to one candidate, nothing more",
+)
+
+
+def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, slice_id, paths, prompt,
+                         criteria=None, threat_model=None, boundary_file=None):
+    """A review request a person can carry to a session polyctl cannot reach (#75).
+
+    Written when no reviewer could be reached for a staged candidate: the prompt the
+    reviewer would have received - as `polyctl review` hands it here, without the note about
+    a tree the session a person carries it to does not hold (REVIEW-TREE-2) - and a
+    nonce the answer must lead with, asked for in the project's language
+    (LANGUAGE-PROMPTS). The metadata beside it binds the request to that candidate, and
+    keeps the criteria the prompt asks about, if any: the answer is read against those
+    when it is collected, although the boundary kept beside them is only a boundary
+    file's name (CRITERIA-VERDICTS).
+
+    Both are kept outside the tree (review_requests_dir), and the metadata holds the digest of the text: a collect
+    reads the binding from there alone, and the text a person carries is the one polyctl wrote (REVIEW-PATH-HIGHS).
+    """
+    import secrets
+    from .storage import replace_file_durably
+    nonce = secrets.token_hex(16)
+    directory = review_requests_dir(root)
+    text = (f"# polyctl review request {nonce}\n\n"
+            "No reviewer could be reached for the staged candidate below. Paste everything\n"
+            "under the line into a session running a different model family from the\n"
+            "implementer's, save its whole answer to a file, and then a person runs:\n\n"
+            f"    polyctl collect-review {nonce} --response <file> --model <the model that answered> --by <your name>\n\n"
+            f"The request binds to candidate `{candidate['digest']}`; if the staged bytes change,\n"
+            "it no longer applies.\n\n---\n\n"
+            + language.text(cfg, "prompt.review-request", nonce=nonce) + f"\n\n{prompt}\n").encode(UTF8)
+    meta = {"nonce": nonce, "at": int(time.time()), "candidate": candidate["digest"],
+            "index_tree": candidate["index_tree"], "scope": scope, "diff_digest": diff_digest,
+            "boundary": boundary, "slice": slice_id, "paths": paths, "collected": None,
+            "text": "sha256:" + hashlib.sha256(text).hexdigest()}
+    if boundary_file:
+        meta["boundary_file"] = boundary_file
+    if criteria:
+        meta["criteria"] = criteria
+    if threat_model:
+        meta["threat_model"] = threat_model     # the one its prompt carries, which an answer is judged under
+    path = os.path.join(directory, f"{nonce}.md")
+    replace_file_durably(os.path.join(directory, f"{nonce}.json"),
+                         json.dumps(meta, indent=1, sort_keys=True).encode(UTF8))
+    replace_file_durably(path, text)
+    return dict(meta, path=path)
+
+
+def review_request(root, nonce):
+    """A request's metadata by its nonce, or None."""
+    if not re.fullmatch(r"[0-9a-f]{32}", str(nonce or "")):
+        return None
+    try:
+        with open(os.path.join(review_requests_dir(root), f"{nonce}.json"), encoding=UTF8) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and data.get("nonce") == nonce else None
+
+
+def mark_review_request_collected(root, nonce, artefact, by):
+    """A request answers once: record which artefact its answer became and who carried it."""
+    from .storage import replace_file_durably
+    meta = review_request(root, nonce)
+    if meta is None:
+        return None
+    meta["collected"] = {"at": int(time.time()), "artefact": artefact, "by": by}
+    replace_file_durably(os.path.join(review_requests_dir(root), f"{nonce}.json"),
+                         json.dumps(meta, indent=1, sort_keys=True).encode(UTF8))
+    return meta
+
+
+def review_ledger_path(root):
+    return os.path.join(root, ".polyctl", "ledger", "reviews.jsonl")
+
+
+def review_artefact_name(root, reviews_dir, head):
+    """A review artefact name no earlier review has, so no record points at a rewritten file."""
+    stem = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}"
+    name, n = f"{stem}.md", 2
+    while os.path.lexists(os.path.join(root, reviews_dir, name)):
+        name, n = f"{stem}-{n}.md", n + 1
+    return name
+
+
+def record_review(root, name, data, evidence, verdict, reviewer=None, fallback=False):
+    """Append one review to the chained review ledger: which file, which bytes, what it decided (#63)."""
+    from .storage import append_chained_jsonl
+    evidence = evidence if isinstance(evidence, dict) else {}
+    candidate = evidence.get("candidate") if isinstance(evidence.get("candidate"), dict) else {}
+    row = {
+        "at": int(time.time()),
+        "artefact": name,
+        "sha256": "sha256:" + hashlib.sha256(data).hexdigest(),
+        "kind": evidence.get("kind"),
+        "candidate": candidate.get("digest"),
+        "verdict": verdict,
+        "authorizable": evidence.get("authorizable") is True,
+        "fallback": bool(fallback),
+        "reviewer": reviewer,
+        "slice": evidence.get("slice"),
+    }
+    if row["kind"] == "commit-range":
+        row["commits"] = evidence.get("commits")
+        if evidence.get("author") is not None:
+            # Whose range a catch-up reviewed it as, so its waiver closes on its own review (CATCHUP-READY-2).
+            row["author"] = evidence["author"]
+    if evidence.get("review_tier"):
+        # The tier the review stands in, so a grant, `polyctl reviews` and `polyctl stats` label it (REVIEW-TIERS).
+        row["tier"] = evidence["review_tier"]
+    if evidence.get("nonce"):
+        # The request a carried answer came back for, so a collect cut off before it marked the request finds
+        # the review it already recorded (JOURNAL-7).
+        row["nonce"] = evidence["nonce"]
+    return append_chained_jsonl(review_ledger_path(root), row, REVIEW_CHAIN)
+
+
+def write_review_artefact(root, reviews_dir, name, text, *, evidence, verdict,
+                          reviewer=None, fallback=False):
+    """Record a review, then write exactly the recorded bytes, whole (#63, #65).
+
+    The row comes first. A write that dies after it leaves a newest review that
+    cannot be read, and that refuses; written first, a file whose row was never
+    appended left the older recorded approval of the candidate deciding (audit).
+
+    Returns the row as the ledger holds it, so the caller knows which review is its own: one found by
+    counting the rows before it could be a review of the same bytes that ran beside it (LEADS-REVIEW).
+    """
+    from .storage import replace_file_durably
+    directory = os.path.join(root, reviews_dir)
+    os.makedirs(directory, exist_ok=True)
+    data = scan_evidence(text)[0].encode(UTF8)          # scanned before it is recorded or written (#48)
+    row = record_review(root, name, data, evidence, verdict, reviewer=reviewer, fallback=fallback)
+    replace_file_durably(os.path.join(directory, name), data)
+    return row
+
+
+# ---- review artefacts: kept while anything rests on them, pruned by age (#38) ----------
+
+# Files whose text names the review artefacts they rest on, and what each one is.
+REVIEW_REFERENCE_FILES = (
+    ("grant", (".polyctl", "ledger", "authority.jsonl")),
+    ("verification", (".polyctl", "ledger", "verifications.jsonl")),
+    ("board", (".polyctl", "board.md")),
+    ("waiver", (".polyctl", "ledger", "waivers.jsonl")),
+    ("decision", (".polyctl", "ledger", "decisions.jsonl")),
+)
+
+
+# ---- a merge is verified on its result, before it is made (#39) ------------------------
+
+MERGE_CHAIN = "polyctl-merge-check-row-v1"
+
+
+def merge_checks_path(root):
+    return os.path.join(root, ".polyctl", "ledger", "merges.jsonl")
+
+
+def merge_checks(root):
+    """Recorded runs of merge results, oldest first; raises on a broken chain."""
+    from .storage import read_chained_jsonl
+    return [row for row in read_chained_jsonl(merge_checks_path(root), MERGE_CHAIN) if isinstance(row, dict)]
+
+
+def record_merge_check(root, row):
+    from .storage import append_chained_jsonl
+    return append_chained_jsonl(merge_checks_path(root), scan_record(row), MERGE_CHAIN)
+
+
+def merge_result_tree(root, into, branch):
+    """(tree, conflict): the tree `git merge` would make of two commits, computed without touching a worktree.
+
+    RuntimeError when git cannot compute it at all (merge-tree --write-tree needs git 2.38).
+    """
+    try:
+        # In a process group of its own, as every Git query of authority's is: a merge driver the repository
+        # configures can start a worker that holds git's pipes past its time (LEADS-GATE).
+        result = run_as_group([git_binary(), "merge-tree", "--write-tree", "--name-only", "--no-messages",
+                               into, branch], 120, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        unasked = getattr(exc, "unasked", None)
+        raise RuntimeError(f"cannot compute the merge: {exc}" + (f"; {unasked}" if unasked else "")) from exc
+    lines = result.stdout.decode(UTF8, "replace").splitlines()
+    if result.returncode == 0 and lines:
+        return lines[0].strip(), None
+    if result.returncode == 1 and lines:
+        return None, "conflicts in " + ", ".join(line.strip() for line in lines[1:] if line.strip())
+    detail = result.stderr.decode(UTF8, "replace").strip()
+    raise RuntimeError(f"cannot compute the merge: {detail or f'git merge-tree exit {result.returncode}'}")
+
+
+def unverified_merges(root, cfg):
+    """(merge commit, why) for each recent merge on HEAD's first-parent line no passing run vouches for (#39).
+
+    A run vouches for a merge only when it names both parents and the tree the
+    merge made, so a run of an older pair, or of a result that was changed while
+    merging, vouches for nothing.
+    """
+    days = settings.get(cfg, "merge.check_days")
+    log = git_text(root, "log", "--merges", "--first-parent", f"--since={days}.days", "--format=%H %T %P", "HEAD")
+    runs = {(row.get("into"), row.get("branch"), row.get("tree")): row for row in merge_checks(root)}
+    out = []
+    for line in log.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        sha, tree, first, second = parts[:4]
+        run = runs.get((first, second, tree))
+        if run is None:
+            out.append((sha, "no run of its merge result was recorded"))
+        elif run.get("passed") is not True:
+            out.append((sha, f"the recorded run of its merge result, {run.get('id')}, failed"))
+        else:
+            try:
+                spec = json.loads(_git_output(root, "show", f"{tree}:.polyctl/gates.json"))
+                digest = gate_definitions_digest_of(spec, run.get("profile"))
+            except (OSError, ValueError, RuntimeError, TypeError, AttributeError) as exc:
+                out.append((sha, f"the merge's gate definitions cannot be read: {exc}; run merge-check again"))
+                continue
+            if not digest or run.get("gates_digest") != digest:
+                out.append((sha, "the recorded run used different gate definitions; run merge-check again"))
+    return out
+
+
+def _review_artefact_directory(root, reviews_dir):
+    """Pruning follows no directory link and never leaves the project (TRIAGE-3-MEDIUM)."""
+    base = os.path.abspath(root)
+    directory = os.path.abspath(os.path.join(base, reviews_dir))
+    if not _within(directory, base) or directory == base:
+        raise RuntimeError("review directory leaves the project; configure a directory inside it before pruning")
+    part = directory
+    while part != base:
+        if os.path.islink(part):
+            raise RuntimeError("review directory contains a link; replace it with a directory before pruning")
+        parent = os.path.dirname(part)
+        if parent == part:
+            raise RuntimeError("review directory leaves the project; correct it before pruning")
+        part = parent
+    return directory
+
+
+def review_artefact_names(root, reviews_dir):
+    """The regular review files on disk, excluding links (TRIAGE-3-MEDIUM)."""
+    import stat
+    directory = _review_artefact_directory(root, reviews_dir)
+    try:
+        return sorted(name for name in os.listdir(directory)
+                      if not name.startswith(".") and stat.S_ISREG(os.lstat(os.path.join(directory, name)).st_mode))
+    except FileNotFoundError:
+        return []
+
+
+def tracked_review_names(root, reviews_dir):
+    """The review artefacts git tracks, by name; RuntimeError when git cannot say."""
+    listed = _git_output(root, "ls-files", "-z", "--", reviews_dir)
+    return {os.path.basename(os.fsdecode(path)) for path in listed.split(b"\0") if path}
+
+
+def review_artefact_references(root, cfg):
+    """{artefact: [what rests on it]} for every review artefact polyctl must keep (#38).
+
+    A grant, a verification, the board, a waiver or a decision that names the
+    file; a submitted review's state; a review of a slice that is neither done nor
+    rejected, or of the candidate staged now; and a file git tracks, which moving
+    would turn into a deletion in the tree. The review ledger is the catalogue of
+    every review, not a reason to keep one. Whatever cannot be read raises, so
+    nothing is pruned on a guess.
+    """
+    from .storage import read_chained_history
+    names = review_artefact_names(root, cfg["reviews"])
+    kept = {}
+
+    def keep(name, why):
+        reasons = kept.setdefault(name, [])
+        if why not in reasons:
+            reasons.append(why)
+
+    texts = []
+    chains = {"grant": (AUTHORITY_CHAIN, False), "verification": (VERIFICATION_CHAIN, True),
+              "waiver": (WAIVER_CHAIN, True), "decision": (DECISION_CHAIN, True)}
+    for why, parts in REVIEW_REFERENCE_FILES:
+        if why in chains:
+            chain, legacy = chains[why]
+            rows = read_chained_history(os.path.join(root, *parts), chain, legacy_prefix=legacy)
+            texts.append((why, json.dumps(rows, ensure_ascii=False)))
+            continue
+        try:
+            with open(os.path.join(root, *parts), encoding=UTF8, errors="replace") as fh:
+                texts.append((why, fh.read()))
+        except FileNotFoundError:
+            continue
+    states = os.path.join(root, ".polyctl", "reviews")
+    for entry in sorted(os.listdir(states)) if os.path.isdir(states) else []:
+        if entry.startswith("R-") and entry.endswith(".json"):
+            with open(os.path.join(states, entry), encoding=UTF8, errors="replace") as fh:
+                texts.append(("submitted review", fh.read()))
+    for why, text in texts:
+        for name in names:
+            if name in text:
+                keep(name, why)
+    open_slices = {item["id"] for state, items in board(root).items() if state not in ("done", "rejected")
+                   for item in items}
+    staged = index_candidate(root)["digest"]
+    for row in read_chained_history(review_ledger_path(root), REVIEW_CHAIN):
+        name = row.get("artefact") if isinstance(row, dict) else None
+        if name not in names:
+            continue
+        if row.get("slice") in open_slices:
+            keep(name, "open slice")
+        if staged and row.get("candidate") == staged:
+            keep(name, "staged candidate")
+    tracked = tracked_review_names(root, cfg["reviews"])
+    for name in names:
+        if name in tracked:
+            keep(name, "tracked in git")
+    return kept
+
+
+def prune_review_artefacts(root, cfg, days, apply=False, now=None):
+    """Move the review artefacts nothing rests on, older than `days`, out of the repository (#38).
+
+    Age is the later of the file's time and its ledger row's, so neither alone
+    makes a review old. They move to ~/.polyctl/archive/<project>/, not away: a review
+    is evidence someone may still ask for. Returns what was kept and why, how many
+    were recent, what was moved (or would be), its bytes and where it went.
+    """
+    import shutil
+    import stat
+    from .storage import read_chained_history
+    now = time.time() if now is None else now
+    kept = review_artefact_references(root, cfg)
+    written = {}
+    for row in read_chained_history(review_ledger_path(root), REVIEW_CHAIN):
+        if isinstance(row, dict) and row.get("artefact"):
+            written[row["artefact"]] = max(written.get(row["artefact"], 0), int(row.get("at") or 0))
+    directory = os.path.join(root, cfg["reviews"])
+    cutoff = now - days * 86400
+    recent, moving, size = 0, [], 0
+    for name in review_artefact_names(root, cfg["reviews"]):
+        if name in kept:
+            continue
+        path = os.path.join(directory, name)
+        if max(os.path.getmtime(path), written.get(name, 0)) >= cutoff:
+            recent += 1
+        else:
+            moving.append(name)
+            size += os.path.getsize(path)
+    folder = f"{os.path.basename(os.path.normpath(cfg['reviews']))}-{datetime.fromtimestamp(now):%Y%m%d-%H%M%S}"
+    archive = os.path.join(HOME, ".polyctl", "archive", project_key(root), folder)
+    if apply and moving:
+        os.makedirs(archive, exist_ok=True)
+        for name in moving:
+            # Recheck after reading the references, before each move (TRIAGE-3-MEDIUM).
+            directory = _review_artefact_directory(root, cfg["reviews"])
+            if not stat.S_ISREG(os.lstat(os.path.join(directory, name)).st_mode):
+                raise RuntimeError("review artefacts changed during pruning; inspect them and retry")
+            shutil.move(os.path.join(directory, name), os.path.join(archive, name))
+            record_archived(root, name, archive)     # where it went stays on the record (#47)
+    return {"kept": kept, "recent": recent, "moved": moving, "bytes": size, "archive": archive}

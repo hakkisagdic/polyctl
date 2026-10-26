@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from ao import procs
+from polyctl import procs
 
 
 def test_self_consistency_on_this_platform():
@@ -21,7 +21,7 @@ def test_self_consistency_on_this_platform():
 def test_a_process_that_exited_and_was_not_reaped_is_not_alive():
     import subprocess
     import time
-    from ao import lib as A
+    from polyctl import lib as A
     child = subprocess.Popen([sys.executable, "-c", "pass"])
     try:
         deadline = time.time() + 20

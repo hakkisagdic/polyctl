@@ -3,7 +3,7 @@ import os
 import subprocess
 import time
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 
 def _git(root, *args):
@@ -89,7 +89,7 @@ def test_without_candidates_turns_read_as_busy_and_silence_as_idle(project, tmp_
 def test_decisions_asked_and_still_waiting_are_counted_with_the_oldest_age(project, tmp_path, monkeypatch):
     root = project["root"]
     _transcript(tmp_path, monkeypatch, minutes_ago=1)
-    folder = os.path.join(root, ".ao", "decisions")
+    folder = os.path.join(root, ".polyctl", "decisions")
     os.makedirs(folder, exist_ok=True)
     now = time.time()
     for name, asked, state in (("D-1", now - 3 * 3600, "open"), ("D-2", now - 600, "answered"),

@@ -1,6 +1,6 @@
 # A review answered three times and collected none — the 08:49 stop of 2026-10-16
 
-A measurement note, not an audit of ao. It records what was seen of one landing review
+A measurement note, not an audit of polyctl. It records what was seen of one landing review
 that answered nothing and of the spy that was kept under the reading path it failed on,
 so that whoever finds the UNAVAILABLE artifact it left — `semantic-review/2026-10-16-084920-bbe7492.md`,
 which says of itself "No review took place. This file is not a round." — reads what was
@@ -11,7 +11,7 @@ right after it. Counts age.
 
 ## The stop
 
-At 08:49 on 2026-10-16 a landing chain ran `ao review` on its staged candidate
+At 08:49 on 2026-10-16 a landing chain ran `polyctl review` on its staged candidate
 (WARP-ADAPTER, which a later run that day landed). Three configured reviewer routes ran in
 turn and each exited 0 — after 10m41s, 6m17s and 1m17s — and then the step that follows an
 exit, reading what a reviewer answered and recording it, failed for all three at once:
@@ -30,8 +30,8 @@ The code that reads a reviewer's answer and records it is byte-identical to the 
 reviews around the stop ran: between the commit the stopped chain ran (bbe7492) and the
 commit this note is written on (55cdb07) none of the modules a review reads and records an
 answer with differs by a byte — the review command with its stream reader, its answer
-record and the line that named this failure (`src/ao/parts/cli_review.py`), the ACP binding
-(`src/ao/acp.py`) and the process helpers (`src/ao/procs.py`) — and nothing touched the
+record and the line that named this failure (`src/polyctl/parts/cli_review.py`), the ACP binding
+(`src/polyctl/acp.py`) and the process helpers (`src/polyctl/procs.py`) — and nothing touched the
 first of them after 03:19 that morning or the other two for days before.
 
 And the path collected answers the whole day around the stop: `semantic-review/` holds
@@ -54,8 +54,8 @@ claimed.
 The log holds readings that are not the failure too, each attributed by its traceback:
 platform probes (`nt`, `_winapi`), an encodings probe of a codec name that does not exist
 made by the suite's UTF-8 test, and `setproctitle` probes from suite workers. An entry
-that matters has the shape of the failure: a module of `ao` named as the failed import,
-with `ao` frames in its traceback. None has been seen.
+that matters has the shape of the failure: a module of `polyctl` named as the failed import,
+with `polyctl` frames in its traceback. None has been seen.
 
 ## The counter
 
@@ -78,7 +78,7 @@ the reading said so and asked once more — and each was read at the second aski
 collection, its asking-again branch included, answered every time.
 
 No entry in the log has the shape of the failure: the failed imports recorded under the
-counter are platform probes (`nt`, `_winapi`) alone, none of them naming a module of `ao`.
+counter are platform probes (`nt`, `_winapi`) alone, none of them naming a module of `polyctl`.
 So the stop is closed as not seen — the fifteen reviews the day collected around it each
 ended in a recorded verdict, and the ten armed runs of this note watched the path it
 failed on without failing it — and by this note's acceptance it owes no fix. The
@@ -98,12 +98,12 @@ words. What could be moved into reach was moved:
 
   | path | sha256 |
   |------|--------|
-  | `src/ao/parts/cli_review.py` | `6ecb60d4e95acc018023e2cf6f6d1d8d1de7c088ec6a897b49d717010f694fc6` |
-  | `src/ao/acp.py` | `41264decaa0a3527eef2b5eaab7fe6b2191d357576a24496c9fbfdbf7b39bf73` |
-  | `src/ao/procs.py` | `66c79d130ac84387ece854422f0be696365ae2802f2754ed1455826291f347d8` |
+  | `src/polyctl/parts/cli_review.py` | `6ecb60d4e95acc018023e2cf6f6d1d8d1de7c088ec6a897b49d717010f694fc6` |
+  | `src/polyctl/acp.py` | `41264decaa0a3527eef2b5eaab7fe6b2191d357576a24496c9fbfdbf7b39bf73` |
+  | `src/polyctl/procs.py` | `66c79d130ac84387ece854422f0be696365ae2802f2754ed1455826291f347d8` |
 
 - The line that named the failure, `reviewer invocation failed ({type(exc).__name__})`,
-  stands in `src/ao/parts/cli_review.py` at 1603 and 1737.
+  stands in `src/polyctl/parts/cli_review.py` at 1603 and 1737.
 - The counter's transcript — the ten askings, their working copies, the verdicts read and
   the records left:
 

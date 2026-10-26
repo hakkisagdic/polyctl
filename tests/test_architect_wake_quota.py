@@ -4,7 +4,7 @@ A wake that stopped on the architect's usage limit was read with the five-hour w
 the limit. A weekly limit whose stop named only a clock time already past when it was written
 was read as that time gone, so its block ended at once and the architect could be woken again
 within minutes, days before its week was over. The wake now reads the limit the stop names, and
-the window the machine reads for the architect's provider - keyflip's, kept in ~/.ao/quota.json,
+the window the machine reads for the architect's provider - keyflip's, kept in ~/.polyctl/quota.json,
 as the implementer's quota gate reads it - and holds every wake until the later reset. With no
 reset known it waits one window after the stop, as it always did.
 
@@ -17,7 +17,7 @@ import time
 
 import pytest
 
-from ao import email, lib as A, telegram, watchdog as W
+from polyctl import email, lib as A, telegram, watchdog as W
 from tests.scenarios import World
 
 HOUR, DAY = 3600, 86400
@@ -69,9 +69,9 @@ def _stopped(world, at, message, log="escalate-log", wake="escalate"):
 
 
 def _reading(monkeypatch, *lines):
-    """keyflip's lines, kept in ~/.ao/quota.json under the command the adapters' quota block declares.
+    """keyflip's lines, kept in ~/.polyctl/quota.json under the command the adapters' quota block declares.
 
-    The reading is read back as every ao process reads it; a command started to take a new
+    The reading is read back as every polyctl process reads it; a command started to take a new
     one fails the test, so what is read is what was canned.
     """
     command = " ".join(A._window_adapter()["telemetry"]["quota"]["argv"])

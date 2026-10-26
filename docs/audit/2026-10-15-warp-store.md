@@ -1,8 +1,8 @@
 # Warp's own store, measured — what a second adapter would read
 
-A measurement note, not an audit of ao. It records what was read off this machine on
+A measurement note, not an audit of polyctl. It records what was read off this machine on
 2026-10-15, and the readings of 2026-10-16 once the provider's token cap reset, so that the
-harness adapter ([`warp.json`](../../src/ao/adapters/warp.json)) did not have to carry it, and
+harness adapter ([`warp.json`](../../src/polyctl/adapters/warp.json)) did not have to carry it, and
 so the work of watching Warp's desktop agent — which that adapter deliberately declines to
 declare — is not started from zero by whoever takes it.
 
@@ -25,13 +25,13 @@ nothing.
 `warp`, `warp-cli`, `warp-dex`, `warp-diag` and `warp-updater` on that PATH belong to
 Cloudflare WARP, a VPN, which is why no detection here keys on the word `warp`.
 
-ao finds the bundle's `oz` where Warp installs it: its adapter declares
+polyctl finds the bundle's `oz` where Warp installs it: its adapter declares
 `/Applications/Warp.app/Contents/Resources/bin` and the corresponding
 `~/Applications/Warp.app/Contents/Resources/bin`. No adapter layer is needed to
 reach either. The SQLite container below and `~/Library/Logs/oz` remain notes
 about state and logs, not binary search directories. MCP management flags were
 observed, but no setup file was measured: the adapter carries that observation
-in its notes, with no MCP declaration. `ao init --agent warp` therefore uses the
+in its notes, with no MCP declaration. `polyctl init --agent warp` therefore uses the
 files-only setup, and auto setup falls back to generic when only Oz is present.
 
 The two halves keep different state. The desktop agent writes a SQLite store; a CLI run
@@ -112,7 +112,7 @@ Both the text and the number describe the same instant, and only one of them is 
 machine's UTC offset behind the `current_time` the JSON in its own `input` carries with that
 offset — the same moment, a timezone apart — and `blocks`' newest `completed_ts` matches the
 modification time of the store's own file only when it is read as UTC.
-A reader that parses the text as ao's freshness reading does, `datetime.fromisoformat` on a
+A reader that parses the text as polyctl's freshness reading does, `datetime.fromisoformat` on a
 naive string, gets local time and answers the store's silence plus the machine's UTC
 offset — three hours more on the machine measured, and a shift that will differ on every
 box. `SQLite`'s `strftime('%s', ...)` reads naive text as UTC, which is what these rows are,
@@ -127,8 +127,8 @@ A declaration would have to match those strings as they are, quotes included.
 ## Why the shipped adapter declares none of this
 
 Not because the readings fail — they are above, and they work — but because of what they would
-be read as. The sessions this store keeps are the desktop app's conversations, and the ids ao
-would get back from `oz agent run` are not in it; `ao resume` would name to a server a
+be read as. The sessions this store keeps are the desktop app's conversations, and the ids polyctl
+would get back from `oz agent run` are not in it; `polyctl resume` would name to a server a
 conversation the local store says nothing about. A `sessions` block makes a harness's ids
 resolvable, and a panel reading an app conversation as an implementer's turn is the misreading
 this project already refuses in writing. Two other readings are missing for smaller reasons:
@@ -140,7 +140,7 @@ reply of Warp's would ever appear even once the array is reachable.
 What would make the second adapter honest is a measured answer to one question: does a
 conversation id the app's store names mean anything to `oz agent run --conversation`? If it
 does, the store and the CLI are one id space, the app's sessions become resumable, and the
-declaration above becomes the right one to ship. If it does not, the app is a harness ao can
+declaration above becomes the right one to ship. If it does not, the app is a harness polyctl can
 watch and never drive, and it wants its own adapter id rather than a second block on this one.
 Neither has been answered: the turns that completed once the cap reset the next day were
 started fresh, and no id from the app's store was ever offered to `--conversation`.

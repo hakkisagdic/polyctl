@@ -1,0 +1,34 @@
+{
+  "project_config": [".omp", "AGENTS.md", "CLAUDE.md"],
+  "id": "omp", "name": "oh-my-pi", "contract": 1, "verified": "untested",
+  "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "notes": "A pi fork (can1357/oh-my-pi, npm @oh-my-pi/pi-coding-agent). Its default approval mode is already yolo. --plan <id> chooses the model of the plan role; it is not a plan mode.",
+  "sources": ["https://github.com/can1357/oh-my-pi/blob/main/docs/cli-reference.md",
+              "https://github.com/can1357/oh-my-pi/blob/main/docs/approval-mode.md",
+              "https://github.com/can1357/oh-my-pi/blob/main/docs/session.md",
+              "https://github.com/can1357/oh-my-pi/blob/main/docs/context-files.md"],
+  "detect": { "headless": ["-p"] },
+  "send":   { "argv": ["omp", "-p", "{prompt}"], "cwd_matters": true,
+              "stdin": { "replaces": ["{prompt}"], "with": [],
+                         "note": "Verified from the CLI reference (github.com/can1357/oh-my-pi, docs/cli-reference.md), read 2026-09-17: non-TTY stdin is read automatically as the initial prompt, with no - marker." } },
+  "resume": { "argv": ["omp", "--resume", "{session}", "-p", "{prompt}"], "continue_last": ["omp", "--continue", "-p", "{prompt}"],
+              "note": "--resume takes an id prefix or a path",
+              "stdin": { "replaces": ["{prompt}"], "with": [], "note": "As send: the reference says it of every run." } },
+  "options": {
+    "trust_none": ["--no-tools"],
+    "trust_none_note": "every built-in tool off",
+    "model": ["--model", "{model}"],
+    "effort": ["--thinking", "{effort}"],
+    "effort_values": ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"],
+    "output_json": ["--mode", "json"],
+    "trust_all": ["--approval-mode", "yolo"],
+    "bypass": {
+      "--approval-mode yolo": { "roles": ["implementer"],
+        "why": "Kept, and leaving it out narrows nothing: yolo is omp's default approval mode. --approval-mode write approves reads and edits and fails every shell command no one can approve, so an implementer could run none of its gates without bash.patterns allow rules in a configuration overlay polyctl does not write. Read on 2026-09-17 from github.com/can1357/oh-my-pi (docs/approval-mode.md, docs/cli-reference.md, src/extensibility/extensions/wrapper.ts)." }
+    }
+  },
+  "transcript": { "kind": "jsonl", "path": "~/.omp/agent/sessions/{encoded_cwd}/*_{session}.jsonl", "todo": "confirm the cwd encoding and the record shape against an install" },
+  "busy": { "mtime_glob": "~/.omp/agent/sessions/*/*.jsonl", "idle_seconds": 240 },
+  "directives": { "steering_files": [".omp/AGENTS.md", ".omp/RULES.md", "AGENTS.md", "CLAUDE.md", "~/.omp/agent/AGENTS.md"],
+                  "note": "also reads other harnesses' rule files; --no-rules loads none" }
+}

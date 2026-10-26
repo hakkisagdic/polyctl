@@ -1,12 +1,12 @@
-"""ao writes English unless a project chooses Turkish, and reads both languages always (LANGUAGE-FILES).
+"""polyctl writes English unless a project chooses Turkish, and reads both languages always (LANGUAGE-FILES).
 
-Every product review of ao found Turkish in the repository it governed and in its agents'
-instructions: the files `ao init` writes and the markers its mail carries. Both now come from
-src/ao/language.py in the project's `language` setting - English by default, Turkish with `tr` -
+Every product review of polyctl found Turkish in the repository it governed and in its agents'
+instructions: the files `polyctl init` writes and the markers its mail carries. Both now come from
+src/polyctl/language.py in the project's `language` setting - English by default, Turkish with `tr` -
 and the markers of both languages are read in every project, so the urgent notes, decision requests
 and handoffs an existing Turkish project already holds are found, surfaced and escalated as before.
 
-A guard keeps a Turkish letter out of every string literal under src/ao outside the catalogue, save
+A guard keeps a Turkish letter out of every string literal under src/polyctl outside the catalogue, save
 the texts the next two slices convert, each named with the slice that removes it. The allowlist is
 meant to shrink to nothing: an entry that no longer matches anything fails until it is dropped.
 """
@@ -21,16 +21,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, language, lib as A, mcp, settings as S, telegram, watchdog as W
+from polyctl import cli, language, lib as A, mcp, settings as S, telegram, watchdog as W
 from tests import conftest
 from tests.scenarios import World
 from tests.test_profiles import _init_args
 
 ROOT = Path(__file__).resolve().parent.parent
 TURKISH = re.compile("[çğıİöşüÇĞÖŞÜ]")
-CATALOGUE = "src/ao/language.py"
-INIT_FILES = (".ao/authority.md", ".ao/board.md", ".ao/backlog.md", "agent-mail/README.md")
-STEERING = ".kiro/steering/ao-coordination.md"      # the coordination file init writes for the kiro adapter
+CATALOGUE = "src/polyctl/language.py"
+INIT_FILES = (".polyctl/authority.md", ".polyctl/board.md", ".polyctl/backlog.md", "agent-mail/README.md")
+STEERING = ".kiro/steering/polyctl-coordination.md"      # the coordination file init writes for the kiro adapter
 PROMPTS, OUTPUT = "LANGUAGE-PROMPTS", "LANGUAGE-OUTPUT"
 
 # (path, top-level definition, a piece of the literal - "" for every literal the definition holds):
@@ -51,7 +51,7 @@ def _read(path):
 def _choose(project, chosen):
     """The project with `language` set, in the config every reader loads from disk."""
     cfg = dict(project, language=chosen)
-    with open(os.path.join(project["root"], ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(project["root"], ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in cfg.items() if key != "root"}, fh)
     return cfg
 
@@ -73,10 +73,10 @@ def _kind(cfg, name):
     return next((a["kind"] for a in A.anomalies(cfg["root"], cfg, {}, 0, 60) if name in (a.get("reports") or [])), None)
 
 
-# ---- ao init -----------------------------------------------------------------------------------
+# ---- polyctl init -----------------------------------------------------------------------------------
 
 def _init(root, capsys):
-    """`ao init` in a fresh repository for the kiro adapter, with no reviewer to probe."""
+    """`polyctl init` in a fresh repository for the kiro adapter, with no reviewer to probe."""
     root.mkdir(exist_ok=True)
     subprocess.run([conftest.GIT, "init", "-q"], cwd=root, check=True)
     assert cli.cmd_init({"root": str(root)}, _init_args(name="acme-api", profile=None, agent="kiro")) == 0, \
@@ -87,10 +87,10 @@ def _init(root, capsys):
 def test_init_writes_english_unless_the_project_or_the_machine_chose_turkish(project, tmp_path, capsys):
     english = _init(tmp_path / "english", capsys)
 
-    assert english[".ao/authority.md"].startswith("# Authority — the canonical source\n")
-    assert english[".ao/board.md"] == language.TEXTS["init.board"]["en"]
-    assert english[".ao/backlog.md"].startswith("# acme-api — pre-authorised work queue\n")
-    assert "`DECISION REQUIRED`" in english[".ao/authority.md"] and "`DECISION REQUIRED`" in english[".ao/backlog.md"]
+    assert english[".polyctl/authority.md"].startswith("# Authority — the canonical source\n")
+    assert english[".polyctl/board.md"] == language.TEXTS["init.board"]["en"]
+    assert english[".polyctl/backlog.md"].startswith("# acme-api — pre-authorised work queue\n")
+    assert "`DECISION REQUIRED`" in english[".polyctl/authority.md"] and "`DECISION REQUIRED`" in english[".polyctl/backlog.md"]
     assert "`URGENT`" in english["agent-mail/README.md"] and "`## URGENT`" in english["agent-mail/README.md"]
     assert "`HANDOFF`" in english["agent-mail/README.md"] and "(`## URGENT`)" in english[STEERING]
     assert [rel for rel, text in english.items() if TURKISH.search(text)] == []
@@ -100,16 +100,16 @@ def test_init_writes_english_unless_the_project_or_the_machine_chose_turkish(pro
         assert commands - {"ACIL", "DEVIR"} <= set(re.findall(r"`([^`]*)`", language.TEXTS[key]["en"])), key
 
     chosen = tmp_path / "chosen"
-    (chosen / ".ao").mkdir(parents=True)
-    (chosen / ".ao" / "config.json").write_text(json.dumps({"project": "acme-api", "language": "tr"}), encoding="utf-8")
+    (chosen / ".polyctl").mkdir(parents=True)
+    (chosen / ".polyctl" / "config.json").write_text(json.dumps({"project": "acme-api", "language": "tr"}), encoding="utf-8")
     turkish = _init(chosen, capsys)
 
-    # A Turkish project is given what ao init wrote before English was the default, byte for byte.
-    assert turkish[".ao/authority.md"] == language.TEXTS["init.authority"]["tr"]
-    assert turkish[".ao/board.md"] == language.TEXTS["init.board"]["tr"]
-    assert turkish[".ao/backlog.md"] == language.TEXTS["init.backlog"]["tr"].format(name="acme-api")
-    assert turkish[".ao/backlog.md"].startswith("# acme-api — önceden yetkilendirilmiş iş kuyruğu\n")
-    assert "`KARAR GEREKLİ`" in turkish[".ao/authority.md"] and "`## ACİL`" in turkish["agent-mail/README.md"]
+    # A Turkish project is given what polyctl init wrote before English was the default, byte for byte.
+    assert turkish[".polyctl/authority.md"] == language.TEXTS["init.authority"]["tr"]
+    assert turkish[".polyctl/board.md"] == language.TEXTS["init.board"]["tr"]
+    assert turkish[".polyctl/backlog.md"] == language.TEXTS["init.backlog"]["tr"].format(name="acme-api")
+    assert turkish[".polyctl/backlog.md"].startswith("# acme-api — önceden yetkilendirilmiş iş kuyruğu\n")
+    assert "`KARAR GEREKLİ`" in turkish[".polyctl/authority.md"] and "`## ACİL`" in turkish["agent-mail/README.md"]
     assert "`DEVIR`" in turkish["agent-mail/README.md"] and "(`## ACİL`)" in turkish[STEERING]
 
     with open(S.machine_path(), "w", encoding="utf-8") as fh:
@@ -120,8 +120,8 @@ def test_init_writes_english_unless_the_project_or_the_machine_chose_turkish(pro
 def test_init_keeps_the_files_a_project_has_whatever_its_language_now_is(project, tmp_path, capsys):
     root = tmp_path / "kept"
     first = _init(root, capsys)
-    stored = json.loads((root / ".ao" / "config.json").read_text(encoding="utf-8"))
-    (root / ".ao" / "config.json").write_text(json.dumps(dict(stored, language="tr")), encoding="utf-8")
+    stored = json.loads((root / ".polyctl" / "config.json").read_text(encoding="utf-8"))
+    (root / ".polyctl" / "config.json").write_text(json.dumps(dict(stored, language="tr")), encoding="utf-8")
     (root / "agent-mail" / "README.md").unlink()
 
     again = _init(root, capsys)
@@ -129,7 +129,7 @@ def test_init_keeps_the_files_a_project_has_whatever_its_language_now_is(project
     assert {rel: text for rel, text in again.items() if rel != "agent-mail/README.md"} == \
         {rel: text for rel, text in first.items() if rel != "agent-mail/README.md"}
     assert again["agent-mail/README.md"] == language.TEXTS["init.mail-readme"]["tr"].format()
-    assert "kept   .ao/authority.md" in _plain(capsys.readouterr().out)
+    assert "kept   .polyctl/authority.md" in _plain(capsys.readouterr().out)
 
 
 # ---- the catalogue -----------------------------------------------------------------------------
@@ -172,7 +172,7 @@ def test_a_text_is_the_projects_language_the_machines_choice_or_english(project,
 
 # ---- markers: written in the project's language, read in both ---------------------------------
 
-def test_the_readers_hold_every_form_ao_ever_wrote():
+def test_the_readers_hold_every_form_polyctl_ever_wrote():
     assert set(A.URGENT_MARKERS) == {"## URGENT", "## ACİL", "## STOP", "## DUR"}
     assert set(language.lowered("decision", "urgent")) == {"## decision required", "## karar gerekli",
                                                            "## urgent", "## acil"}
@@ -183,7 +183,7 @@ def test_the_readers_hold_every_form_ao_ever_wrote():
 
 
 @pytest.mark.parametrize("chosen", ["en", "tr"])
-def test_every_marker_ao_writes_is_the_projects_and_every_reader_knows_it(project, monkeypatch, tmp_path, capsys,
+def test_every_marker_polyctl_writes_is_the_projects_and_every_reader_knows_it(project, monkeypatch, tmp_path, capsys,
                                                                            chosen):
     monkeypatch.setattr(telegram, "CONF", str(tmp_path / "no-telegram.json"))     # nothing reaches a phone
     cfg = _choose(project, chosen)
@@ -200,7 +200,7 @@ def test_every_marker_ao_writes_is_the_projects_and_every_reader_knows_it(projec
         assert [m["id"] for m in A.urgent_messages(cfg["root"], reader)] == [note]
     os.remove(os.path.join(cfg["root"], cfg["mailbox"], note))
 
-    report = mcp.call("ao_report", {"kind": "blocked", "summary": "queue empty", "needs": "next slice"}, cfg, False)
+    report = mcp.call("polyctl_report", {"kind": "blocked", "summary": "queue empty", "needs": "next slice"}, cfg, False)
     path = os.path.join(cfg["root"], cfg["mailbox"], report["written"])
     assert f"\n{form['decision']}\n" in _read(path) and foreign["decision"] not in _read(path)
     monkeypatch.setattr(A, "agent_pids", lambda *args, **kwargs: [])
@@ -208,9 +208,9 @@ def test_every_marker_ao_writes_is_the_projects_and_every_reader_knows_it(projec
         assert _class(reader, report["written"]) == "needs-decision"
         assert _kind(reader, report["written"]) == "decision-requested"
         assert A.waiting_on_architect(cfg["root"], reader)[0] == report["written"]
-    again = mcp.call("ao_report", {"kind": "blocked", "summary": "queue empty", "needs": "next slice"}, cfg, False)
+    again = mcp.call("polyctl_report", {"kind": "blocked", "summary": "queue empty", "needs": "next slice"}, cfg, False)
     assert again["repeated"] == 2 and re.search(rf"^{form['repeat']}: 2 · ", _read(path), re.M)
-    assert mcp.call("ao_report", {"kind": "blocked", "summary": "queue empty"}, other, False)["repeated"] == 3
+    assert mcp.call("polyctl_report", {"kind": "blocked", "summary": "queue empty"}, other, False)["repeated"] == 3
     assert re.search(rf"^{foreign['repeat']}: 3 · ", _read(path), re.M) and form["repeat"] + ":" not in _read(path)
     os.remove(path)
 
@@ -239,20 +239,20 @@ def test_an_urgent_note_written_in_turkish_still_holds_the_implementer_in_an_eng
                                                                                             capsys):
     assert language.of(project) == "en"
     name = "20260916-1201-fable-to-kiro-ACIL-stop-s3.md"
-    _mail(project, name, "---\nao: 1\nkind: acil\nfrom: fable\nto: kiro\n---\n# stop S3\n\n## ACİL\n\nhold it\n")
+    _mail(project, name, "---\npolyctl: 1\nkind: acil\nfrom: fable\nto: kiro\n---\n# stop S3\n\n## ACİL\n\nhold it\n")
     english = "20260916-1202-fable-to-kiro-URGENT-stop-s4.md"
-    _mail(project, english, "---\nao: 1\nkind: urgent\nfrom: fable\nto: kiro\n---\n# stop S4\n\n## URGENT\n\nhold\n")
-    monkeypatch.setenv("AO_ROLE", "implementer")
+    _mail(project, english, "---\npolyctl: 1\nkind: urgent\nfrom: fable\nto: kiro\n---\n# stop S4\n\n## URGENT\n\nhold\n")
+    monkeypatch.setenv("POLYCTL_ROLE", "implementer")
 
     assert [m["id"] for m in A.urgent_messages(project["root"], project)] == [name, english]
-    cli._urgent_banner(project)                                     # what ao lock and ao verify print first
-    lines = _plain("\n".join(cli._mailbox_banner(project)))        # what ao status, ao board and ao mail show
+    cli._urgent_banner(project)                                     # what polyctl lock and polyctl verify print first
+    lines = _plain("\n".join(cli._mailbox_banner(project)))        # what polyctl status, polyctl board and polyctl mail show
     printed = _plain(capsys.readouterr().out)
 
     assert "2 URGENT message(s) from the architect" in printed and name in printed
     assert "URGENT for the implementer: stop S3" in lines and "URGENT for the implementer: stop S4" in lines
     assert _class(project, name) == _class(project, english) == "needs-read"
-    assert [m["id"] for m in mcp.call("ao_inbox", {}, project, False)["messages"]] == [name, english]
+    assert [m["id"] for m in mcp.call("polyctl_inbox", {}, project, False)["messages"]] == [name, english]
 
 
 @pytest.mark.parametrize("chosen", ["en", "tr"])
@@ -304,7 +304,7 @@ def test_the_words_a_turkish_report_or_board_uses_are_read_as_before(project, mo
     assert sorted(kinds["decision-requested"]) == ["20260916-1202-kiro-to-fable-STATUS-c.md",
                                                    "20260916-1203-kiro-to-fable-STATUS-d.md"]
 
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     text = _read(board).replace("## blocked\n", "## blocked\n- [S1] a · waiting: insan\n- [S2] b · waiting: human\n"
                                                 "- [S3] c · waiting: architect\n")
     with open(board, "w", encoding="utf-8") as fh:
@@ -358,9 +358,9 @@ def _literals(path):
 
 
 def _turkish(root):
-    """(path, definition, text) of every string literal under src/ao holding a Turkish letter, the catalogue aside."""
+    """(path, definition, text) of every string literal under src/polyctl holding a Turkish letter, the catalogue aside."""
     return [(path.relative_to(root).as_posix(), scope, text)
-            for path in sorted((Path(root) / "src" / "ao").rglob("*.py"))
+            for path in sorted((Path(root) / "src" / "polyctl").rglob("*.py"))
             if path.relative_to(root).as_posix() != CATALOGUE
             for scope, text in _literals(path) if TURKISH.search(text)]
 
@@ -377,21 +377,21 @@ def test_no_string_literal_holds_turkish_outside_the_catalogue_but_what_the_next
                 if not any(_allowed(entry, (path, scope, text)) for entry in ALLOWLIST)]
     stale = [entry for entry in ALLOWLIST if not any(_allowed(entry, literal) for literal in found)]
 
-    assert unlisted == [], "put the text in src/ao/language.py:\n" + "\n".join(unlisted)
+    assert unlisted == [], "put the text in src/polyctl/language.py:\n" + "\n".join(unlisted)
     assert stale == [], f"converted, so drop these from ALLOWLIST: {stale}"
     assert set(ALLOWLIST.values()) <= {PROMPTS, OUTPUT}
 
 
 def test_the_guard_reads_code_and_not_a_docstring_or_a_comment(tmp_path):
-    sample = tmp_path / "src" / "ao" / "sample.py"
+    sample = tmp_path / "src" / "polyctl" / "sample.py"
     sample.parent.mkdir(parents=True)
     sample.write_text('"""Bir modül: ## ACİL."""\n# bir yorum: ## ACİL\nHEADING = "## ACİL"\n\n\n'
                       'def told(n):\n    """Kaç kez söylendiği."""\n    return f"{n} kez söylendi"\n', encoding="utf-8")
-    (tmp_path / "src" / "ao" / "language.py").write_text('TEXTS = {"x": {"tr": "kaldı"}}\n', encoding="utf-8")
+    (tmp_path / "src" / "polyctl" / "language.py").write_text('TEXTS = {"x": {"tr": "kaldı"}}\n', encoding="utf-8")
 
     found = _turkish(tmp_path)
 
-    assert found == [("src/ao/sample.py", "HEADING", "## ACİL"), ("src/ao/sample.py", "told", "{} kez söylendi")]
-    assert _allowed(("src/ao/sample.py", "told", ""), found[1]) and not _allowed(("src/ao/sample.py", "told", ""), found[0])
-    assert _allowed(("src/ao/sample.py", "told", "kez"), found[1])
-    assert not _allowed(("src/ao/sample.py", "told", "dk"), found[1])
+    assert found == [("src/polyctl/sample.py", "HEADING", "## ACİL"), ("src/polyctl/sample.py", "told", "{} kez söylendi")]
+    assert _allowed(("src/polyctl/sample.py", "told", ""), found[1]) and not _allowed(("src/polyctl/sample.py", "told", ""), found[0])
+    assert _allowed(("src/polyctl/sample.py", "told", "kez"), found[1])
+    assert not _allowed(("src/polyctl/sample.py", "told", "dk"), found[1])

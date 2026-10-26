@@ -1,12 +1,12 @@
 import time
 from types import SimpleNamespace
 
-from ao import cli, email, lib as A, telegram
-from ao import watchdog as W
+from polyctl import cli, email, lib as A, telegram
+from polyctl import watchdog as W
 
 PROBLEMS = [
-    ("watchdog-dead", "watchdog silent for 40m — launchctl / ao watchdog status"),
-    ("no-channel", "no human channel beyond desktop notifications — ao email setup"),
+    ("watchdog-dead", "watchdog silent for 40m — launchctl / polyctl watchdog status"),
+    ("no-channel", "no human channel beyond desktop notifications — polyctl email setup"),
     ("credits-exhaust", "credits exhausted at the last reading: 12503/10000"),
     ("shared-pool", "the reviewer draws on the implementer's credit pool"),
 ]

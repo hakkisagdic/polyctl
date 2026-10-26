@@ -12,13 +12,13 @@ The distinction that matters is orange → red. Alert call sites declare who
 must act; that explicit audience is authoritative and title wording or
 localization never changes its route. Legacy calls that omit an audience retain
 title inference for compatibility, and regression coverage preserves both sides
-of that boundary. `ao watchdog explain`/`--dry-run` computes the same routing
+of that boundary. `polyctl watchdog explain`/`--dry-run` computes the same routing
 and verdicts but never writes a notice or alarm episode and never invokes the
 desktop, Telegram, e-mail, or dead-man-switch ping channels.
 
 Some of what an alarm says follows the project's `language` ([configuration.md](configuration.md)),
 and a project whose `language` is `tr` reads it in Turkish: the architect at quota, a slice parked
-on quota, a slice past its budget, a failed wake, `ao alarms test`, the lines a red mail adds below an alarm's text, and the
+on quota, a slice past its budget, a failed wake, `polyctl alarms test`, the lines a red mail adds below an alarm's text, and the
 phone's "architect woken" and "architect done" lines. An alarm's key never follows the language, and
 neither does its audience: a project that changes its language raises the episode that stands, and
 nothing rings again for it.
@@ -41,13 +41,13 @@ When the watchdog itself was the one silent, see [After a silence](#after-a-sile
 A key that rang does not ring the desktop and the phone again inside its window, and the
 whole window counts, however little of it the notices ledger still holds. As each notice is
 recorded, when its key was last recorded and last sent - and each key a resume notice names -
-is folded into `.ao/ledger/notice-times.json`, and nothing trims the ledger before that fold:
-not its own bound, `retention.observation_kb`, not the watchdog's cycle and not `ao prune`. A
+is folded into `.polyctl/ledger/notice-times.json`, and nothing trims the ledger before that fold:
+not its own bound, `retention.observation_kb`, not the watchdog's cycle and not `polyctl prune`. A
 check reads that file and the ledger lines written after the newest one folded, and writes
 nothing. The file lets a key go a week after it was last recorded, and past 500 keys the oldest
 once a day has passed since they were recorded; a window that reaches back to a key it let go is
 read from the ledger. A fold that cannot be written trims nothing: the ledger grows past its
-bound, and `ao doctor` names it. The check used to
+bound, and `polyctl doctor` names it. The check used to
 read the last 100 KB of the ledger. Rebuilt in a temporary project with a review parked
 through the day, those 100 KB held eight and a half hours, and the review, whose window is a
 day, rang the desktop and the phone twice more; with the ledger held to 64 KB, four times more.
@@ -135,13 +135,13 @@ A hung turn the reaper could not stop is one alarm, `reap-survived`. The reaper 
 unattended turn silent past three idle windows; where a process of it still runs after the forced
 stop - on Windows, one taskkill was refused or could not find - the cycle starts no turn beside it
 and names to a person what still runs. It rings the desktop and the phone once for those processes
-and climbs the ladder while they run; `ao hold` stops what ao can and says what it could not
+and climbs the ladder while they run; `polyctl hold` stops what polyctl can and says what it could not
 ([windows.md](windows.md)).
 
 Some conditions ring red at once, because waiting cannot help:
 
 - the implementer's credits are exhausted for the billing period, on the account its own
-  adapter declares; an implementer whose adapter declares none ao can read has no credits alarm
+  adapter declares; an implementer whose adapter declares none polyctl can read has no credits alarm
 - the architect's wake keeps failing on the same binary
 - a hold has stood for four hours
 
@@ -156,7 +156,7 @@ reset has passed says nothing of the plan after it, and the scheduled check page
 on it: until a fresh reading is taken the credits are unknown, and a usage check that
 cannot read them is reported as such.
 
-*In ao since slice LEADS-OPS: `ao doctor` shows such a reading as the last reading, taken before
+*In polyctl since slice LEADS-OPS: `polyctl doctor` shows such a reading as the last reading, taken before
 its reset, and the credits as unknown since, where it said exhausted, in red, of a plan the
 scheduled check no longer paged about.*
 
@@ -172,7 +172,7 @@ A slice past the budget it was given ([watchdog.md](watchdog.md#a-slice-past-its
 the architect, once per window, with the reading it is past (`31m of 30m`, `spent 7.5 credit of 5`)
 and that nothing resumes it but a start; the implementer may not lift the block.
 
-`ao alarms` lists the live episodes with their level and age. `ao alarms test
+`polyctl alarms` lists the live episodes with their level and age. `polyctl alarms test
 --level red` sends a real test through every channel.
 
 ## After a silence
@@ -217,32 +217,32 @@ the last one left, is a **resume**:
   before the resume age from the resume, so none turns orange or red on time in which
   nothing ran. Whatever starts after the resume climbs the ladder as it always has.
 
-A snooze still standing stays off the notice. `ao watchdog explain` shows the notice a
+A snooze still standing stays off the notice. `polyctl watchdog explain` shows the notice a
 resume would send and writes nothing. A silence under the threshold changes nothing.
 
 ## Channels
 
 - Desktop: `osascript` notification, always on.
-- Telegram: `ao telegram setup` — see [telegram.md](telegram.md). An alarm's text is sent
+- Telegram: `polyctl telegram setup` — see [telegram.md](telegram.md). An alarm's text is sent
   as written, so an underscore in a report's name cannot make the phone refuse the message
   as broken markup.
-- ntfy: `ao ntfy setup --topic-url <url> [--token-env NAME]` — an outbound-only phone
-  channel beside Telegram, for ntfy.sh or your own ntfy server. Writes `~/.ao/ntfy.json`
-  (0600; on Windows, as private as `~/.ao`), reads an access token only from the environment
+- ntfy: `polyctl ntfy setup --topic-url <url> [--token-env NAME]` — an outbound-only phone
+  channel beside Telegram, for ntfy.sh or your own ntfy server. Writes `~/.polyctl/ntfy.json`
+  (0600; on Windows, as private as `~/.polyctl`), reads an access token only from the environment
   variable `--token-env` names (never an argument, never printed, never logged), and sends
   what the watchdog sends to Telegram as one HTTP POST per alert with the same text and a
   `Priority` header from its alarm level (`urgent` for red, `high` for orange, `default` for
-  the rest). `ao ntfy test` sends one test message and reports whether it arrived;
-  `ao ntfy status` shows whether ntfy is set up and the server's host, never the token.
-- E-mail: `ao email setup --token … --to …` — formsubmit.co relays a JSON POST,
-  no server; the token lives in `~/.ao/email.json` (0600; on Windows, which keeps no file mode,
-  as private as `~/.ao`), never in a repo.
+  the rest). `polyctl ntfy test` sends one test message and reports whether it arrived;
+  `polyctl ntfy status` shows whether ntfy is set up and the server's host, never the token.
+- E-mail: `polyctl email setup --token … --to …` — formsubmit.co relays a JSON POST,
+  no server; the token lives in `~/.polyctl/email.json` (0600; on Windows, which keeps no file mode,
+  as private as `~/.polyctl`), never in a repo.
   An unknown provider, or a `provider` value that is not a string, disables the channel
-  without raising; run `ao email setup` to replace the unusable settings.
-  `ao doctor` warns when neither Telegram, ntfy nor e-mail is configured: an orange
+  without raising; run `polyctl email setup` to replace the unusable settings.
+  `polyctl doctor` warns when neither Telegram, ntfy nor e-mail is configured: an orange
   alarm with no channel beyond the desktop is a silent alarm.
 
-*In ao since slice TRIAGE-HIGHS: e-mail through your own server (`ao email setup --provider smtp`)
+*In polyctl since slice TRIAGE-HIGHS: e-mail through your own server (`polyctl email setup --provider smtp`)
 verifies the server's certificate, and that it names the host you gave, before the account's
 password is sent, over implicit TLS (`--tls implicit`, port 465) as over STARTTLS. Implicit TLS took
 smtplib's own context, which verifies neither, so whoever answered for the host on the way was
@@ -254,40 +254,40 @@ handed the password ([privacy.md](privacy.md)).*
 "alarms": {"red_after_minutes": 60}
 ```
 
-in `.ao/config.json`. Optional.
+in `.polyctl/config.json`. Optional.
 
 ## When the alarm itself can die
 
-Every channel above runs on the machine that is failing. `ao pings setup` adds
+Every channel above runs on the machine that is failing. `polyctl pings setup` adds
 the one that does not: the watchdog and the doctor job ping an external
 check (healthchecks.io) every cycle, and that service e-mails you when the pings
-stop. The credit burn rate (`ao doctor`) turns "the plan runs out before it
+stop. The credit burn rate (`polyctl doctor`) turns "the plan runs out before it
 resets" into a red alarm days ahead rather than a silent stop on the day. It projects only
 the samples the implementer's own adapter took: another harness's readings in the same
 ledger are not its account, and neither is a sample that names no adapter
 ([telemetry.md](telemetry.md), "Whose account").
 
 The check's address is a secret: whoever has its UUID can ping it, and keep a dead
-watchdog looking alive. `ao pings setup` asks for it at your terminal and does not show it, as
-`ao telegram setup` asks for the bot token, and refuses what is no http or https address with a
+watchdog looking alive. `polyctl pings setup` asks for it at your terminal and does not show it, as
+`polyctl telegram setup` asks for the bot token, and refuses what is no http or https address with a
 host. Where no terminal is attached a script names the variable that holds it,
-`ao pings setup --url-env NAME`, and `--all` makes it the address of every project that has none
+`polyctl pings setup --url-env NAME`, and `--all` makes it the address of every project that has none
 of its own. An address given on the command line with `--url` is refused, and nothing is saved:
 the shell's history and the process list keep a command line. The whole address is the secret - a
 check's UUID can stand in its path or in its host's labels, a host can be the check's own name, and
-four characters at its end can be all of the secret - so `ao pings` shows only its scheme, and names
-the file that holds it, `~/.ao/pings.json`.
+four characters at its end can be all of the secret - so `polyctl pings` shows only its scheme, and names
+the file that holds it, `~/.polyctl/pings.json`.
 
-*In ao since slice LEADS-SECRETS: `ao pings` printed the whole ping URL. `tests/test_leads_secrets.py`.*
+*In polyctl since slice LEADS-SECRETS: `polyctl pings` printed the whole ping URL. `tests/test_leads_secrets.py`.*
 
-*In ao since slice SECRETS-2: the setup had you type the address into a command line,
-`ao pings setup --url https://hc-ping.com/<uuid>`, which your shell's history kept.
+*In polyctl since slice SECRETS-2: the setup had you type the address into a command line,
+`polyctl pings setup --url https://hc-ping.com/<uuid>`, which your shell's history kept.
 `tests/test_secrets_2.py`.*
 
-The doctor job, `ao doctor --check --notify` every fifteen minutes, is the watchdog's
+The doctor job, `polyctl doctor --check --notify` every fifteen minutes, is the watchdog's
 backstop. `--notify` is for the person and the scheduler: it can page a person. The grants audit
-names agent rules that admit it with `--check`, including `Bash(ao doctor:*)`; a plain
-`ao doctor --check` remains quiet. This is a grant audit, not caller authentication.
+names agent rules that admit it with `--check`, including `Bash(polyctl doctor:*)`; a plain
+`polyctl doctor --check` remains quiet. This is a grant audit, not caller authentication.
 The job pages nothing twice:
 
 - **One alarm whoever sees it.** What the watchdog raises itself - credits that ran out, an
@@ -296,7 +296,7 @@ The job pages nothing twice:
   used to ring a second alarm whenever the watchdog's had gone quiet, which it also did
   after a silence, under a snooze and while a reading could not be taken.
 - **Not dead on arrival.** Both jobs run when they are loaded, and the doctor can run first.
-  It records each of its runs in `~/.ao/doctor-<project>.json`, and a run that finds its
+  It records each of its runs in `~/.polyctl/doctor-<project>.json`, and a run that finds its
   last one more than twenty minutes ago was stopped too: the jobs were switched off, or
   the machine was off or asleep. Then the watchdog has one of its cycles, the
   StartInterval of its launchd job or the interval of its systemd timer, before the
@@ -305,13 +305,13 @@ The job pages nothing twice:
   not come back is paged at the doctor's next run, and a doctor that cannot write its
   record gives no cycle.
 
-*In ao since slice LEADS-OPS: a watchdog with no heartbeat at all has that cycle too, when the
-doctor saw its heartbeat at its last run - each run records the one it saw. `ao watchdog uninstall`
-takes the heartbeat with the jobs, and the doctor that ran first after `ao watchdog install` paged
+*In polyctl since slice LEADS-OPS: a watchdog with no heartbeat at all has that cycle too, when the
+doctor saw its heartbeat at its last run - each run records the one it saw. `polyctl watchdog uninstall`
+takes the heartbeat with the jobs, and the doctor that ran first after `polyctl watchdog install` paged
 what the first cycle was about to name, a credits reading two weeks old among it. A doctor that saw
 no heartbeat at its last run, or has no run of its own yet, gives no cycle, as before.*
 
-*In ao since slice TRIAGE-HIGHS: a `.ao/gates.json` in a shape the doctor's coverage check could not
+*In polyctl since slice TRIAGE-HIGHS: a `.polyctl/gates.json` in a shape the doctor's coverage check could not
 read raised, and the job ended on one line without sending any alarm, a dead watchdog's among them.
 That file is now a finding of its own, `gates-unusable`, an advisory for the architect
 ([gates.md](gates.md)), and every other finding is sent as before.*

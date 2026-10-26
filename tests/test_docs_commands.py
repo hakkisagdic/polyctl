@@ -1,22 +1,22 @@
-"""Every `ao` invocation a document shows is one the parser accepts (DOCS-COMMANDS).
+"""Every `polyctl` invocation a document shows is one the parser accepts (DOCS-COMMANDS).
 
-docs/recovery.md sent a reader coming back to a project to `ao since --slice
-claim-admission` and `ao brief`. since has no --slice and brief is no command, so following
+docs/recovery.md sent a reader coming back to a project to `polyctl since --slice
+claim-admission` and `polyctl brief`. since has no --slice and brief is no command, so following
 the document ended in an argparse error, and nothing stopped the next drift. This reads the
-invocations the documents show and walks each through the parser `ao.cli.build_parser()`
+invocations the documents show and walks each through the parser `polyctl.cli.build_parser()`
 returns, in process: the command exists, every literal word has a positional to fill and
 one with choices is among them, every option is the command's own and spelled out in full
 (an abbreviation argparse accepts today stops working once a second option shares its
 prefix), and a literal value of an option with choices is among them. Types, required
-options and missing arguments are not checked: a sentence may name `ao commit` without its
+options and missing arguments are not checked: a sentence may name `polyctl commit` without its
 message.
 
 What counts as an invocation:
 - in a fenced block marked bash, sh, shell or zsh, or not marked: each command whose first
-  word is `ao`, after joining `\\` continuations, cutting an unquoted `#` comment, splitting
+  word is `polyctl`, after joining `\\` continuations, cutting an unquoted `#` comment, splitting
   at `&&`, `||`, `;`, `|` and `&`, and dropping redirections; in a console block, only a
   command after a `$ ` prompt;
-- in inline code: a span that starts with `ao `, read as a synopsis: `[...]` is an optional
+- in inline code: a span that starts with `polyctl `, read as a synopsis: `[...]` is an optional
   part, `a|b` offers alternatives that are each checked, and a `|` with a space beside it
   is a pipe.
 `<placeholder>`, `…` and `...` stand for what the reader supplies and are not checked; a
@@ -26,7 +26,7 @@ A passage that describes a design not yet built says so on the line directly abo
 `<!-- not built: <why> -->`. The marker covers the fenced block, or the paragraph, list or
 table, that starts on the next line; it excuses only the invocations there that the parser
 refuses, and it fails when it excuses none, so it cannot outlive the design it describes. The
-same marker excuses a tool, a path or a setting ao does not have, and tests/test_docs_names.py
+same marker excuses a tool, a path or a setting polyctl does not have, and tests/test_docs_names.py
 holds that rule for both readings.
 """
 import argparse
@@ -35,7 +35,7 @@ import re
 import shlex
 from pathlib import Path
 
-from ao import cli
+from polyctl import cli
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -68,7 +68,7 @@ Marker = collections.namedtuple("Marker", "line reason covers")
 def _documents(root):
     # SECURITY.md sits at the root and is read like the READMEs: a reporter follows the commands it shows.
     paths = sorted((root / "docs").glob("*.md")) + [root / "README.md", root / "README.tr.md", root / "SECURITY.md",
-                                                  root / "src" / "ao" / "skill" / "SKILL.md"]
+                                                  root / "src" / "polyctl" / "skill" / "SKILL.md"]
     named = [(path.relative_to(root).as_posix(), path) for path in paths]
     return [(name, path) for name, path in named
             if not any(name == kept or name.startswith(kept + "/") for kept in HISTORICAL)]
@@ -128,7 +128,7 @@ def _words(command, synopsis):
 
 
 def _commands(text, synopsis):
-    """(as written, words) for each command in `text` whose first word is ao.
+    """(as written, words) for each command in `text` whose first word is polyctl.
 
     A placeholder is held aside while the line is split, so `<dir|ref>` offers no
     alternatives and `<slice>` is no redirection, and it is read as `…`.
@@ -141,7 +141,7 @@ def _commands(text, synopsis):
 
     found = []
     for segment in _segments(PLACEHOLDER.sub(hold, text), synopsis):
-        if segment.split()[0] != "ao":
+        if segment.split()[0] != "polyctl":
             continue
         written = " ".join(HELD.sub(lambda m: held[int(m.group(1))], segment).split())
         try:
@@ -168,7 +168,7 @@ def _spans(text):
 
 
 def _read(text):
-    """([Invocation], [Marker]): the `ao` invocations a document's text shows, and its markers."""
+    """([Invocation], [Marker]): the `polyctl` invocations a document's text shows, and its markers."""
     lines = text.split("\n")
     invocations, markers, waiting, i = [], [], None, 0
     while i < len(lines):
@@ -215,7 +215,7 @@ def _read(text):
             joined = "\n".join(unit)
             for offset, content in _spans(joined):
                 content = " ".join(content.replace("\\|", "|").split())      # `\|` is a pipe inside a table
-                if content.startswith("ao "):
+                if content.startswith("polyctl "):
                     line_number = first + 1 + joined.count("\n", 0, offset)
                     invocations.extend(Invocation(line_number, written, words, waiting)
                                        for written, words in _commands(content, synopsis=True))
@@ -272,7 +272,7 @@ def _refusals(parser, words):
                             and value not in action.choices)
         literal = [value for value in values if not _placeholder(value)]
         if not values or (slot >= len(positionals) and not literal):
-            continue                                           # `ao fanout record …`: the rest of the line
+            continue                                           # `polyctl fanout record …`: the rest of the line
         if slot >= len(positionals):
             problems.append(f"{parser.prog} takes no argument {literal[0]!r}")
             break
@@ -314,7 +314,7 @@ def _marker_problems(root, parser, excused=()):
     """Each `not built` marker that gives no reason, covers no block, or excuses nothing.
 
     `excused` holds the (document, line) of each marker that excuses a name another reading of
-    the same documents finds ao does not have.
+    the same documents finds polyctl does not have.
     """
     seen, markers = _scan(root, parser)
     out = []
@@ -326,19 +326,19 @@ def _marker_problems(root, parser, excused=()):
         elif (name, marker.line) not in excused \
                 and not any(problems for doc, inv, problems in seen if doc == name and inv.marker is marker):
             out.append(f"{name}:{marker.line}: a not-built marker excuses nothing: no command the parser refuses, "
-                       "no name ao lacks")
+                       "no name polyctl lacks")
     return out
 
 
 def _command(words):
-    """The command an invocation's words name, past `ao` and its own options."""
+    """The command an invocation's words name, past `polyctl` and its own options."""
     i = 1
     while i < len(words) and _option_like(words[i]):
         i += 2 if words[i] in (["-C"], ["--root"]) else 1
     return words[i] if i < len(words) else []
 
 
-def test_every_ao_invocation_in_the_documents_is_one_the_parser_accepts():
+def test_every_polyctl_invocation_in_the_documents_is_one_the_parser_accepts():
     problems = _refused(ROOT, cli.build_parser())
 
     assert problems == [], "\n".join(problems)
@@ -357,78 +357,78 @@ def test_the_scan_reaches_every_command_the_parser_has():
 SAMPLE = """# A document
 
 ```bash
-ao since last          # a comment with --no-such-option
-ao since --slice claim-admission
-cd project && ao brief | head -n 3 > out.txt 2>&1
-ao lock --wait 60 -- pytest --maxfail 1
-ao -C ~/project status --window=12 \\
+polyctl since last          # a comment with --no-such-option
+polyctl since --slice claim-admission
+cd project && polyctl brief | head -n 3 > out.txt 2>&1
+polyctl lock --wait 60 -- pytest --maxfail 1
+polyctl -C ~/project status --window=12 \\
    --no-such-option
 ```
 
-Run `ao review collect <R-id>\\|--any`, `ao hooks [status|install] [--allow-shared-hooks]` or
-`ao fanout record …`, never `ao review resume R-<id>`, `ao alarms test --level purple|red`
-or `ao
+Run `polyctl review collect <R-id>\\|--any`, `polyctl hooks [status|install] [--allow-shared-hooks]` or
+`polyctl fanout record …`, never `polyctl review resume R-<id>`, `polyctl alarms test --level purple|red`
+or `polyctl
 doctor --consist`.
 
 ```console
-$ ao board ready
-ao output that is not a command
+$ polyctl board ready
+polyctl output that is not a command
 ```
 
 ```json
-{"run": "ao brief"}
+{"run": "polyctl brief"}
 ```
 
 <!-- not built: lanes are a design -->
 ```bash
-ao lanes
-ao status
+polyctl lanes
+polyctl status
 ```
 
 <!-- not built: -->
-`ao board` is built.
+`polyctl board` is built.
 
 <!-- not built: queues are a design -->
 
-`ao queue` is not covered.
+`polyctl queue` is not covered.
 """
 
 
 def test_the_reading_sees_shell_syntax_synopses_placeholders_markers_and_history(tmp_path):
     parser = cli.build_parser()
-    for name, text in (("docs/sample.md", SAMPLE), ("docs/lessons.md", "`ao brief`\n"),
-                       ("README.md", "`ao status`\n"), ("README.tr.md", "`ao board`\n"),
-                       ("SECURITY.md", "`ao --version`, then `ao advisories`\n"),
-                       ("src/ao/skill/SKILL.md", "`ao brief --x`\n")):
+    for name, text in (("docs/sample.md", SAMPLE), ("docs/lessons.md", "`polyctl brief`\n"),
+                       ("README.md", "`polyctl status`\n"), ("README.tr.md", "`polyctl board`\n"),
+                       ("SECURITY.md", "`polyctl --version`, then `polyctl advisories`\n"),
+                       ("src/polyctl/skill/SKILL.md", "`polyctl brief --x`\n")):
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(text, encoding="utf-8")
 
     invocations, markers = _read(SAMPLE)
 
     assert [(inv.line, inv.text) for inv in invocations] == [
-        (4, "ao since last"), (5, "ao since --slice claim-admission"), (6, "ao brief"),
-        (7, "ao lock --wait 60 -- pytest --maxfail 1"), (8, "ao -C ~/project status --window=12 --no-such-option"),
-        (12, "ao review collect <R-id>|--any"), (12, "ao hooks [status|install] [--allow-shared-hooks]"),
-        (13, "ao fanout record …"), (13, "ao review resume R-<id>"), (13, "ao alarms test --level purple|red"),
-        (14, "ao doctor --consist"), (18, "ao board ready"), (28, "ao lanes"), (29, "ao status"), (33, "ao board"),
-        (37, "ao queue"),
+        (4, "polyctl since last"), (5, "polyctl since --slice claim-admission"), (6, "polyctl brief"),
+        (7, "polyctl lock --wait 60 -- pytest --maxfail 1"), (8, "polyctl -C ~/project status --window=12 --no-such-option"),
+        (12, "polyctl review collect <R-id>|--any"), (12, "polyctl hooks [status|install] [--allow-shared-hooks]"),
+        (13, "polyctl fanout record …"), (13, "polyctl review resume R-<id>"), (13, "polyctl alarms test --level purple|red"),
+        (14, "polyctl doctor --consist"), (18, "polyctl board ready"), (28, "polyctl lanes"), (29, "polyctl status"), (33, "polyctl board"),
+        (37, "polyctl queue"),
     ]
     assert [(marker.line, marker.reason, marker.covers) for marker in markers] == [
         (26, "lanes are a design", [(27, 30)]), (32, "", [(33, 33)]), (35, "queues are a design", []),
     ]
     assert _refused(tmp_path, parser) == [
-        "docs/sample.md:5: `ao since --slice claim-admission`: ao since has no option --slice",
-        "docs/sample.md:6: `ao brief`: ao has no command 'brief'",
-        "docs/sample.md:8: `ao -C ~/project status --window=12 --no-such-option`: "
-        "ao status has no option --no-such-option",
-        "docs/sample.md:13: `ao review resume R-<id>`: 'resume' is not one of ao review's action choices "
+        "docs/sample.md:5: `polyctl since --slice claim-admission`: polyctl since has no option --slice",
+        "docs/sample.md:6: `polyctl brief`: polyctl has no command 'brief'",
+        "docs/sample.md:8: `polyctl -C ~/project status --window=12 --no-such-option`: "
+        "polyctl status has no option --no-such-option",
+        "docs/sample.md:13: `polyctl review resume R-<id>`: 'resume' is not one of polyctl review's action choices "
         "(cancel, collect, submit)",
-        "docs/sample.md:13: `ao alarms test --level purple|red`: 'purple' is not one of ao alarms --level's "
+        "docs/sample.md:13: `polyctl alarms test --level purple|red`: 'purple' is not one of polyctl alarms --level's "
         "choices (orange, red, yellow)",
-        "docs/sample.md:14: `ao doctor --consist`: ao doctor has no option --consist",
-        "docs/sample.md:37: `ao queue`: ao has no command 'queue'",
-        "SECURITY.md:1: `ao advisories`: ao has no command 'advisories'",
-        "src/ao/skill/SKILL.md:1: `ao brief --x`: ao has no command 'brief'",
+        "docs/sample.md:14: `polyctl doctor --consist`: polyctl doctor has no option --consist",
+        "docs/sample.md:37: `polyctl queue`: polyctl has no command 'queue'",
+        "SECURITY.md:1: `polyctl advisories`: polyctl has no command 'advisories'",
+        "src/polyctl/skill/SKILL.md:1: `polyctl brief --x`: polyctl has no command 'brief'",
     ]
     assert _marker_problems(tmp_path, parser) == [
         "docs/sample.md:32: a not-built marker gives no reason",

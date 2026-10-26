@@ -1,7 +1,7 @@
 """A subagent path stays in its session's directory, a background task's failed end is a failure, and a reply no
 model wrote answers no turn of the implementer's.
 
-`transcript.subagents` names files ao reads and stats, and an adapter layer the agent it describes can write may
+`transcript.subagents` names files polyctl reads and stats, and an adapter layer the agent it describes can write may
 declare it. A `dir`, a transcript's `path` or a sidecar's `path` holding `..`, an absolute path or a drive is
 refused where it is declared, a `dir` that does not name its session too, and every file is read by its real path
 only when that path is inside the session's own subagent directory: a symbolic link whose target leaves it is not
@@ -24,7 +24,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, mcp
+from polyctl import cli, lib as A, mcp
 from tests.test_harness_guard import _docstrings
 from tests.test_second_harness_cost import (HARNESS, R1, R2, R3, R4, R5, R6, _call, _prompt, _response, _result,
                                             _spent, _stamp, _text, _usage)
@@ -101,8 +101,8 @@ def _layered(project, ident=HARNESS, subagents=None, **changes):
             block.pop(last, None)
         else:
             block[last] = value
-    os.makedirs(os.path.join(project["root"], ".ao", "adapters"), exist_ok=True)
-    with open(os.path.join(project["root"], ".ao", "adapters", f"{ident}.json"), "w", encoding="utf-8") as fh:
+    os.makedirs(os.path.join(project["root"], ".polyctl", "adapters"), exist_ok=True)
+    with open(os.path.join(project["root"], ".polyctl", "adapters", f"{ident}.json"), "w", encoding="utf-8") as fh:
         json.dump(adapter, fh)
     return adapter
 
@@ -431,7 +431,7 @@ def test_a_turn_the_harness_answered_in_the_models_place_is_counted_apart_and_in
 def _declared_words():
     """Every path step, value and marker a shipped adapter declares for a background task's end or a harness's reply."""
     words = set()
-    for path in sorted((ROOT / "src" / "ao" / "adapters").glob("*.json")):
+    for path in sorted((ROOT / "src" / "polyctl" / "adapters").glob("*.json")):
         adapter = json.loads(path.read_text(encoding="utf-8"))
         transcript = adapter.get("transcript") if isinstance(adapter.get("transcript"), dict) else {}
         messages = transcript.get("messages") if isinstance(transcript.get("messages"), dict) else {}
@@ -459,7 +459,7 @@ def test_no_core_module_names_a_value_that_marks_a_background_end_or_a_reply_no_
                       + r")(?![A-Za-z0-9_])")
 
     found = []
-    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
+    for path in sorted((ROOT / "src" / "polyctl").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         docs = _docstrings(tree)
         found += [f"{path.name}:{node.lineno} {node.value[:80]!r}" for node in ast.walk(tree)

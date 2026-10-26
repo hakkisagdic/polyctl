@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, procs, watchdog as W
+from polyctl import cli, lib as A, procs, watchdog as W
 from tests.scenarios import World
 
 
@@ -121,7 +121,7 @@ def test_the_telegram_poller_is_refused_where_there_is_no_launchd(project, monke
 
 def test_a_transcript_that_cannot_be_found_is_a_problem_while_the_implementer_is_driven(project, monkeypatch):
     cfg = dict(project, implementer={"adapter": "claude-code", "session": "gone", "cwd": project["root"]})
-    from ao import features as F
+    from polyctl import features as F
     monkeypatch.setattr(F, "enabled", lambda cfg, key: True)
 
     keys = [key for key, _ in cli.doctor_problems(cfg)]

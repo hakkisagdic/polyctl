@@ -2,7 +2,7 @@ import os
 import re
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 BOARD = """# Board
 
@@ -28,7 +28,7 @@ BOARD = """# Board
 
 
 def _board(root, text=BOARD):
-    with open(os.path.join(root, ".ao", "board.md"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "board.md"), "w", encoding="utf-8") as fh:
         fh.write(text)
 
 
@@ -54,7 +54,7 @@ def test_a_chain_advances_one_link_as_each_item_lands(project):
     assert [item["id"] for item in A.ready(root)] == ["C", "K"]
 
 
-def test_a_hand_written_ready_section_is_refused_and_ao_board_ready_prints_the_derived_set(project, capsys):
+def test_a_hand_written_ready_section_is_refused_and_polyctl_board_ready_prints_the_derived_set(project, capsys):
     root = project["root"]
     _board(root, BOARD + "\n## ready\n- [X] chosen by hand\n- [A] listed again\n")
 
@@ -68,7 +68,7 @@ def test_a_hand_written_ready_section_is_refused_and_ao_board_ready_prints_the_d
 
 
 def test_the_doctor_names_a_broken_board(project, monkeypatch, tmp_path):
-    from ao import email, telegram
+    from polyctl import email, telegram
     monkeypatch.setattr(email, "CONF", str(tmp_path / "no-email.json"))
     monkeypatch.setattr(telegram, "CONF", str(tmp_path / "no-telegram.json"))
     _board(project["root"])

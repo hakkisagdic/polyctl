@@ -1,9 +1,9 @@
 """Gate runs and the Git queries authority makes, held to what they answer and to their time (LEADS-GATE-RUNS).
 
-ao's read-only bug hunter read src/ao/parts on 2026-10-12 and left leads, not verdicts. Measured, these held: an
+polyctl's read-only bug hunter read src/polyctl/parts on 2026-10-12 and left leads, not verdicts. Measured, these held: an
 `expect: empty` gate passed whatever its command answered - grep's 2 is an error, and a sweep that sent it to
 /dev/null passed - so it counts now only on 0, or a code the gate declares in ok_exit; a timeout killed git, or a
-gate's shell, alone and what it started ran on; a gates.json ao could not run raised once the machine lock was held;
+gate's shell, alone and what it started ran on; a gates.json polyctl could not run raised once the machine lock was held;
 and two verifications in one second shared an id.
 """
 import json
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, settings as S
+from polyctl import cli, lib as A, settings as S
 from tests import standin
 
 # A program that starts a child and waits for it: the child's pid is written to `pidfile` for the test to ask after.
@@ -57,7 +57,7 @@ def _still_runs(pid):
 
 def _gates(root, gates, profile="quick"):
     spec = {"gates": gates, "profiles": {profile: list(gates)}, "default_profile": profile}
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         json.dump(spec, fh)
 
 
@@ -138,7 +138,7 @@ def test_verify_fails_an_empty_gate_whose_command_was_not_found(project, tmp_pat
     assert (gates["grep"]["passed"], gates["grep"]["detail"]) == (True, "clean")
 
 
-# ---- 8ce12e1e3d2bab33: a gates.json ao cannot run is one line, before the lock -------------------
+# ---- 8ce12e1e3d2bab33: a gates.json polyctl cannot run is one line, before the lock -------------------
 
 GOOD = {"run": "true", "timeout": 30}
 
@@ -157,10 +157,10 @@ GOOD = {"run": "true", "timeout": 30}
     (json.dumps({"gates": {"smoke": GOOD}, "profiles": {"quick": ["smoke"]}, "default_profile": ["quick"]}),
      "is not a name"),
 ))
-def test_a_gates_file_ao_cannot_run_is_said_in_one_line_before_the_lock_is_taken(project, monkeypatch, capsys,
+def test_a_gates_file_polyctl_cannot_run_is_said_in_one_line_before_the_lock_is_taken(project, monkeypatch, capsys,
                                                                                  written, said):
     root = project["root"]
-    with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8") as fh:
         fh.write(written)
     taken = []
     monkeypatch.setattr(cli, "_take_gate_lock", lambda cfg, wait: taken.append(wait) or (lambda: None))
@@ -169,7 +169,7 @@ def test_a_gates_file_ao_cannot_run_is_said_in_one_line_before_the_lock_is_taken
     assert cli.cmd_merge_check(project, SimpleNamespace(profile=None, wait=0, into="HEAD", branch="HEAD")) == 2
 
     out = capsys.readouterr().out
-    assert out.count("no usable .ao/gates.json") == 2 and said in out
+    assert out.count("no usable .polyctl/gates.json") == 2 and said in out
     assert taken == [] and A.latest_verification(root) is None
 
 
@@ -248,7 +248,7 @@ def test_a_worker_that_left_the_gates_group_and_lost_its_parent_is_stopped_by_it
 def test_a_process_table_that_cannot_be_read_during_the_stop_is_said(project, tmp_path, monkeypatch, capsys):
     """A table that could not be read was read as a session with nobody else in it, and the stop said nothing of what
     might still run (LEADS-GATE-RUNS)."""
-    from ao import procs
+    from polyctl import procs
     root = project["root"]
     monkeypatch.setattr(A, "GATE_LOCK", str(tmp_path / "gate.lock"))
     _gates(root, {"suite": {"run": _command([sys.executable, "-c", "import time; time.sleep(120)"]), "timeout": 2}})

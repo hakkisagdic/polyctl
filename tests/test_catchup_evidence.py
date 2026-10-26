@@ -18,7 +18,7 @@ import sys
 import time
 from types import SimpleNamespace
 
-from ao import cli, language, lib as A, storage, watchdog as W
+from polyctl import cli, language, lib as A, storage, watchdog as W
 from tests.test_switches_and_bypass import _allow_candidate_verification
 
 APPROVED = ("VERDICT: APPROVED", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0")
@@ -47,7 +47,7 @@ def _write(root, rel, text):
 
 def _running(root, *lines):
     """The board's running section holds exactly these item lines."""
-    with open(os.path.join(root, ".ao", "board.md"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "board.md"), "w", encoding="utf-8") as fh:
         fh.write("# Board\n\n## running\n" + "".join(f"- {line}\n" for line in lines)
                  + "\n## blocked\n\n## queued\n\n## inbox\n\n## verified\n\n## done\n")
 
@@ -59,7 +59,7 @@ def _catchup(cfg, **given):
 
 
 def _base(project, monkeypatch):
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     monkeypatch.setattr(W, "run", lambda ns: 0)
     _write(project["root"], "mod.py", MODULE)
     _git(project["root"], "commit", "-q", "-m", "base")
@@ -290,13 +290,13 @@ def test_plan_names_the_waivers_that_close_by_proof_and_writes_nothing(project, 
                          (W, "run")):
         monkeypatch.setattr(target, name, _refuse)
     A.review_waiver_ranges(root)                  # every reader takes its ledger's lock file first
-    before = _snapshot(root, A.HOME, os.path.dirname(os.environ["AO_LEDGER_CHECKPOINTS"]))
+    before = _snapshot(root, A.HOME, os.path.dirname(os.environ["POLYCTL_LEDGER_CHECKPOINTS"]))
     capsys.readouterr()
 
     assert _catchup(project, plan=True, **PERSON) == 0
 
     out = capsys.readouterr().out
-    assert _snapshot(root, A.HOME, os.path.dirname(os.environ["AO_LEDGER_CHECKPOINTS"])) == before
+    assert _snapshot(root, A.HOME, os.path.dirname(os.environ["POLYCTL_LEDGER_CHECKPOINTS"])) == before
     start, end = moved.split("..")
     assert (f"{proven['id']} (SPLIT-B): {start[:12]}..{end[:12]}, 1 commit(s), 5 changed line(s): its grant recorded "
             "a pure move; closes by proof, 1 definition(s) moved byte for byte on the landed range; no reviewer") in out
@@ -379,7 +379,7 @@ def test_a_catchup_review_is_recorded_as_the_waived_slices_whatever_runs_now(pro
     evidence = A.review_evidence(open(os.path.join(root, "semantic-review", name), encoding="utf-8").read())
     assert evidence["slice"] == "B7" and "lenses" not in evidence
     assert A.range_review(root, landed)["slice"] == "B7"
-    # `ao stats` counts the defect a retrospective review found against the slice that landed it.
+    # `polyctl stats` counts the defect a retrospective review found against the slice that landed it.
     [outcome] = A.slice_outcomes(root)
     assert (outcome["slice"], outcome["defect_found"]) == ("B7", True)
 
@@ -387,7 +387,7 @@ def test_a_catchup_review_is_recorded_as_the_waived_slices_whatever_runs_now(pro
 def test_a_split_whose_part_runs_before_the_import_it_replaced_cannot_land_as_move_only(project, monkeypatch, capsys):
     """SPLIT-CHECK-3: join moved byte for byte, but its part was loaded before the import it used to override, so
     build() gave "a/b" where it gave "a+b"; commit-ok let it land as move-only and catchup closed it unreviewed."""
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     root = project["root"]
     custom = 'def join(*parts):\n    return "+".join(parts)\n'
     build = '\n\ndef build():\n    return join("a", "b")\n'

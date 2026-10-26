@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from ao import drivers, lib as A
+from polyctl import drivers, lib as A
 
 
 def test_the_provider_an_actor_spends_is_the_one_its_adapter_declares():

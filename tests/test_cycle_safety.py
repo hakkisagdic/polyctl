@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import lib as A, storage, watchdog as W
+from polyctl import lib as A, storage, watchdog as W
 from tests.scenarios import World
 
 KIRO = ["/agents/kiro-cli", "chat", "--resume-id", "s1", "--no-interactive", "devam"]
@@ -103,10 +103,10 @@ def test_a_parked_review_is_a_persons_to_unblock_not_open_work(world):
 
 
 def test_a_retired_projects_heartbeat_is_not_a_dead_watchdog(project):
-    ao = os.path.join(A.HOME, ".ao")
-    os.makedirs(ao, exist_ok=True)
+    polyctl = os.path.join(A.HOME, ".polyctl")
+    os.makedirs(polyctl, exist_ok=True)
     for name, age in (("heartbeat-recently-dead", 20 * 60), ("heartbeat-retired", 10 * 86400)):
-        path = os.path.join(ao, name)
+        path = os.path.join(polyctl, name)
         open(path, "w", encoding="utf-8").write("1")
         then = time.time() - age
         os.utime(path, (then, then))

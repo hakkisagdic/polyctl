@@ -1,4 +1,4 @@
-from ao import cli, lib as A, telegram, watchdog as W
+from polyctl import cli, lib as A, telegram, watchdog as W
 from tests.test_attacks import _git, _granted
 
 

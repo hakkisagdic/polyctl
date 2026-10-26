@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 
 TEXT = ("mod.py, read with its parts where they load, is not the text it was: a move adds, drops or carries "
         "elsewhere no line")
@@ -164,7 +164,7 @@ def test_a_part_runs_in_the_namespace_of_the_module_it_came_from(tmp_path):
 def test_a_move_only_slice_cannot_land_a_candidate_that_is_not_a_pure_move(project, capsys):
     root = project["root"]
     _repo(root)
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     text = open(board, encoding="utf-8").read().replace("## running\n", "## running\n- [SPLIT-B] move b · move-only\n")
     open(board, "w", encoding="utf-8").write(text)
     _stage(root, LIB.replace('def b(n):\n    return n + 1\n\n\n', '_part("mod_b", globals())\n\n\n'),
@@ -355,7 +355,7 @@ def test_a_split_the_proof_passes_runs_the_part_the_proof_read(project):
     module in another folder passed as a pure move, and its import then failed, or ran another module's part."""
     import importlib.util
     root = project["root"]
-    old = LIB.replace("import os\n", "import os\nfrom ao import lib as A\n")
+    old = LIB.replace("import os\n", "import os\nfrom polyctl import lib as A\n")
     _write_files(root, {"sub/mod.py": old}, commit="sub")
     _write_files(root, {"sub/mod.py": old.replace(B + '\n\n', 'A._part("mod_b", globals())\n\n\n'),
                         "sub/parts/mod_b.py": B})
@@ -384,7 +384,7 @@ def test_a_part_runs_from_the_parts_folder_beside_the_module_that_loads_it(tmp_p
     assert namespace["b"](1) == 2
 
 
-def test_ao_s_own_modules_read_their_parts_where_they_always_did():
+def test_polyctl_s_own_modules_read_their_parts_where_they_always_did():
     for module in (A, cli):
         assert A._parts_folder(os.path.dirname(os.path.abspath(module.__file__))) == A._PARTS_DIR
 
@@ -473,61 +473,61 @@ def test_a_module_that_binds_its_loader_elsewhere_proves_no_move(project, bindin
     assert any("binds _part" in problem for problem in A.split_moves(root)["problems"])
 
 
-def test_ao_s_loaders_and_a_function_s_own_names_bind_nothing_elsewhere():
-    """SPLIT-CHECK-7: the bindings ao's modules use are its loader's, and a local `A` binds nothing of the module's."""
-    for path in ("src/ao/lib.py", "src/ao/cli.py"):
+def test_polyctl_s_loaders_and_a_function_s_own_names_bind_nothing_elsewhere():
+    """SPLIT-CHECK-7: the bindings polyctl's modules use are its loader's, and a local `A` binds nothing of the module's."""
+    for path in ("src/polyctl/lib.py", "src/polyctl/cli.py"):
         with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), path),
                   encoding="utf-8") as fh:
             assert A._loader_rebound(fh.read(), path) == [], path
     local = 'from . import lib as A\n\n\ndef f():\n    A = 1\n    return A\n\n\nA._part("x", globals())\n'
-    assert A._loader_rebound(local, "src/ao/mod.py") == []          # a relative lib is ao's in ao's package
-    assert A._loader_rebound(local.replace("    A = 1\n", "    global A\n    A = 1\n"), "src/ao/mod.py") == ["A"]
+    assert A._loader_rebound(local, "src/polyctl/mod.py") == []          # a relative lib is polyctl's in polyctl's package
+    assert A._loader_rebound(local.replace("    A = 1\n", "    global A\n    A = 1\n"), "src/polyctl/mod.py") == ["A"]
 
 
-def test_a_relative_lib_is_ao_s_loader_only_inside_ao_s_package():
-    """SPLIT-CHECK-8: `from .lib import _part` in another package imports that package's lib, not ao's."""
+def test_a_relative_lib_is_polyctl_s_loader_only_inside_polyctl_s_package():
+    """SPLIT-CHECK-8: `from .lib import _part` in another package imports that package's lib, not polyctl's."""
     load = '_part("x", globals())\n'
     assert A._loader_rebound("from .lib import _part\n" + load, "pkg/mod.py") == ["_part"]
-    assert A._loader_rebound("from .lib import _part\n" + load, "src/ao/mod.py") == []
-    assert A._loader_rebound("from ao.lib import _part\n" + load, "pkg/mod.py") == []
+    assert A._loader_rebound("from .lib import _part\n" + load, "src/polyctl/mod.py") == []
+    assert A._loader_rebound("from polyctl.lib import _part\n" + load, "pkg/mod.py") == []
 
 
 def test_another_object_s_part_attribute_binds_nothing_of_the_loader():
     """SPLIT-CHECK-8: `plugin._part = value` was taken for rebinding the loader, and a sound split refused."""
-    source = 'from ao import lib as A\n\n\ndef configure(plugin):\n    plugin._part = 1\n\n\nA._part("x", globals())\n'
+    source = 'from polyctl import lib as A\n\n\ndef configure(plugin):\n    plugin._part = 1\n\n\nA._part("x", globals())\n'
 
     assert A._loader_rebound(source, "pkg/mod.py") == []
     assert A._loader_rebound(source + "A._part = print\n", "pkg/mod.py") == ["A"]
 
 
-def test_ao_s_package_is_src_ao_itself_not_a_folder_that_ends_so():
-    """SPLIT-CHECK-9: `vendor/src/ao/mod.py` was taken for ao's package, and its own `.lib` for ao's loader."""
+def test_polyctl_s_package_is_src_polyctl_itself_not_a_folder_that_ends_so():
+    """SPLIT-CHECK-9: `vendor/src/polyctl/mod.py` was taken for polyctl's package, and its own `.lib` for polyctl's loader."""
     load = 'from .lib import _part\n_part("x", globals())\n'
-    assert A._loader_rebound(load, "vendor/src/ao/mod.py") == ["_part"]
-    assert A._loader_rebound(load, "src/ao/mod.py") == []
+    assert A._loader_rebound(load, "vendor/src/polyctl/mod.py") == ["_part"]
+    assert A._loader_rebound(load, "src/polyctl/mod.py") == []
 
 
 def test_the_loader_s_part_is_set_wherever_its_name_is_the_module_s():
     """SPLIT-CHECK-9: a function parameter named `A` is another object, and a function that sets `A._part` with no
     `A` of its own sets the loader's."""
-    head, load = "from ao import lib as A\n\n\n", '\n\n\nA._part("x", globals())\n'
+    head, load = "from polyctl import lib as A\n\n\n", '\n\n\nA._part("x", globals())\n'
 
     assert A._loader_rebound(head + "def configure(A):\n    A._part = 1" + load, "pkg/mod.py") == []
     assert A._loader_rebound(head + "def setup():\n    A._part = print" + load, "pkg/mod.py") == ["A"]
     assert A._loader_rebound(head + "class C:\n    A._part = print" + load, "pkg/mod.py") == ["A"]
 
 
-def test_a_vendored_lib_s_own_part_is_no_loader_of_ao_s():
-    """SPLIT-CHECK-10: any path ending in ao/lib.py was taken for ao's lib, so the `_part` vendor/src/ao/lib.py defines
-    passed for ao's loader."""
+def test_a_vendored_lib_s_own_part_is_no_loader_of_polyctl_s():
+    """SPLIT-CHECK-10: any path ending in polyctl/lib.py was taken for polyctl's lib, so the `_part` vendor/src/polyctl/lib.py defines
+    passed for polyctl's loader."""
     source = 'def _part(name, namespace):\n    pass\n\n\n_part("x", globals())\n'
 
-    assert A._loader_rebound(source, "vendor/src/ao/lib.py") == ["_part"]
-    assert A._loader_rebound(source, "src/ao/lib.py") == []
-    assert A._loader_rebound(source + "f = lambda x=(_part := print): x\n", "src/ao/lib.py") == ["_part"]
+    assert A._loader_rebound(source, "vendor/src/polyctl/lib.py") == ["_part"]
+    assert A._loader_rebound(source, "src/polyctl/lib.py") == []
+    assert A._loader_rebound(source + "f = lambda x=(_part := print): x\n", "src/polyctl/lib.py") == ["_part"]
 
 
-_HEAD, _LOAD = "from ao import lib as A\n\n\n", '\n\n\nA._part("x", globals())\n'
+_HEAD, _LOAD = "from polyctl import lib as A\n\n\n", '\n\n\nA._part("x", globals())\n'
 
 
 def test_a_class_body_sets_the_module_s_loader_until_it_binds_its_own():
@@ -554,13 +554,13 @@ def test_a_function_s_own_bindings_and_its_closures_are_other_objects(body):
 
 
 @pytest.mark.parametrize("source", [
-    _HEAD + "def setup():\n    from ao import lib as A\n    A._part = print" + _LOAD,
+    _HEAD + "def setup():\n    from polyctl import lib as A\n    A._part = print" + _LOAD,
     _HEAD + "def setup(x=(A := print)):\n    return x" + _LOAD,
     _HEAD + "B = [(A := print) for _ in (0,)]" + _LOAD,
     "from helpers import *\n" + _HEAD + _LOAD,
 ])
 def test_what_binds_the_module_s_name_wherever_it_is_written_is_found(source):
-    """SPLIT-CHECK-10: an `A` a function imports may be ao's lib itself; a walrus in a default or a comprehension binds
+    """SPLIT-CHECK-10: an `A` a function imports may be polyctl's lib itself; a walrus in a default or a comprehension binds
     the module's `A`; and a star import binds a public `A` as surely as `_part` through `__all__`."""
     assert A._loader_rebound(source, "pkg/mod.py") == ["A"]
 
@@ -581,26 +581,26 @@ def test_a_body_s_own_name_is_its_own_where_it_surely_binds_it(source):
     _HEAD + "class C:\n    A = A\n    A._part = print" + _LOAD,
     _HEAD + "class C:\n    if len(__name__):\n        A = object()\n    A._part = print" + _LOAD,
     _HEAD + "class C:\n    A = object()\n    del A\n    A._part = print" + _LOAD,
-    _HEAD + "def f():\n    from ao import lib as A\n    def inner():\n        A._part = print\n    return inner" + _LOAD,
+    _HEAD + "def f():\n    from polyctl import lib as A\n    def inner():\n        A._part = print\n    return inner" + _LOAD,
 ])
 def test_a_body_whose_own_name_may_still_be_the_module_s_sets_the_loader(source):
     """SPLIT-CHECK-11: a class body's `A = A` binds the module's object, a binding that may not run or is deleted leaves
-    the module's, and a closure over a function that imports `A` may hold ao's lib."""
+    the module's, and a closure over a function that imports `A` may hold polyctl's lib."""
     assert A._loader_rebound(source, "pkg/mod.py") == ["A"]
 
 
-def test_a_walrus_in_ao_s_lib_binds_the_loader_only_in_the_module_s_own_namespace():
+def test_a_walrus_in_polyctl_s_lib_binds_the_loader_only_in_the_module_s_own_namespace():
     """SPLIT-CHECK-11: a walrus in a function's body binds that function's `_part`, and was taken for the module's."""
     head = 'def _part(name, namespace):\n    pass\n\n\n'
     load = '\n\n\n_part("x", globals())\n'
 
-    assert A._loader_rebound(head + "def helper():\n    (_part := print)\n    return _part" + load, "src/ao/lib.py") == []
-    assert A._loader_rebound(head + "def helper(x=(_part := print)):\n    return x" + load, "src/ao/lib.py") == ["_part"]
-    assert A._loader_rebound(head + "class K((_part := object)):\n    pass" + load, "src/ao/lib.py") == ["_part"]
+    assert A._loader_rebound(head + "def helper():\n    (_part := print)\n    return _part" + load, "src/polyctl/lib.py") == []
+    assert A._loader_rebound(head + "def helper(x=(_part := print)):\n    return x" + load, "src/polyctl/lib.py") == ["_part"]
+    assert A._loader_rebound(head + "class K((_part := object)):\n    pass" + load, "src/polyctl/lib.py") == ["_part"]
 
 
 @pytest.mark.parametrize("attempt", [
-    "A._part = print", "setattr(A, '_part', print)", "del A._part", "sys.modules['ao.lib']._part = print",
+    "A._part = print", "setattr(A, '_part', print)", "del A._part", "sys.modules['polyctl.lib']._part = print",
     "globals()['A']._part = print", "(lambda A=A: setattr(A, '_part', print))()", "A.__class__ = types.ModuleType",
     "cli.A = types.SimpleNamespace(_part=print)", "del cli.A", "A._KeepsItsLoader = types.ModuleType",
     "del A._KeepsItsLoader",
@@ -609,7 +609,7 @@ def test_a_module_s_loader_is_not_rebound_from_outside_it(attempt):
     """#111: code that already landed could rebind the loader through an expression the proof does not read as a
     name - `globals()["A"]._part`, a function's `A=A`, `sys.modules` - and every load after it ran another loader."""
     loader = A._part
-    with pytest.raises(AttributeError, match="binds ao's loader"):
+    with pytest.raises(AttributeError, match="binds polyctl's loader"):
         exec(attempt, {"A": A, "cli": cli, "sys": sys, "types": types})
     assert A._part is loader and cli.A is A
 
@@ -627,7 +627,7 @@ def test_a_module_s_other_names_are_set_as_before(monkeypatch):
     'from sys import modules', 'import builtins', 'import ctypes', 'def f():\n    return f.__globals__',
     'def f(x):\n    return getattr(x, "__dict__")', 'import sys\nsys._getframe().f_globals["A"] = 1',
     'object.__setattr__(A, "_part", print)', 'reach = globals',
-    'import sys as s\ns.modules["ao.lib"] = None', 'import importlib\nimportlib.import_module("builtins").globals()',
+    'import sys as s\ns.modules["polyctl.lib"] = None', 'import importlib\nimportlib.import_module("builtins").globals()',
     'def f(o):\n    return getattr(getattr(o, "sys"), "modules")', 'b = __import__("builtins")',
     'def f(m):\n    return m.exec("A = 1")', 'def f(m):\n    return m.compile("x", "y", "exec")', 'import inspect',
     'def f(b):\n    return getattr(b, "globals")()', 'def f(b, n):\n    return getattr(b, n)', 'look = getattr',
@@ -641,17 +641,17 @@ def test_what_binds_a_name_in_the_namespace_that_no_statement_names_is_found(lin
     assert A._namespace_writes(_HEAD + line + _LOAD, "pkg/mod.py"), line
 
 
-def test_the_namespace_a_load_hands_its_part_and_ao_s_own_loader_are_no_writes():
+def test_the_namespace_a_load_hands_its_part_and_polyctl_s_own_loader_are_no_writes():
     assert A._namespace_writes(_HEAD + "X = 1" + _LOAD, "pkg/mod.py") == []
     assert A._namespace_writes(_HEAD + "import re\nP = re.compile('x')\nQ = A.re.compile('y')" + _LOAD, "pkg/mod.py") == []
     plain = "class C:\n    __slots__ = ('a',)\n\n    def __init__(self, a):\n        self.a = getattr(a, 'b', None)\n"
     assert A._namespace_writes(_HEAD + plain + "N = __name__" + _LOAD, "pkg/mod.py") == []
     loader = 'import sys\n\n\ndef _part(name, namespace):\n    exec("", namespace)\n'
-    assert A._namespace_writes(loader, "src/ao/lib.py") == []
-    assert A._namespace_writes(loader, "vendor/src/ao/lib.py")
+    assert A._namespace_writes(loader, "src/polyctl/lib.py") == []
+    assert A._namespace_writes(loader, "vendor/src/polyctl/lib.py")
 
 
-def test_ao_s_modules_and_every_part_they_load_bind_and_write_nothing_the_proof_cannot_read():
+def test_polyctl_s_modules_and_every_part_they_load_bind_and_write_nothing_the_proof_cannot_read():
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     read = []
 
@@ -660,9 +660,9 @@ def test_ao_s_modules_and_every_part_they_load_bind_and_write_nothing_the_proof_
         with open(os.path.join(base, path), encoding="utf-8") as fh:
             return fh.read()
 
-    assert A._namespace_findings({path: reader(path) for path in ("src/ao/lib.py", "src/ao/cli.py")}, reader) == \
+    assert A._namespace_findings({path: reader(path) for path in ("src/polyctl/lib.py", "src/polyctl/cli.py")}, reader) == \
         ([], [])
-    parts = {f"src/ao/parts/{name}" for name in os.listdir(os.path.join(base, "src", "ao", "parts"))
+    parts = {f"src/polyctl/parts/{name}" for name in os.listdir(os.path.join(base, "src", "polyctl", "parts"))
              if name.endswith(".py") and name != "__init__.py"}
     assert parts <= set(read), sorted(parts - set(read))
 
@@ -704,12 +704,12 @@ def test_a_part_the_candidate_touches_is_read_though_its_module_is_not():
     assert A._namespace_findings({}, lambda path: None, {"parts/mod_b.py": "X = globals()\n"})[1]
 
 
-def test_the_loader_is_kept_though_ao_s_lib_is_taken_out_of_the_module_table(monkeypatch):
-    """#111, from the review of SPLIT-CHECK-12: the guard knew ao's lib by its `sys.modules` entry, so code that removed
+def test_the_loader_is_kept_though_polyctl_s_lib_is_taken_out_of_the_module_table(monkeypatch):
+    """#111, from the review of SPLIT-CHECK-12: the guard knew polyctl's lib by its `sys.modules` entry, so code that removed
     the entry could rebind `cli.A`; it knows the lib by its loader now."""
-    monkeypatch.delitem(sys.modules, "ao.lib")
+    monkeypatch.delitem(sys.modules, "polyctl.lib")
 
-    with pytest.raises(AttributeError, match="binds ao's loader"):
+    with pytest.raises(AttributeError, match="binds polyctl's loader"):
         cli.A = types.SimpleNamespace(_part=print)
     assert cli.A is A
 
@@ -719,7 +719,7 @@ def test_the_guard_keeps_what_it_refuses_by():
     lib's names, so `A._keep_loader = lambda *args: None` switched it off; what it refuses by is held in it now."""
     A._keep_loader = lambda *args: None        # a name of the lib's like any other, which the guard no longer reads
     try:
-        with pytest.raises(AttributeError, match="binds ao's loader"):
+        with pytest.raises(AttributeError, match="binds polyctl's loader"):
             A._part = print
     finally:
         del A._keep_loader

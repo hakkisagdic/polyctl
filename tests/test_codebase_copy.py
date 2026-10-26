@@ -1,9 +1,9 @@
-"""`ao ask --codebase` runs its provider in a copy of the working tree, never in the tree (CODEBASE-COPY).
+"""`polyctl ask --codebase` runs its provider in a copy of the working tree, never in the tree (CODEBASE-COPY).
 
 The provider ran with the repository as its working directory, so a provider that is a harness read the tree's own
 configuration - hooks in .claude/settings.json, plugins and MCP servers in opencode.json, instructions in AGENTS.md,
 files an agent writes - and ran them before any review had seen them (#112). The working tree as it stands is now
-written into a tree object through an index of ao's own, unpacked outside the repository less what a harness reads
+written into a tree object through an index of polyctl's own, unpacked outside the repository less what a harness reads
 from a project, as a review's candidate is (REVIEW-TREE-3), and the provider runs there; its citations are read
 against that copy, and the copy is removed afterwards, after a refusal and a timeout too. A stand-in provider, a
 script run as [python, script], writes down what it found where it ran.
@@ -17,7 +17,7 @@ import time
 
 import pytest
 
-from ao import lib as A
+from polyctl import lib as A
 
 # What an agent can write into a tree for a harness to read as its own; none of it reaches the copy.
 HARNESS_FILES = {".claude/settings.json": '{"hooks": {"SessionStart": [{"hooks": [{"command": "touch pwned"}]}]}}\n',
@@ -79,7 +79,7 @@ def _working_tree(project):
     for name, text in dict(HARNESS_FILES, **{"src/a.py": "a = 1\n", "src/b.py": "b = 1\n",
                                              ".gitignore": "build/\n"}).items():
         _write(root, name, text)
-    _git(root, "add", "-A", "--", ".", ":!.ao", ":!agent-mail", ":!semantic-review")
+    _git(root, "add", "-A", "--", ".", ":!.polyctl", ":!agent-mail", ":!semantic-review")
     _git(root, "commit", "-q", "-m", "a tree with harness configuration in it")
     _write(root, "src/a.py", "a = 2  # changed, not staged\n")
     _write(root, "src/b.py", "b = 2  # changed and staged\n")

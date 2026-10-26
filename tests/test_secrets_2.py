@@ -1,18 +1,18 @@
 """A ping URL typed nowhere, a new bot's first messages read, and no mail written over another (SECRETS-2).
 
-LEADS-SECRETS left four things open on 2026-10-13. `ao pings setup --url https://hc-ping.com/<uuid>` had a person type
+LEADS-SECRETS left four things open on 2026-10-13. `polyctl pings setup --url https://hc-ping.com/<uuid>` had a person type
 the ping URL on a command line, which the shell's history and the process list keep, and whoever reads the check's UUID
-can ping it, so a dead watchdog looks alive. A new Telegram bot token kept the old bot's ~/.ao/telegram-offset: the
+can ping it, so a dead watchdog looks alive. A new Telegram bot token kept the old bot's ~/.polyctl/telegram-offset: the
 poller asked the new bot for its updates from the old bot's number on, Telegram takes every update below the number
 asked from as read, and a person's first messages to the new bot were dropped unread. `write_mail` opened its file with
-"w": a second `ao note`, `ao mail send`, `ao_report` or hold release of the same minute and subject was written over the
+"w": a second `polyctl note`, `polyctl mail send`, `polyctl_report` or hold release of the same minute and subject was written over the
 first, two writers that each found a name free - a handoff's look at the mailbox among them - both wrote to it, and a
-link left at a mail's name was written through. And `ao doctor` hinted `ao ping set <url>`, a command that never was.
+link left at a mail's name was written through. And `polyctl doctor` hinted `polyctl ping set <url>`, a command that never was.
 
-`ao pings setup` asks for the URL at the terminal and does not show it, takes it from the variable a script names, and
+`polyctl pings setup` asks for the URL at the terminal and does not show it, takes it from the variable a script names, and
 refuses one given on the command line. A token of another bot drops the offset file, and nothing beside it. Every mail
 is created under a name no file has, `-2` after its own when that is taken, and its writer says the name it was written
-under. The doctor hints `ao pings setup`. Nothing here reaches healthchecks or Telegram: every request is faked.
+under. The doctor hints `polyctl pings setup`. Nothing here reaches healthchecks or Telegram: every request is faked.
 """
 import builtins
 import getpass
@@ -26,7 +26,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, mcp, telegram
+from polyctl import cli, lib as A, mcp, telegram
 from tests.test_bug_hunter import _repo, _stand_in
 from tests.test_docs_commands import _commands, _refusals
 
@@ -42,7 +42,7 @@ def _plain(capsys):
     return re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
 
 
-# ---- ao pings setup: the URL asked unseen, or named by its variable, never typed on a command line ---------------
+# ---- polyctl pings setup: the URL asked unseen, or named by its variable, never typed on a command line ---------------
 
 def _at_a_terminal(monkeypatch, attached, typed=None):
     """A terminal attached or not, and what a person pastes at the URL's prompt: [the prompts asked]."""
@@ -73,26 +73,26 @@ def test_at_a_terminal_the_setup_asks_for_the_ping_url_unseen_and_saves_it(proje
 
     out = _plain(capsys)
     assert prompts == ["ping URL (not shown): "]
-    assert "2. Copy its ping URL and paste it when ao asks. It is not shown" in out
+    assert "2. Copy its ping URL and paste it when polyctl asks. It is not shown" in out
     assert f"saved {A.pings_path()} ({cli._private_mode()}): this project pings https://…" in out
-    assert "now: ao pings test" in out
+    assert "now: polyctl pings test" in out
     assert "--url https" not in out and SECRET not in out
     assert A.ping_url(project["root"]) == URL and _saved() == {A.project_key(project["root"]): URL}
 
 
 def test_a_script_names_the_variable_that_holds_the_url(project, monkeypatch, capsys):
     _at_a_terminal(monkeypatch, False)
-    monkeypatch.delenv("AO_TEST_PING_URL", raising=False)
+    monkeypatch.delenv("POLYCTL_TEST_PING_URL", raising=False)
 
-    assert _setup(project, url_env="AO_TEST_PING_URL") == 2
-    assert _plain(capsys) == "not saved: $AO_TEST_PING_URL is not set\n"
-    monkeypatch.setenv("AO_TEST_PING_URL", "")
-    assert _setup(project, url_env="AO_TEST_PING_URL") == 2
-    assert _plain(capsys) == "not saved: $AO_TEST_PING_URL is empty\n"
+    assert _setup(project, url_env="POLYCTL_TEST_PING_URL") == 2
+    assert _plain(capsys) == "not saved: $POLYCTL_TEST_PING_URL is not set\n"
+    monkeypatch.setenv("POLYCTL_TEST_PING_URL", "")
+    assert _setup(project, url_env="POLYCTL_TEST_PING_URL") == 2
+    assert _plain(capsys) == "not saved: $POLYCTL_TEST_PING_URL is empty\n"
     assert _saved() is None
 
-    monkeypatch.setenv("AO_TEST_PING_URL", URL)
-    assert _setup(project, url_env="AO_TEST_PING_URL", all=True) == 0          # named: nothing is asked
+    monkeypatch.setenv("POLYCTL_TEST_PING_URL", URL)
+    assert _setup(project, url_env="POLYCTL_TEST_PING_URL", all=True) == 0          # named: nothing is asked
 
     out = _plain(capsys)
     assert out.startswith(f"saved {A.pings_path()} ") and "every project with no URL of its own pings" in out
@@ -106,26 +106,26 @@ def test_without_a_terminal_or_a_variable_the_setup_refuses_and_says_both_ways(p
 
     out = _plain(capsys)
     assert "1. Create a check at https://healthchecks.io" in out
-    assert out.endswith("not saved: the ping URL is asked at a terminal, and none is attached; run ao pings setup in "
+    assert out.endswith("not saved: the ping URL is asked at a terminal, and none is attached; run polyctl pings setup in "
                         "a terminal of yours, or name the variable that holds it with --url-env NAME\n")
     assert _saved() is None
 
 
 def test_a_url_given_on_the_command_line_is_refused_unsaved_and_unquoted(project, monkeypatch, capsys):
     _at_a_terminal(monkeypatch, True)                    # at a terminal too: nothing is asked in its place
-    monkeypatch.setenv("AO_TEST_PING_URL", URL)
+    monkeypatch.setenv("POLYCTL_TEST_PING_URL", URL)
     parsed = cli.build_parser().parse_args(["pings", "setup", "--url", URL, "--all"])
 
     assert parsed.fn(project, parsed) == 2
-    assert _setup(project, url=URL, url_env="AO_TEST_PING_URL") == 2
+    assert _setup(project, url=URL, url_env="POLYCTL_TEST_PING_URL") == 2
 
     out = _plain(capsys)
     assert out == 2 * ("not saved: a ping URL on a command line stays in the shell's history and the process list, "
-                       "where whoever reads it can ping the check; run ao pings setup to paste it unseen, or name "
+                       "where whoever reads it can ping the check; run polyctl pings setup to paste it unseen, or name "
                        "the variable that holds it with --url-env NAME\n")
     assert _saved() is None
-    named = cli.build_parser().parse_args(["pings", "setup", "--url-env", "AO_TEST_PING_URL", "--all"])
-    assert (named.url, named.url_env, named.all) == (None, "AO_TEST_PING_URL", True)
+    named = cli.build_parser().parse_args(["pings", "setup", "--url-env", "POLYCTL_TEST_PING_URL", "--all"])
+    assert (named.url, named.url_env, named.all) == (None, "POLYCTL_TEST_PING_URL", True)
 
 
 @pytest.mark.parametrize("typed, said", [
@@ -152,8 +152,8 @@ def test_what_is_no_ping_url_is_refused_unsaved_and_unquoted(project, monkeypatc
 
 @pytest.fixture
 def conf(project, monkeypatch, tmp_path):
-    """~/.ao/telegram.json of the project's own home; the poller's offset file is beside it."""
-    path = tmp_path / "home" / ".ao" / "telegram.json"
+    """~/.polyctl/telegram.json of the project's own home; the poller's offset file is beside it."""
+    path = tmp_path / "home" / ".polyctl" / "telegram.json"
     monkeypatch.setattr(telegram, "CONF", str(path))
     return path
 
@@ -196,9 +196,9 @@ def test_after_a_new_token_the_poller_reads_the_new_bots_first_messages(project,
     assert len(telegram.poll(project["root"], project)["written"]) == 1
     assert open(telegram._offset_path(), encoding="utf-8").read() == "1001"
 
-    monkeypatch.setenv("AO_TEST_TELEGRAM_TOKEN", NEW_TOKEN)
+    monkeypatch.setenv("POLYCTL_TEST_TELEGRAM_TOKEN", NEW_TOKEN)
     assert cli.cmd_telegram(project, SimpleNamespace(action="setup", once=False, chat=["42"],
-                                                     token_env="AO_TEST_TELEGRAM_TOKEN")) == 0
+                                                     token_env="POLYCTL_TEST_TELEGRAM_TOKEN")) == 0
 
     [name] = telegram.poll(project["root"], project)["written"]
     assert "stop the deploy" in open(os.path.join(project["root"], project["mailbox"], name), encoding="utf-8").read()
@@ -211,7 +211,7 @@ def _store(project, mode):
     root = project["root"]
     stored = {key: value for key, value in project.items() if key != "root"}
     stored["mail"] = {"store": mode}
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump(stored, fh)
     return A.load_config(root)
 
@@ -272,7 +272,7 @@ def test_a_link_left_at_a_mails_name_is_not_written_through(project, tmp_path, m
 
 
 class _Now(datetime):
-    """The clock `ao handoff` stamps its note with, stopped at one minute."""
+    """The clock `polyctl handoff` stamps its note with, stopped at one minute."""
 
     @classmethod
     def now(cls, tz=None):
@@ -377,7 +377,7 @@ def _handoff(project, monkeypatch, capsys):
 
 
 def _report(project, monkeypatch, capsys):
-    return [mcp.call("ao_report", {"kind": "status", "summary": "the parser moved"}, project, False)["written"]]
+    return [mcp.call("polyctl_report", {"kind": "status", "summary": "the parser moved"}, project, False)["written"]]
 
 
 def _telegram(project, monkeypatch, capsys):
@@ -402,7 +402,7 @@ def _hunt(project, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("writer", [_mail_send, _note, _hold_release, _handoff, _report, _telegram, _hunt],
-                         ids=["mail send", "note", "hold release", "handoff", "ao_report", "telegram", "hunt"])
+                         ids=["mail send", "note", "hold release", "handoff", "polyctl_report", "telegram", "hunt"])
 def test_each_writer_says_the_name_its_mail_was_written_under(project, monkeypatch, capsys, taken, writer):
     said = writer(project, monkeypatch, capsys)
 
@@ -414,7 +414,7 @@ def test_each_writer_says_the_name_its_mail_was_written_under(project, monkeypat
 
 
 @pytest.mark.parametrize("mode", ["deletion", "append-only"])
-@pytest.mark.parametrize("writer", [_mail_send, _note, _report], ids=["mail send", "note", "ao_report"])
+@pytest.mark.parametrize("writer", [_mail_send, _note, _report], ids=["mail send", "note", "polyctl_report"])
 def test_a_same_minute_mail_after_ack_keeps_a_new_id(project, monkeypatch, capsys, mode, writer):
     """Acknowledging the first mail removes its view, but never makes its ID reusable (SECRETS-2)."""
     from tests.test_message_store import _ack
@@ -443,17 +443,17 @@ def test_a_same_minute_mail_after_ack_keeps_a_new_id(project, monkeypatch, capsy
     assert os.path.isfile(os.path.join(root, cfg["mailbox"], second))
 
 
-# ---- ao doctor: a hint names a command there is --------------------------------------------------------------------
+# ---- polyctl doctor: a hint names a command there is --------------------------------------------------------------------
 
 def test_every_command_the_doctor_hints_for_an_optional_feature_is_one_the_parser_accepts(project, monkeypatch):
-    from ao import email
+    from polyctl import email
     monkeypatch.setattr(email, "config", lambda: None)
     monkeypatch.setattr(telegram, "config", lambda: None)
     parser = cli.build_parser()
 
     hints = {name: hint for name, _, hint in cli._optional_features(project)}
 
-    assert hints["ping"] == "ao pings setup"
-    refused = {hint: _refusals(parser, words[1:]) for hint in hints.values() if hint.startswith("ao ")
+    assert hints["ping"] == "polyctl pings setup"
+    refused = {hint: _refusals(parser, words[1:]) for hint in hints.values() if hint.startswith("polyctl ")
                for _, words in _commands(hint, synopsis=True)}
     assert {hint: problems for hint, problems in refused.items() if problems} == {}

@@ -12,7 +12,7 @@ import os
 import time
 from datetime import datetime
 
-from ao import lib as A
+from polyctl import lib as A
 
 # A store of one message table and one part table, in the shape a real install was found in:
 # times in milliseconds, the record's fields in a JSON column, the children naming their parent.
@@ -94,7 +94,7 @@ def add_session(db, session, parent, at, text):
 
 
 def read_adapter(tmp_path, monkeypatch):
-    """The declared store, as a package adapter ao can find."""
+    """The declared store, as a package adapter polyctl can find."""
     db, adapter = make_store(tmp_path)
     monkeypatch.setattr(A, "package_adapters", lambda: {adapter["id"]: adapter})
     return db, adapter
@@ -131,7 +131,7 @@ def test_a_record_holds_its_own_columns_and_its_json_columns_fields_together(tmp
 
 
 def _shipped_opencode(tmp_path, change):
-    """The fixture store with `change` (sql, values) applied, read through the opencode adapter ao ships."""
+    """The fixture store with `change` (sql, values) applied, read through the opencode adapter polyctl ships."""
     import sqlite3
     db, _ = make_store(tmp_path)
     connection = sqlite3.connect(db)
@@ -145,7 +145,7 @@ def _shipped_opencode(tmp_path, change):
 
 
 def test_the_shipped_opencode_declaration_reads_a_messages_tokens_as_its_turns_spend(tmp_path):
-    """ADAPTER-SQLITE-READER-2: spend was declared from the session, which nothing reads, and ao cost read 0."""
+    """ADAPTER-SQLITE-READER-2: spend was declared from the session, which nothing reads, and polyctl cost read 0."""
     tokens = {"input": 10, "output": 3, "reasoning": 0, "cache": {"read": 400, "write": 20}}
     recs, adapter = _shipped_opencode(tmp_path, ("UPDATE message SET data = ? WHERE id = 'msg_a2'", (json.dumps(
         {"role": "assistant", "finish": "tool-calls", "cost": 0.0, "tokens": tokens}),)))
@@ -384,7 +384,7 @@ def test_a_delegating_session_lists_only_itself_and_walks_every_child_once(tmp_p
 
 
 def test_a_store_that_declares_no_children_is_read_as_having_none(tmp_path, monkeypatch):
-    """A child ao was never told how to find is no child, and the store is not asked anyway."""
+    """A child polyctl was never told how to find is no child, and the store is not asked anyway."""
     db, adapter = read_adapter(tmp_path, monkeypatch)
     add_session(db, "ses_sub", "ses_one", 90_000_000, "undeclared, so unseen")
     shape = A.transcript_shape(adapter)

@@ -2,7 +2,7 @@ import json
 import os
 import subprocess
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.test_profiles import _git_init, _init_args, _tree_state
 
 
@@ -14,7 +14,7 @@ def _files(root, tree, ext, n=6):
 
 def _gates(root, gates):
     json.dump({"gates": gates, "profiles": {"quick": list(gates)}},
-              open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8"))
+              open(os.path.join(root, ".polyctl", "gates.json"), "w", encoding="utf-8"))
 
 
 def test_the_doctor_names_a_tree_no_gate_exercises(project):
@@ -66,4 +66,4 @@ def test_init_refuses_quick_gates_that_exercise_nothing_unless_told(tmp_path, ca
     args = _init_args(profile=None, agent="kiro", no_mcp=True)
     args.allow_uncovered_gates = True
     assert cli.cmd_init({"root": str(root)}, args) == 0
-    assert os.path.exists(root / ".ao" / "gates.json")
+    assert os.path.exists(root / ".polyctl" / "gates.json")

@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from ao import lib as A
+from polyctl import lib as A
 
 
 def _git(root, *args):
@@ -31,7 +31,7 @@ def test_review_sees_the_inventory_and_not_the_coordination_noise(project):
 
 
 def test_helpers_are_not_writers(project, monkeypatch):
-    from ao import procs
+    from polyctl import procs
     root = project["root"]
     monkeypatch.setattr(
         A,
@@ -55,7 +55,7 @@ def test_scoped_prospective_review_refuses_staged_paths_outside_scope_before_rev
     import sys
     from types import SimpleNamespace
 
-    from ao import cli
+    from polyctl import cli
 
     root = project["root"]
     os.makedirs(os.path.join(root, "src"))

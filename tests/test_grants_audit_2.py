@@ -2,15 +2,15 @@
 
 A grant through `--trust-tools` names tools, not commands, and the audit read no rule from it: a grant
 that trusted Kiro's shell tool was reported as admitting nothing. A grant written into a launch other
-than the resume went unread. `ao commit -m ""` was told it had given both or neither of -m and -F, and
-the `-F` form behind the shipped `Bash(ao commit -F:*)` grant had no test that reached Git.
+than the resume went unread. `polyctl commit -m ""` was told it had given both or neither of -m and -F, and
+the `-F` form behind the shipped `Bash(polyctl commit -F:*)` grant had no test that reached Git.
 """
 import subprocess
 from types import SimpleNamespace
 
 import pytest
 
-from ao import allowlist as AL, cli, lib as A
+from polyctl import allowlist as AL, cli, lib as A
 
 EVERY_COMMAND = "trusts the shell tool, which runs every command"
 
@@ -56,7 +56,7 @@ def test_a_grant_written_into_another_launch_is_audited_too(project, monkeypatch
         in problems["actor-grant:implementer-send"]
 
 
-def test_ao_commit_hands_git_a_message_file_as_it_is(project, monkeypatch):
+def test_polyctl_commit_hands_git_a_message_file_as_it_is(project, monkeypatch):
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda argv, **kw: calls.append(argv) or SimpleNamespace(returncode=0))
     monkeypatch.setattr(cli, "cmd_commit_check", lambda cfg, args: 0)
@@ -67,6 +67,6 @@ def test_ao_commit_hands_git_a_message_file_as_it_is(project, monkeypatch):
 
 
 @pytest.mark.parametrize("message, file", [("", None), ("   ", None), (None, ""), (None, None)])
-def test_ao_commit_says_an_empty_message_is_empty(project, capsys, message, file):
+def test_polyctl_commit_says_an_empty_message_is_empty(project, capsys, message, file):
     assert cli.cmd_commit(project, SimpleNamespace(message=message, file=file)) == 2
-    assert "ao commit needs a message" in capsys.readouterr().out
+    assert "polyctl commit needs a message" in capsys.readouterr().out

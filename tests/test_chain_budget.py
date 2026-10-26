@@ -1,4 +1,4 @@
-from ao import cli
+from polyctl import cli
 
 
 def _fake_clock(monkeypatch, start=1000.0):

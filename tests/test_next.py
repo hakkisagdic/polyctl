@@ -1,17 +1,17 @@
-"""`ao next` names the command that stands in the way, and whose hand has it (NEXT).
+"""`polyctl next` names the command that stands in the way, and whose hand has it (NEXT).
 
-A project's state is spread over `.ao/board.md`, three chained ledgers, `~/.ao/review-requests`,
-Git's index and a harness configuration no person has read yet. `ao board` answers where an item is
-and `ao status` whether an agent is alive; neither answers which command, in what order, by whom -
+A project's state is spread over `.polyctl/board.md`, three chained ledgers, `~/.polyctl/review-requests`,
+Git's index and a harness configuration no person has read yet. `polyctl board` answers where an item is
+and `polyctl status` whether an agent is alive; neither answers which command, in what order, by whom -
 and that is where a landing chain stalls, because a person has to hold all of it in memory. So this
 reads the same stores the gate reads, through its readers, and pins what it answers:
 
-- the chain is named at its first open stage, and the stage is the one `ao commit-ok` refuses on: an
+- the chain is named at its first open stage, and the stage is the one `polyctl commit-ok` refuses on: an
   item is produced by the reader the grant uses, never by a parallel guess, and a drift test has
-  `ao commit-ok` itself refuse for the reason `ao next` named;
-- a person's item never runs: `ao next` writes nothing anywhere, not to a ledger, not to a request,
-  not a git ref, which is checked by hashing the project and `~/.ao` around every form of the command;
-- a request that binds bytes no longer staged is named without a command, because `ao collect-review`
+  `polyctl commit-ok` itself refuse for the reason `polyctl next` named;
+- a person's item never runs: `polyctl next` writes nothing anywhere, not to a ledger, not to a request,
+  not a git ref, which is checked by hashing the project and `~/.polyctl` around every form of the command;
+- a request that binds bytes no longer staged is named without a command, because `polyctl collect-review`
   refuses it and a person who typed the shown command would only meet that refusal;
 - a store that cannot be read is an item that says so, never an empty list, which would read as
   nothing waiting.
@@ -23,7 +23,7 @@ import subprocess
 
 import pytest
 
-from ao import cli, lib as A, mcp, matrix
+from polyctl import cli, lib as A, mcp, matrix
 
 
 def _git(root, *args):
@@ -46,9 +46,9 @@ def _stage(project, text="value = 2\n"):
 
 
 def _verification(project, candidate, **over):
-    """One passing verification of exactly these bytes, as `ao verify` records it."""
+    """One passing verification of exactly these bytes, as `polyctl verify` records it."""
     root = project["root"]
-    record = {"id": f"V-{len(os.listdir(os.path.join(root, '.ao', 'ledger')))}", "at": 1, "passed": True,
+    record = {"id": f"V-{len(os.listdir(os.path.join(root, '.polyctl', 'ledger')))}", "at": 1, "passed": True,
               "profile": "quick", "gates": [{"name": "tests", "passed": True}],
               "gates_digest": A.gate_definitions_digest(root, "quick"),
               "candidate": candidate, "candidate_ready": True, "candidate_issues": [],
@@ -89,7 +89,7 @@ def _grant(project, candidate, token="C-1", **over):
 
 
 def _pipeline(project):
-    """The implementer's items, as (kind, command): the chain `ao next` reads."""
+    """The implementer's items, as (kind, command): the chain `polyctl next` reads."""
     return [(item["kind"], item["command"]) for item in A.pipeline_items(project)]
 
 
@@ -123,7 +123,7 @@ def _digests(root):
 # ---- the chain ---------------------------------------------------------------------------------------------
 
 def test_an_empty_project_names_the_command_that_stages_something(project):
-    assert _pipeline(project) == [("no-candidate", "ao board ready")]
+    assert _pipeline(project) == [("no-candidate", "polyctl board ready")]
     assert cli.build_parser().parse_args(A.pipeline_items(project)[0]["command"].split()[1:]).view == "ready"
 
 
@@ -131,15 +131,15 @@ def test_a_staged_candidate_is_named_at_the_first_stage_that_does_not_hold(proje
     root = project["root"]
     candidate = _stage(project)
 
-    assert _pipeline(project) == [("no-verification", "ao verify")]
+    assert _pipeline(project) == [("no-verification", "polyctl verify")]
     _verification(project, candidate, passed=False, gates=[{"name": "tests", "passed": False}])
-    assert _pipeline(project) == [("gates-failed", "ao verify")]
+    assert _pipeline(project) == [("gates-failed", "polyctl verify")]
     _verification(project, candidate)
-    assert _pipeline(project) == [("no-review", "ao review")]
+    assert _pipeline(project) == [("no-review", "polyctl review")]
     _review(project, candidate)
-    assert _pipeline(project) == [("no-grant", "ao commit-ok")]
+    assert _pipeline(project) == [("no-grant", "polyctl commit-ok")]
     _grant(project, candidate)
-    assert _pipeline(project) == [("granted", 'ao commit -m "<message>"')]
+    assert _pipeline(project) == [("granted", 'polyctl commit -m "<message>"')]
 
 
 def test_a_stage_behind_an_open_one_is_not_listed(project):
@@ -150,7 +150,7 @@ def test_a_stage_behind_an_open_one_is_not_listed(project):
     _grant(project, candidate)
     assert len(_pipeline(project)) == 1
     _stage(project, text="value = 3\n")           # the index moved: only re-verifying is named
-    assert _pipeline(project) == [("verification-stale", "ao verify")]
+    assert _pipeline(project) == [("verification-stale", "polyctl verify")]
 
 
 def test_a_record_of_other_bytes_grants_nothing(project):
@@ -162,21 +162,21 @@ def test_a_record_of_other_bytes_grants_nothing(project):
     assert other["index_tree"] in item["why"] and candidate["index_tree"] in item["why"]
     _verification(project, candidate)
     _review(project, other)
-    assert _pipeline(project) == [("no-review", "ao review")]
+    assert _pipeline(project) == [("no-review", "polyctl review")]
 
 
 def test_a_review_that_is_not_an_approval_grants_nothing(project):
     candidate = _stage(project)
     _verification(project, candidate)
     _review(project, candidate, verdict="NEEDS_CHANGES")
-    assert _pipeline(project) == [("no-review", "ao review")]
+    assert _pipeline(project) == [("no-review", "polyctl review")]
 
 
 def test_a_review_that_cannot_be_authorized_grants_nothing(project):
     candidate = _stage(project)
     _verification(project, candidate)
     _review(project, candidate, authorizable=False)
-    assert _pipeline(project) == [("no-review", "ao review")]
+    assert _pipeline(project) == [("no-review", "polyctl review")]
 
 
 def test_a_review_file_rewritten_after_it_was_recorded_is_a_refusal(project):
@@ -189,16 +189,16 @@ def test_a_review_file_rewritten_after_it_was_recorded_is_a_refusal(project):
     assert A.pipeline_items(project)[0]["kind"] == "no-review"
 
 
-def test_a_granted_candidate_names_ao_commit_which_shipped_allowlists_admit(project):
+def test_a_granted_candidate_names_polyctl_commit_which_shipped_allowlists_admit(project):
     candidate = _stage(project)
     _verification(project, candidate)
     _review(project, candidate)
     _grant(project, candidate)
     item = A.pipeline_items(project)[0]
     assert item["kind"] == "granted"
-    assert item["command"] == 'ao commit -m "<message>"'
+    assert item["command"] == 'polyctl commit -m "<message>"'
     tools = A.turn_adapter("claude-code")["options"]["implementer_tools"]
-    assert "Bash(ao commit -m:*)" in tools and "Bash(git commit" not in tools
+    assert "Bash(polyctl commit -m:*)" in tools and "Bash(git commit" not in tools
 
 
 def test_a_grant_bound_to_other_bytes_is_named_as_stale(project):
@@ -206,7 +206,7 @@ def test_a_grant_bound_to_other_bytes_is_named_as_stale(project):
     _verification(project, candidate)
     _review(project, candidate)
     _grant(project, dict(candidate, digest="sha256:" + "1" * 64))
-    assert _pipeline(project) == [("grant-stale", "ao commit-ok")]
+    assert _pipeline(project) == [("grant-stale", "polyctl commit-ok")]
 
 
 def test_a_grant_bound_to_an_older_verification_of_the_same_bytes_is_named_as_stale(project, capsys):
@@ -219,14 +219,14 @@ def test_a_grant_bound_to_an_older_verification_of_the_same_bytes_is_named_as_st
     assert A.pipeline_items(project)[0]["kind"] == "granted"
     _verification(project, candidate, id="V-2")
     item = A.pipeline_items(project)[0]
-    assert item["kind"] == "grant-stale" and item["command"] == "ao commit-ok"
+    assert item["kind"] == "grant-stale" and item["command"] == "polyctl commit-ok"
     assert "V-2" in item["why"] and "V-1" in item["why"]
     assert cli.main(["-C", root, "commit-check"]) != 0
     assert item["why"] in capsys.readouterr().out
 
 
 def test_a_grant_whose_scope_no_longer_holds_the_candidate_is_named(project):
-    """A path staged after the grant sits outside its scope; the hook refuses, so `ao next` may not say commit."""
+    """A path staged after the grant sits outside its scope; the hook refuses, so `polyctl next` may not say commit."""
     root = project["root"]
     candidate = _stage(project)
     _verification(project, candidate)
@@ -250,7 +250,7 @@ def test_a_project_under_a_hold_is_named_for_the_person(project):
     _verification(project, candidate)
     _review(project, candidate)
     _grant(project, candidate)
-    os.makedirs(os.path.join(root, ".ao"), exist_ok=True)
+    os.makedirs(os.path.join(root, ".polyctl"), exist_ok=True)
     with open(os.path.join(root, A.HOLD_FILE), "w", encoding="utf-8") as fh:
         json.dump({"by": "fable", "reason": "a release is being cut"}, fh)
     items = A.pipeline_items(project)
@@ -268,7 +268,7 @@ def test_an_unreadable_ledger_is_an_item_that_says_so_never_an_empty_list(projec
 
 
 def test_the_isolation_reading_is_the_gate_s_own(project, capsys):
-    """`ao next` and `ao commit-ok` refuse a verification for the same reason, in the same words."""
+    """`polyctl next` and `polyctl commit-ok` refuse a verification for the same reason, in the same words."""
     root = project["root"]
     candidate = _stage(project)
     _verification(project, candidate, isolation_inputs=["something", "else"])
@@ -286,7 +286,7 @@ def test_a_harness_change_no_person_has_read_is_named_for_the_person(project):
     assert "harness-unseen" in kinds
     item = next(item for item in _items(project) if item["kind"] == "harness-unseen")
     assert item["who"] == A.PERSON
-    assert item["command"] == "ao harness seen --by <your name> --ask"
+    assert item["command"] == "polyctl harness seen --by <your name> --ask"
 
 
 def test_a_stand_in_request_waits_for_the_person_who_can_carry_it_back(project):
@@ -301,7 +301,7 @@ def test_a_stand_in_request_waits_for_the_person_who_can_carry_it_back(project):
 
 
 def test_a_request_bound_to_bytes_no_longer_staged_names_no_command(project):
-    """`ao collect-review` refuses it, so showing its command would only lead a person to that refusal."""
+    """`polyctl collect-review` refuses it, so showing its command would only lead a person to that refusal."""
     root = project["root"]
     candidate = _stage(project)
     A.write_review_request(root, project, candidate, A.candidate_scope(candidate),
@@ -347,7 +347,7 @@ def test_a_review_requests_directory_that_cannot_be_listed_is_named_as_unreadabl
 def test_urgent_unacknowledged_mail_is_named_with_the_command_that_reads_it(project, monkeypatch):
     monkeypatch.setattr(A, "urgent_messages", lambda root, cfg, role=None: [{"id": "M-1", "title": "release"}])
     item = next(item for item in _items(project) if item["kind"] == "mail-urgent")
-    assert item["who"] == A.PERSON and item["command"] == "ao mail ack M-1"
+    assert item["who"] == A.PERSON and item["command"] == "polyctl mail ack M-1"
 
 
 def test_urgent_mail_for_implementer_or_architect_is_named_and_acknowledged_with_mail_ack(project, capsys):
@@ -366,15 +366,15 @@ def test_urgent_mail_for_implementer_or_architect_is_named_and_acknowledged_with
     _grant(project, candidate)
 
     urgent_items = [item for item in A.person_items(project) if item["kind"] == "mail-urgent"]
-    assert [item["command"] for item in urgent_items] == [f"ao mail ack {to_impl}", f"ao mail ack {to_arch}"]
+    assert [item["command"] for item in urgent_items] == [f"polyctl mail ack {to_impl}", f"polyctl mail ack {to_arch}"]
     pipe_item = A.pipeline_items(project)[0]
-    assert pipe_item["kind"] == "mail-urgent" and pipe_item["command"] == f"ao mail ack {to_impl}"
+    assert pipe_item["kind"] == "mail-urgent" and pipe_item["command"] == f"polyctl mail ack {to_impl}"
     assert cli.main(["-C", root, "commit-check"]) != 0
     assert pipe_item["why"] in capsys.readouterr().out
 
     assert cli.main(["-C", root, "mail", "ack", to_arch]) == 0
     assert [item["command"] for item in A.person_items(project) if item["kind"] == "mail-urgent"] == [
-        f"ao mail ack {to_impl}"
+        f"polyctl mail ack {to_impl}"
     ]
     assert cli.main(["-C", root, "mail", "ack", to_impl]) == 0
     assert "mail-urgent" not in _kinds(project)
@@ -388,28 +388,28 @@ def test_an_open_proposal_names_its_question_and_the_answer_command_that_closes_
     item = next(item for item in _items(project) if item["kind"] == "proposal-open")
     assert recorded["question"] in item["why"]
     assert item["detail"] == recorded["question"]
-    assert item["command"] == f"ao answer {recorded['question']} a|b"
+    assert item["command"] == f"polyctl answer {recorded['question']} a|b"
     assert cli.main(["-C", root, "answer", recorded["question"], "a"]) == 0
     assert "proposal-open" not in _kinds(project)
 
 
 def test_a_slice_blocked_waiting_on_a_person_is_named(project):
     root = project["root"]
-    path = os.path.join(root, ".ao", "board.md")
+    path = os.path.join(root, ".polyctl", "board.md")
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(text.replace("## blocked\n", "## blocked\n\n- [S7] needs a key · waiting: human\n", 1))
     item = next(item for item in _items(project) if item["kind"] == "slice-waits-human")
-    assert item["slice"] == "S7" and item["command"] == "ao slice start S7"
+    assert item["slice"] == "S7" and item["command"] == "polyctl slice start S7"
     assert cli.main(["-C", root, "slice", "start", "S7"]) == 0
     assert "slice-waits-human" not in _kinds(project)
     assert [row["id"] for row in A.board(root)["running"]] == ["S7"]
 
 
 def _switch_review(project, on):
-    """The config's switch, written the way `ao features off review` writes it."""
-    path = os.path.join(project["root"], ".ao", "config.json")
+    """The config's switch, written the way `polyctl features off review` writes it."""
+    path = os.path.join(project["root"], ".polyctl", "config.json")
     with open(path, encoding="utf-8") as fh:
         cfg = json.load(fh)
     cfg["features"] = dict(cfg.get("features") or {}, review=on)
@@ -420,21 +420,21 @@ def _switch_review(project, on):
 
 def test_a_review_switched_off_without_a_person_s_record_is_named(project):
     """The config is a file the implementer can write, so review stays required until a person records it."""
-    from ao import features as F
+    from polyctl import features as F
     _switch_review(project, False)
     assert "review" in F.unrecorded(project)
     item = next(item for item in _items(project) if item["kind"] == "review-off-unrecorded")
-    assert item["who"] == A.PERSON and "ao features off review --by <your name>" in item["command"]
+    assert item["who"] == A.PERSON and "polyctl features off review --by <your name>" in item["command"]
 
 
 def test_a_review_switched_off_by_a_person_holds_no_item(project):
-    """A person recorded the switch, so review is off and `ao next` asks for no review either."""
+    """A person recorded the switch, so review is off and `polyctl next` asks for no review either."""
     root = project["root"]
     _switch_review(project, False)
     A.record_opt_in(root, "features.review", False, "alice")
     candidate = _stage(project)
     _verification(project, candidate)
-    assert _pipeline(project) == [("no-grant", "ao commit-ok")]
+    assert _pipeline(project) == [("no-grant", "polyctl commit-ok")]
     assert "review-off-unrecorded" not in _kinds(project)
 
 
@@ -442,7 +442,7 @@ def test_a_review_switched_off_by_a_person_holds_no_item(project):
 
 @pytest.mark.parametrize("flags", [[], ["--json"], ["--short"]])
 def test_no_form_of_the_command_writes_anywhere(project, capsys, monkeypatch, flags):
-    """Not a ledger row, not a request, not a git object or index extension, not a byte in ~/.ao or .ao/project-key."""
+    """Not a ledger row, not a request, not a git object or index extension, not a byte in ~/.polyctl or .polyctl/project-key."""
     root = project["root"]
     os.makedirs(os.path.join(root, "src"), exist_ok=True)
     path = os.path.join(root, "src", "a.py")
@@ -455,7 +455,7 @@ def test_no_form_of_the_command_writes_anywhere(project, capsys, monkeypatch, fl
     _git(root, "add", "src/a.py")
     home = A.HOME
     assert not os.path.exists(A.project_registry_path())
-    assert not os.path.exists(os.path.join(root, ".ao", A.PROJECT_KEY_FILE))
+    assert not os.path.exists(os.path.join(root, ".polyctl", A.PROJECT_KEY_FILE))
     monkeypatch.setattr(A, "urgent_messages", lambda *a, **k: [{"id": "M-1", "title": "release"}])
     before = (_digests(root), _digests(home))
     head_before = subprocess.run([A.git_binary(), "rev-parse", "HEAD"], cwd=root,
@@ -463,7 +463,7 @@ def test_no_form_of_the_command_writes_anywhere(project, capsys, monkeypatch, fl
 
     assert cli.main(["-C", root, "next", *flags]) == 0
     assert capsys.readouterr().out
-    mcp_items = mcp.call("ao_next", {}, dict(project, project=None), allow_verify=False, role="architect")["items"]
+    mcp_items = mcp.call("polyctl_next", {}, dict(project, project=None), allow_verify=False, role="architect")["items"]
     assert "no-verification" in [item["kind"] for item in mcp_items]
 
     assert (_digests(root), _digests(home)) == before
@@ -492,10 +492,10 @@ def test_person_items_leaves_the_process_environment_and_module_bindings_untouch
     assert seen_inside == [(env_before, key_fn, A.next_project_key(root))]
     assert dict(os.environ) == env_before and A.project_key is key_fn
     assert not os.path.exists(A.project_registry_path())
-    assert not os.path.exists(os.path.join(root, ".ao", A.PROJECT_KEY_FILE))
+    assert not os.path.exists(os.path.join(root, ".polyctl", A.PROJECT_KEY_FILE))
 
 
-def test_a_request_file_ao_cannot_read_is_named_never_dropped(project):
+def test_a_request_file_polyctl_cannot_read_is_named_never_dropped(project):
     """A request that stopped matching its own nonce answers nothing; silently skipping it would hide
     that a person's carried copy may be in there."""
     root = project["root"]
@@ -512,7 +512,7 @@ def test_a_request_file_ao_cannot_read_is_named_never_dropped(project):
 
 
 def test_a_grant_of_the_schema_the_mode_does_not_run_is_named(project):
-    """The hook refuses a matrix grant on a project that declares no matrix; `ao next` says so before a
+    """The hook refuses a matrix grant on a project that declares no matrix; `polyctl next` says so before a
     person is told to commit."""
     candidate = _stage(project)
     _verification(project, candidate)
@@ -526,7 +526,7 @@ def test_a_grant_of_the_schema_the_mode_does_not_run_is_named(project):
 def test_a_strict_project_is_not_told_to_commit_a_grant_without_a_matrix(project, monkeypatch):
     """The other half of the same rule: strict wants schema 3, and a schema-2 grant is the hook's refusal.
 
-    Strictness is patched rather than declared: `ao capability_matrix` contract is test_capability_matrix's
+    Strictness is patched rather than declared: `polyctl capability_matrix` contract is test_capability_matrix's
     to pin, and what matters here is only that the mirror reaches the schema rule the hook reads."""
     root = project["root"]
     candidate = _stage(project)
@@ -538,20 +538,20 @@ def test_a_strict_project_is_not_told_to_commit_a_grant_without_a_matrix(project
     monkeypatch.setattr(matrix, "resolve", lambda cfg, **over: {"digest": "sha256:" + "3" * 64})
     item = A.pipeline_items(project)[0]
     assert item["kind"] == "grant-stale" and "capability-matrix grant" in item["why"]
-    assert item["command"] == "ao commit-ok"
+    assert item["command"] == "polyctl commit-ok"
 
 
 def test_a_matrix_that_does_not_resolve_is_blamed_rather_than_the_grant(project):
     """A strict project whose declaration is broken refuses before any grant: the item says so (NEXT).
 
-    Written with the real resolver, no patch — this is the state where `ao next` would otherwise blame a
+    Written with the real resolver, no patch — this is the state where `polyctl next` would otherwise blame a
     schema-2 grant for a matrix that never resolved, and send an agent to a command that refuses it again."""
     root = project["root"]
     candidate = _stage(project)
     _verification(project, candidate)
     _review(project, candidate)
     _grant(project, candidate)
-    path = os.path.join(root, ".ao", "config.json")
+    path = os.path.join(root, ".polyctl", "config.json")
     with open(path, encoding="utf-8") as fh:
         cfg = json.load(fh)
     cfg["capability_matrix"] = {"product": ["src/**/*.py"]}
@@ -565,10 +565,10 @@ def test_a_matrix_that_does_not_resolve_is_blamed_rather_than_the_grant(project)
 
 
 def test_the_person_s_command_is_shown_and_never_run(project, capsys):
-    """`ao next` lists a person's command as text; the harness-change item names one it must not execute."""
+    """`polyctl next` lists a person's command as text; the harness-change item names one it must not execute."""
     root = project["root"]
     out = _run(project, capsys)
-    assert "ao harness seen --by <your name> --ask" in out
+    assert "polyctl harness seen --by <your name> --ask" in out
     assert A.harness_seen_record(root) is None
     assert "Nothing here was run or recorded" in out
 
@@ -596,14 +596,14 @@ def test_the_short_line_counts_actions_and_names_one_command(project, capsys, mo
     _review(project, candidate)
     _grant(project, candidate)
     lines = _run(project, capsys, "--short").splitlines()
-    assert lines[0] == '0 for you · 1 for the implementer · ao commit -m "<message>"'
+    assert lines[0] == '0 for you · 1 for the implementer · polyctl commit -m "<message>"'
     assert lines[1] == "---"
     assert lines[2] == "for the implementer (1)"
-    assert 'ao commit -m "<message>"' in lines[-1]
+    assert 'polyctl commit -m "<message>"' in lines[-1]
 
 
 def test_an_unactionable_person_item_is_counted_for_no_one(project, capsys, monkeypatch):
-    """A superseded request is listed by `ao next`; a menu bar counts only what asks for a hand."""
+    """A superseded request is listed by `polyctl next`; a menu bar counts only what asks for a hand."""
     root = project["root"]
     _nothing_waits_a_person(monkeypatch)
     candidate = _stage(project)
@@ -611,14 +611,14 @@ def test_an_unactionable_person_item_is_counted_for_no_one(project, capsys, monk
                            "sha256:" + "0" * 64, "product change", "S1", candidate["changed_paths"], "judge")
     _stage(project, text="value = 8\n")
     lines = _run(project, capsys, "--short").splitlines()
-    assert lines[0] == "0 for you · 1 for the implementer · ao verify"
+    assert lines[0] == "0 for you · 1 for the implementer · polyctl verify"
     assert lines[1] == "---"
     assert any("review-superseded" in line for line in lines[2:])
     assert "review-superseded" in _kinds(project)
 
 
 def test_short_renders_swiftbar_and_xbar_dropdown_with_command_text_only(project, capsys):
-    """`ao next --short` prints the menu bar line, `---`, and plain dropdown lines with no executable parameters."""
+    """`polyctl next --short` prints the menu bar line, `---`, and plain dropdown lines with no executable parameters."""
     root = project["root"]
     _stage(project)
     lines = _run(project, capsys, "--short").splitlines()
@@ -626,8 +626,8 @@ def test_short_renders_swiftbar_and_xbar_dropdown_with_command_text_only(project
     assert lines[1] == "---"
     assert "for you (1)" in lines[2:]
     assert "for the implementer (1)" in lines[2:]
-    assert any("ao harness seen --by <your name> --ask" in line for line in lines[2:])
-    assert any(line.strip() == "ao verify" for line in lines[2:])
+    assert any("polyctl harness seen --by <your name> --ask" in line for line in lines[2:])
+    assert any(line.strip() == "polyctl verify" for line in lines[2:])
     assert all("|" not in line for line in lines)
     assert all(not any(param in line for param in ("bash=", "shell=", "href=", "terminal=")) for line in lines)
     assert A.harness_seen_record(root) is None
@@ -647,7 +647,7 @@ def test_short_when_nothing_waits_and_disarms_swiftbar_pipe_parameters(project, 
         lambda root, cfg, role=None: [{"id": "M-1", "title": "Pick one | bash=/bin/sh terminal=false"}],
     )
     piped = _run(project, capsys, "--short").splitlines()
-    assert piped[0] == "1 for you · 0 for the implementer · ao mail ack M-1"
+    assert piped[0] == "1 for you · 0 for the implementer · polyctl mail ack M-1"
     assert piped[1] == "---"
     assert all("|" not in line for line in piped)
     assert any(r"\x7c bash=/bin/sh" in line for line in piped[2:])
@@ -666,7 +666,7 @@ def test_surfaces_install_and_uninstall_swiftbar_plugin(project, tmp_path, capsy
     assert plugin.is_file() and os.access(plugin, os.X_OK)
     body = plugin.read_text(encoding="utf-8")
     assert body.startswith("#!/bin/sh\n" + cli.SWIFTBAR_MARKER + "\n")
-    assert body.endswith('exec "$ao" -C "$root" next --short\n')
+    assert body.endswith('exec "$polyctl" -C "$root" next --short\n')
 
     ran = subprocess.run([str(plugin)], capture_output=True, text=True, check=True)
     ran_lines = ran.stdout.splitlines()
@@ -692,41 +692,41 @@ def test_surfaces_never_guesses_a_directory_and_refuses_a_foreign_file(project, 
     plugin_dir = tmp_path / "plugins"
     plugin_dir.mkdir()
     plugin = plugin_dir / cli.SWIFTBAR_PLUGIN
-    foreign = f"#!/bin/sh\n{cli.SWIFTBAR_MARKER}\necho not-ao\n"
+    foreign = f"#!/bin/sh\n{cli.SWIFTBAR_MARKER}\necho not-polyctl\n"
     plugin.write_text(foreign, encoding="utf-8")
 
     assert cli.main(["-C", root, "surfaces", "install", "swiftbar", "--dir", str(plugin_dir)]) == 1
     out = capsys.readouterr().out
-    assert "not ao's plugin file" in out
+    assert "not polyctl's plugin file" in out
     assert plugin.read_text(encoding="utf-8") == foreign
 
     assert cli.main(["-C", root, "surfaces", "uninstall", "swiftbar", "--dir", str(plugin_dir)]) == 1
     out = capsys.readouterr().out
-    assert "not ao's plugin file" in out
+    assert "not polyctl's plugin file" in out
     assert plugin.read_text(encoding="utf-8") == foreign
 
 
 def test_an_agent_s_grant_refuses_surfaces_install_and_admits_next_short():
-    from ao import allowlist as AL
+    from polyctl import allowlist as AL
     adapter = A.load_adapter("claude-code")
     grants = {
         "implementer": AL.rules(A.role_commands(adapter)["implementer"]),
         "architect": AL.rules(cli._architect_argv("claude-code")),
     }
     for role, rules in grants.items():
-        assert any(AL.admits(rule, "ao next --short") for rule in rules), role
-        assert not any(AL.admits(rule, "ao surfaces install swiftbar --dir x") for rule in rules), role
-        assert not any(AL.admits(rule, "ao surfaces uninstall swiftbar --dir x") for rule in rules), role
-    assert AL.problems(["claude", "--allowedTools", "Bash(ao next --short)"]) == []
+        assert any(AL.admits(rule, "polyctl next --short") for rule in rules), role
+        assert not any(AL.admits(rule, "polyctl surfaces install swiftbar --dir x") for rule in rules), role
+        assert not any(AL.admits(rule, "polyctl surfaces uninstall swiftbar --dir x") for rule in rules), role
+    assert AL.problems(["claude", "--allowedTools", "Bash(polyctl next --short)"]) == []
     for rule, expected in [
-        ("Bash(ao surfaces install swiftbar --dir x)", "installs a menu bar plugin"),
-        ("Bash(ao surfaces uninstall swiftbar --dir x)", "removes a menu bar plugin"),
-        ("Bash(ao surfaces --dir=x install swiftbar)", "installs a menu bar plugin"),
-        ("Bash(ao surfaces install swiftbar --di x)", "installs a menu bar plugin"),
-        ("Bash(ao surfaces uninstall swiftbar --d=x)", "removes a menu bar plugin"),
-        ("Bash(ao -C . surfaces install swiftbar --dir x)", "installs a menu bar plugin"),
-        ("Bash(ao surfaces install:*)", "installs a menu bar plugin"),
-        ("Bash(ao surfaces:*)", "installs a menu bar plugin"),
+        ("Bash(polyctl surfaces install swiftbar --dir x)", "installs a menu bar plugin"),
+        ("Bash(polyctl surfaces uninstall swiftbar --dir x)", "removes a menu bar plugin"),
+        ("Bash(polyctl surfaces --dir=x install swiftbar)", "installs a menu bar plugin"),
+        ("Bash(polyctl surfaces install swiftbar --di x)", "installs a menu bar plugin"),
+        ("Bash(polyctl surfaces uninstall swiftbar --d=x)", "removes a menu bar plugin"),
+        ("Bash(polyctl -C . surfaces install swiftbar --dir x)", "installs a menu bar plugin"),
+        ("Bash(polyctl surfaces install:*)", "installs a menu bar plugin"),
+        ("Bash(polyctl surfaces:*)", "installs a menu bar plugin"),
     ]:
         found = AL.problems(["claude", "--allowedTools", rule])
         assert found and found[0][0] == expected and found[0][2] == rule, (rule, found)
@@ -737,20 +737,20 @@ def test_an_agent_s_grant_refuses_surfaces_install_and_admits_next_short():
 def test_the_mcp_tool_answers_the_items_the_terminal_shows(project):
     candidate = _stage(project)
     _verification(project, candidate)
-    answer = mcp.call("ao_next", {}, project, allow_verify=False, role="architect")
+    answer = mcp.call("polyctl_next", {}, project, allow_verify=False, role="architect")
     assert answer["items"] == _items(project)
     assert answer["counts"]["implementer"] == 1
 
 
 def test_the_mcp_tool_narrows_to_one_actor(project):
-    answer = mcp.call("ao_next", {"who": "implementer"}, project, allow_verify=False, role="architect")
+    answer = mcp.call("polyctl_next", {"who": "implementer"}, project, allow_verify=False, role="architect")
     assert all(item["who"] == "implementer" for item in answer["items"])
-    assert mcp.call("ao_next", {"who": A.PERSON}, project, allow_verify=False,
+    assert mcp.call("polyctl_next", {"who": A.PERSON}, project, allow_verify=False,
                     role="architect")["items"]
 
 
-def test_a_reviewer_is_never_served_ao_next(project):
+def test_a_reviewer_is_never_served_polyctl_next(project):
     """It names a person's commands; a reviewer's server answers nothing that asks for one (MCP-ROLES)."""
-    assert "ao_next" in mcp.ROLE_TOOLS["implementer"] and "ao_next" not in mcp.ROLE_TOOLS["reviewer"]
-    answer = mcp.call("ao_next", {}, project, allow_verify=False, role="reviewer")
+    assert "polyctl_next" in mcp.ROLE_TOOLS["implementer"] and "polyctl_next" not in mcp.ROLE_TOOLS["reviewer"]
+    answer = mcp.call("polyctl_next", {}, project, allow_verify=False, role="reviewer")
     assert "error" in answer and answer.get("items") is None

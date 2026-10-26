@@ -2,9 +2,9 @@
 
 The MCP server served every agent every tool, so a reviewer that loaded it could file a report to
 the architect or acknowledge mail meant for the implementer. A server started with --role lists
-and runs that role's tools alone, and `ao init` writes the role into each harness's registration
+and runs that role's tools alone, and `polyctl init` writes the role into each harness's registration
 when the harnesses reading it hold one role between them. The server is driven here the way a
-client drives it - `ao mcp serve`, JSON-RPC lines on stdin, answers on stdout - so what is tested
+client drives it - `polyctl mcp serve`, JSON-RPC lines on stdin, answers on stdout - so what is tested
 is what an agent is listed and what it can call.
 """
 import io
@@ -17,17 +17,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, mcp, skillkit
+from polyctl import cli, lib as A, mcp, skillkit
 
 ROOT = Path(__file__).resolve().parent.parent
 
 # The spec's reviewer: it reads the project's status, the board and the candidate it judges.
-REVIEWER = {"ao_status", "ao_board", "ao_candidate"}
+REVIEWER = {"polyctl_status", "polyctl_board", "polyctl_candidate"}
 
 
 def _serve(monkeypatch, capsys, root, requests, *flags):
-    """Run `ao -C <root> mcp serve <flags>` over `requests`: ({id: answer}, what it wrote on stderr)."""
-    monkeypatch.setattr(sys, "argv", list(sys.argv))            # `ao mcp serve` rewrites it for the server
+    """Run `polyctl -C <root> mcp serve <flags>` over `requests`: ({id: answer}, what it wrote on stderr)."""
+    monkeypatch.setattr(sys, "argv", list(sys.argv))            # `polyctl mcp serve` rewrites it for the server
     monkeypatch.setattr(sys, "stdin", io.StringIO("".join(json.dumps(dict(request, jsonrpc="2.0")) + "\n"
                                                           for request in requests)))
     capsys.readouterr()
@@ -68,15 +68,15 @@ def _required(tool, message):
 
 def _playbook_mailbox_tools():
     """The tools the playbook's mailbox section, the implementer's, names on its Tools line."""
-    playbook = (ROOT / "src" / "ao" / "skill" / "SKILL.md").read_text(encoding="utf-8")
+    playbook = (ROOT / "src" / "polyctl" / "skill" / "SKILL.md").read_text(encoding="utf-8")
     section = re.search(r"^## 4\. .*?(?=^## )", playbook, re.M | re.S).group(0)
     line = re.search(r"^- Tools:.*?(?=^- )", section, re.M | re.S).group(0)
-    return set(re.findall(r"`(ao_[a-z_]+)", line))
+    return set(re.findall(r"`(polyctl_[a-z_]+)", line))
 
 
 def _configure(root, **blocks):
-    """Replace the fixture's role blocks with `blocks`, and keep the rest of .ao/config.json."""
-    path = Path(root, ".ao", "config.json")
+    """Replace the fixture's role blocks with `blocks`, and keep the rest of .polyctl/config.json."""
+    path = Path(root, ".polyctl", "config.json")
     cfg = {key: value for key, value in json.loads(path.read_text(encoding="utf-8")).items()
            if key not in A.ROLE_BLOCKS}
     path.write_text(json.dumps(dict(cfg, **blocks)), encoding="utf-8")
@@ -84,7 +84,7 @@ def _configure(root, **blocks):
 
 def _registered(root, relative):
     document = json.loads(Path(root, *relative.split("/")).read_text(encoding="utf-8"))
-    return document["mcpServers"]["ao"]["args"]
+    return document["mcpServers"]["polyctl"]["args"]
 
 
 def _git(root, *args):
@@ -94,7 +94,7 @@ def _git(root, *args):
 
 # ---- the server ------------------------------------------------------------------------------
 
-def test_every_role_ao_configures_has_a_tool_set_and_names_only_tools_the_server_has():
+def test_every_role_polyctl_configures_has_a_tool_set_and_names_only_tools_the_server_has():
     assert set(mcp.ROLE_TOOLS) == set(A.ROLE_BLOCKS)
     for role, names in mcp.ROLE_TOOLS.items():
         assert set(names) <= set(mcp.EVERY_TOOL), f"{role} names a tool the server does not register"
@@ -103,7 +103,7 @@ def test_every_role_ao_configures_has_a_tool_set_and_names_only_tools_the_server
 @pytest.mark.parametrize("role", sorted(mcp.ROLE_TOOLS))
 def test_each_role_is_listed_the_tools_its_playbook_uses_and_no_other(project, monkeypatch, capsys, role):
     expected = {"architect": set(mcp.EVERY_TOOL),                       # everything it had before roles
-                "implementer": _playbook_mailbox_tools() | {"ao_verify"},  # and the gate step of its loop
+                "implementer": _playbook_mailbox_tools() | {"polyctl_verify"},  # and the gate step of its loop
                 "reviewer": REVIEWER}[role]
 
     listed, err = _listed(monkeypatch, capsys, project["root"], "--role", role)
@@ -114,7 +114,7 @@ def test_each_role_is_listed_the_tools_its_playbook_uses_and_no_other(project, m
 
 def test_the_playbook_still_names_the_implementer_s_mailbox_tools():
     """The implementer's expectation is read from the playbook; an empty read would prove nothing."""
-    assert {"ao_inbox", "ao_ack", "ao_report", "ao_ask"} <= _playbook_mailbox_tools()
+    assert {"polyctl_inbox", "polyctl_ack", "polyctl_report", "polyctl_ask"} <= _playbook_mailbox_tools()
 
 
 def test_a_reviewer_is_refused_every_tool_outside_its_set_and_its_own_change_nothing(project, monkeypatch, capsys):
@@ -141,20 +141,20 @@ def test_a_reviewer_is_refused_every_tool_outside_its_set_and_its_own_change_not
 
 def test_the_reviewer_s_tools_are_the_ones_docs_mcp_classes_read():
     """docs/mcp.md's access classes are measured by tests/test_docs_names.py; the reviewer holds only reads."""
-    table = dict(re.findall(r"^\| `(ao_[a-z_]+)` \| (read|write|run) \|", (ROOT / "docs" / "mcp.md").read_text(
+    table = dict(re.findall(r"^\| `(polyctl_[a-z_]+)` \| (read|write|run) \|", (ROOT / "docs" / "mcp.md").read_text(
         encoding="utf-8"), re.M))
     assert set(table) == set(mcp.EVERY_TOOL)
     assert {table[name] for name in REVIEWER} == {"read"}
 
 
-def test_urgent_mail_rides_along_where_ao_inbox_is_served(project, monkeypatch, capsys):
+def test_urgent_mail_rides_along_where_polyctl_inbox_is_served(project, monkeypatch, capsys):
     root = project["root"]
     implementer, architect = A.mail_names(project)
     Path(root, "agent-mail", f"20260926-0900-{architect}-to-{implementer}-DECISION-stop.md").write_text(
         "# stop\n\n## URGENT\n\nStop and read this.\n", encoding="utf-8")
 
-    as_implementer = _called(monkeypatch, capsys, root, [("ao_board", {})], "--role", "implementer")["ao_board"]
-    as_reviewer = _called(monkeypatch, capsys, root, [("ao_board", {})], "--role", "reviewer")["ao_board"]
+    as_implementer = _called(monkeypatch, capsys, root, [("polyctl_board", {})], "--role", "implementer")["polyctl_board"]
+    as_reviewer = _called(monkeypatch, capsys, root, [("polyctl_board", {})], "--role", "reviewer")["polyctl_board"]
 
     assert [message["title"] for message in as_implementer["URGENT_UNACKNOWLEDGED"]] == ["stop"]
     assert "URGENT_UNACKNOWLEDGED" not in as_reviewer and "URGENT_NOTE" not in as_reviewer
@@ -166,7 +166,7 @@ def test_no_role_is_served_every_tool_and_says_so(project, monkeypatch, capsys):
 
     assert listed == list(mcp.EVERY_TOOL)
     notice = [line for line in err.splitlines() if "every tool is served" in line]
-    assert len(notice) == 1 and notice[0].startswith("ao mcp: ")
+    assert len(notice) == 1 and notice[0].startswith("polyctl mcp: ")
 
 
 def test_a_role_written_in_other_case_is_still_that_role(project, monkeypatch, capsys):
@@ -185,17 +185,17 @@ def test_the_candidate_is_the_staged_one_and_carries_what_a_review_judges_it_aga
     Path(root, "tests", "test_calc.py").write_text("from calc import add\n\n\ndef test_add():\n"
                                                    "    assert add(1, 2) == 3\n", encoding="utf-8")
     _git(root, "add", "tests/test_calc.py")
-    board = Path(root, ".ao", "board.md")
+    board = Path(root, ".polyctl", "board.md")
     board.write_text(board.read_text(encoding="utf-8").replace(
         "## running\n", "## running\n- [S1] the adder · acceptance: add returns the sum\n"), encoding="utf-8")
 
-    payload = _called(monkeypatch, capsys, root, [("ao_candidate", {})], "--role", "reviewer")["ao_candidate"]
+    payload = _called(monkeypatch, capsys, root, [("polyctl_candidate", {})], "--role", "reviewer")["polyctl_candidate"]
 
     staged = A.index_candidate(root)
     assert (payload["slice"], payload["boundary"]) == ("S1", "add returns the sum")
     assert payload["candidate"] == {key: staged[key] for key in ("digest", "head", "index_tree", "changed_paths")}
     assert payload["candidate"]["changed_paths"] == ["tests/test_calc.py"]
-    # A test-only candidate is judged against the committed source it runs (#97), as `ao review` hands it.
+    # A test-only candidate is judged against the committed source it runs (#97), as `polyctl review` hands it.
     assert payload["context"]["paths"] == ["src/calc.py"] and "def add(a, b):" in payload["context"]["text"]
     assert set(payload) == {"slice", "title", "boundary", "candidate", "context"}      # and no diff
 
@@ -206,7 +206,7 @@ def test_a_candidate_that_cannot_be_measured_is_said_to_be_so(project, monkeypat
 
     monkeypatch.setattr(A, "index_candidate", unmeasurable)
 
-    payload = mcp.call("ao_candidate", {}, project, False, "reviewer")
+    payload = mcp.call("polyctl_candidate", {}, project, False, "reviewer")
 
     assert payload["candidate"] is None and payload["context"] is None
     assert payload["problem"] == "the staged candidate cannot be measured: no index"
@@ -219,7 +219,7 @@ def test_init_registers_each_harness_with_the_one_role_its_readers_hold(project,
     monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)  # a harness's CLI is never run
 
     # The fixture: kiro implements, and the architect runs `claude`; nothing reviews.
-    assert skillkit.register_mcp(root, {"claude-code", "kiro"}, exe="/x/ao") == {"claude-code": "registered",
+    assert skillkit.register_mcp(root, {"claude-code", "kiro"}, exe="/x/polyctl") == {"claude-code": "registered",
                                                                                  "kiro": "registered"}
 
     assert _registered(root, ".mcp.json") == ["-C", root, "mcp", "serve", "--role", "architect"]
@@ -242,26 +242,26 @@ def test_a_registration_read_by_two_roles_or_none_names_no_role(project, monkeyp
     monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
     _configure(root, **blocks)
 
-    assert skillkit.register_mcp(root, {"claude-code"}, exe="/x/ao") == {"claude-code": "registered"}
+    assert skillkit.register_mcp(root, {"claude-code"}, exe="/x/polyctl") == {"claude-code": "registered"}
 
     assert _registered(root, ".mcp.json") == ["-C", root, "mcp", "serve"]
 
 
 def test_the_default_profile_registers_its_implementer_and_leaves_the_two_role_harness_unnamed(project, monkeypatch):
-    """What docs/mcp.md says of the profiles, from the role blocks `ao init --profile` composes."""
+    """What docs/mcp.md says of the profiles, from the role blocks `polyctl init --profile` composes."""
     root = project["root"]
     monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
     assert A.default_profile() == "agy-codex"
     planned, _ = cli._profile_config(root, SimpleNamespace(profile=A.default_profile()), {"project": "proj"})
-    Path(root, ".ao", "config.json").write_text(json.dumps(planned), encoding="utf-8")
+    Path(root, ".polyctl", "config.json").write_text(json.dumps(planned), encoding="utf-8")
 
-    skillkit.register_mcp(root, {"claude-code"}, exe="/x/ao")
+    skillkit.register_mcp(root, {"claude-code"}, exe="/x/polyctl")
 
     assert _registered(root, ".mcp.json") == ["-C", root, "mcp", "serve", "--role", "architect"]
 
     planned, _ = cli._profile_config(root, SimpleNamespace(profile="claude-codex"), {"project": "proj"})
-    Path(root, ".ao", "config.json").write_text(json.dumps(planned), encoding="utf-8")
-    skillkit.register_mcp(root, {"claude-code"}, exe="/x/ao")
+    Path(root, ".polyctl", "config.json").write_text(json.dumps(planned), encoding="utf-8")
+    skillkit.register_mcp(root, {"claude-code"}, exe="/x/polyctl")
 
     assert _registered(root, ".mcp.json") == ["-C", root, "mcp", "serve"]           # implementer and architect
 
@@ -269,19 +269,19 @@ def test_the_default_profile_registers_its_implementer_and_leaves_the_two_role_h
 def test_a_role_reassigned_reaches_the_registration_when_init_registers_again(project, monkeypatch):
     root = project["root"]
     monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
-    skillkit.register_mcp(root, {"kiro"}, exe="/x/ao")
+    skillkit.register_mcp(root, {"kiro"}, exe="/x/polyctl")
     _configure(root, architect={"adapter": "kiro"})
 
-    assert skillkit.register_mcp(root, {"kiro"}, exe="/x/ao") == {"kiro": "registered"}
+    assert skillkit.register_mcp(root, {"kiro"}, exe="/x/polyctl") == {"kiro": "registered"}
     assert _registered(root, ".kiro/settings/mcp.json") == ["-C", root, "mcp", "serve", "--role", "architect"]
-    assert skillkit.register_mcp(root, {"kiro"}, exe="/x/ao") == {"kiro": "kept"}
+    assert skillkit.register_mcp(root, {"kiro"}, exe="/x/polyctl") == {"kiro": "kept"}
 
 
 def test_a_manual_snippet_carries_the_role_escaped_as_its_root_is(project, monkeypatch):
     root = project["root"]
     monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
     _configure(root, implementer={"adapter": "codex"})
-    exe = "/x/{args}/ao"                                   # filled once: a value is never filled again
+    exe = "/x/{args}/polyctl"                                   # filled once: a value is never filled again
 
     snippet = skillkit.register_mcp(root, {"codex"}, exe=exe)["codex"].split("\n", 1)[1]
 
@@ -289,19 +289,19 @@ def test_a_manual_snippet_carries_the_role_escaped_as_its_root_is(project, monke
     assert f'command = "{body(exe)}"' in snippet
     assert f'args = ["-C", "{body(root)}", "mcp", "serve", "--role", "implementer"]' in snippet
     tomllib = pytest.importorskip("tomllib", reason="the TOML reader ships with Python 3.11")
-    assert tomllib.loads(snippet)["mcp_servers"]["ao"] == {
+    assert tomllib.loads(snippet)["mcp_servers"]["polyctl"] == {
         "command": exe, "args": ["-C", root, "mcp", "serve", "--role", "implementer"]}
 
 
-def test_ao_mcp_config_prints_the_role_among_the_server_s_arguments(project, capsys, monkeypatch):
+def test_polyctl_mcp_config_prints_the_role_among_the_server_s_arguments(project, capsys, monkeypatch):
     root = project["root"]
-    monkeypatch.setattr(A, "ao_program", lambda: "/opt/ao/bin/ao")
+    monkeypatch.setattr(A, "polyctl_program", lambda: "/opt/polyctl/bin/polyctl")
 
     assert cli.main(["-C", root, "mcp", "config", "--role", "reviewer"]) == 0
 
     out = capsys.readouterr().out
-    server = json.loads(out[out.index("{"):])["mcpServers"]["agent-orchestrator"]
-    assert server["command"] == "/opt/ao/bin/ao"
+    server = json.loads(out[out.index("{"):])["mcpServers"]["polyctl"]
+    assert server["command"] == "/opt/polyctl/bin/polyctl"
     assert server["args"] == ["-C", root, "mcp", "serve", "--role", "reviewer"]
 
 
@@ -311,7 +311,7 @@ def test_docs_mcp_lists_each_role_with_the_tools_it_is_served():
 
     assert set(rows) == set(mcp.ROLE_TOOLS)
     for role, cell in rows.items():
-        named = set(re.findall(r"`(ao_[a-z_]+)`", cell)) or set(mcp.EVERY_TOOL)   # "every tool"
+        named = set(re.findall(r"`(polyctl_[a-z_]+)`", cell)) or set(mcp.EVERY_TOOL)   # "every tool"
         assert named == set(mcp.ROLE_TOOLS[role]), role
 
 
@@ -336,18 +336,18 @@ def test_server_discover_answers_with_supported_versions_capabilities_and_server
             "resultType": "complete",
             "supportedVersions": ["2026-07-28", "2025-06-18"],
             "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
-            "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "agent-orchestrator", "version": mcp.__version__}},
+            "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "polyctl", "version": mcp.__version__}},
         },
     }
 
 
 def test_each_kept_protocol_version_works_on_requests_and_older_clients_keep_working(
         project, monkeypatch, capsys):
-    server_meta = {"io.modelcontextprotocol/serverInfo": {"name": "agent-orchestrator", "version": mcp.__version__}}
+    server_meta = {"io.modelcontextprotocol/serverInfo": {"name": "polyctl", "version": mcp.__version__}}
     requests = [
         {"id": 1, "method": "tools/list", "params": {"_meta": _meta("2026-07-28")}},
         {"id": 2, "method": "tools/call",
-         "params": {"name": "ao_board", "arguments": {}, "_meta": _meta("2026-07-28",
+         "params": {"name": "polyctl_board", "arguments": {}, "_meta": _meta("2026-07-28",
                                                                         **{"io.modelcontextprotocol/logLevel": "info"})}},
         {"id": 3, "method": "ping", "params": {"_meta": _meta("2026-07-28")}},
         {"id": 4, "method": "tools/list", "params": {"_meta": _meta("2025-06-18")}},
@@ -371,7 +371,7 @@ def test_each_kept_protocol_version_works_on_requests_and_older_clients_keep_wor
     assert answers[5]["result"] == {}
     assert answers[6]["result"] == {"protocolVersion": "2025-06-18",
                                     "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
-                                    "serverInfo": {"name": "agent-orchestrator", "version": mcp.__version__}}
+                                    "serverInfo": {"name": "polyctl", "version": mcp.__version__}}
     assert [tool["name"] for tool in answers[7]["result"]["tools"]] == sorted(REVIEWER, key=mcp.EVERY_TOOL.index)
     assert answers[8]["result"] == {}
 

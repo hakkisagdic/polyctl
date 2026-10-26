@@ -1,7 +1,7 @@
-"""`ao harness probe` asks each harness that speaks ACP what it supports, and sends no prompt (ACP-PROBE).
+"""`polyctl harness probe` asks each harness that speaks ACP what it supports, and sends no prompt (ACP-PROBE).
 
 Nothing here starts a real harness: a fake agent speaks the protocol - one JSON-RPC message a line on its
-standard streams - records every method it is asked, and answers as the file AO_TEST_AGENT names tells it to.
+standard streams - records every method it is asked, and answers as the file POLYCTL_TEST_AGENT names tells it to.
 """
 import json
 import os
@@ -10,13 +10,13 @@ import time
 
 import pytest
 
-from ao import acp, cli, lib as A
+from polyctl import acp, cli, lib as A
 
 AGENT = """
 import json, os, sys, time
-script = json.load(open(os.environ["AO_TEST_AGENT"], encoding="utf-8"))
-asked = os.environ["AO_TEST_ASKED"]
-open(os.environ["AO_TEST_PID"], "w").write(str(os.getpid()))
+script = json.load(open(os.environ["POLYCTL_TEST_AGENT"], encoding="utf-8"))
+asked = os.environ["POLYCTL_TEST_ASKED"]
+open(os.environ["POLYCTL_TEST_PID"], "w").write(str(os.getpid()))
 for line in script.get("noise", []):
     print(line, flush=True)
 for raw in sys.stdin:
@@ -63,9 +63,9 @@ def agent(tmp_path, monkeypatch):
     """(argv, asked, write): the fake agent's command, the methods it was asked, and how to script it."""
     script = tmp_path / "agent.json"
     asked = tmp_path / "asked.jsonl"
-    monkeypatch.setenv("AO_TEST_AGENT", str(script))
-    monkeypatch.setenv("AO_TEST_ASKED", str(asked))
-    monkeypatch.setenv("AO_TEST_PID", str(tmp_path / "agent.pid"))
+    monkeypatch.setenv("POLYCTL_TEST_AGENT", str(script))
+    monkeypatch.setenv("POLYCTL_TEST_ASKED", str(asked))
+    monkeypatch.setenv("POLYCTL_TEST_PID", str(tmp_path / "agent.pid"))
 
     def write(**how):
         script.write_text(json.dumps(dict({"initialize": INITIALIZE}, **how)), encoding="utf-8")
@@ -115,7 +115,7 @@ def test_what_the_agent_asks_back_is_answered_and_noise_is_passed_over(agent, tm
 
     rows = [json.loads(line) for line in (tmp_path / "asked.jsonl").read_text(encoding="utf-8").splitlines()]
     assert {"jsonrpc": "2.0", "id": "agent-1",
-            "error": {"code": acp.METHOD_NOT_FOUND, "message": "ao's probe answers no requests"}} in rows
+            "error": {"code": acp.METHOD_NOT_FOUND, "message": "polyctl's probe answers no requests"}} in rows
 
 
 def test_an_agent_that_does_not_answer_is_said_not_to_and_is_stopped(agent, tmp_path):
@@ -145,7 +145,7 @@ def test_a_command_that_cannot_start_is_said_not_to(tmp_path):
         acp.probe([str(tmp_path / "no-such-agent")], str(tmp_path), timeout=5)
 
 
-# ---- ao harness probe ---------------------------------------------------------------------------
+# ---- polyctl harness probe ---------------------------------------------------------------------------
 
 def _declared(adapter_id, argv, measured="fake 1.0 answered initialize, 2026-09-28"):
     return {"id": adapter_id, "name": adapter_id, "verified": "untested", "contract": A.ADAPTER_CONTRACT,
@@ -182,16 +182,16 @@ def test_the_command_keeps_each_answer_in_the_machines_harness_profiles(project,
     profile = json.loads(open(cli.harness_profile_path("fake"), encoding="utf-8").read())
     assert profile["argv"] == argv and profile["binary"] == sys.executable and profile["sessions"] == 2
     assert profile["session"] == ["list", "resume"] and isinstance(profile["measured_at"], int)
-    assert cli.harness_profile_path("fake").startswith(os.path.join(A.HOME, ".ao", "harness"))
+    assert cli.harness_profile_path("fake").startswith(os.path.join(A.HOME, ".polyctl", "harness"))
     assert methods() == ["initialize", "session/list"]
 
 
 def test_a_harness_that_is_not_installed_is_said_to_be_and_nothing_is_kept(project, capsys, monkeypatch):
-    _adapter(monkeypatch, "absent", ["ao-test-no-such-harness", "acp"])
+    _adapter(monkeypatch, "absent", ["polyctl-test-no-such-harness", "acp"])
 
     assert _probe(project, "absent") == 0
 
-    assert "absent       not installed: ao-test-no-such-harness is on no path ao searches" in capsys.readouterr().out
+    assert "absent       not installed: polyctl-test-no-such-harness is on no path polyctl searches" in capsys.readouterr().out
     assert not os.path.exists(cli.harness_profile_path("absent"))
 
 
@@ -213,24 +213,24 @@ def test_an_adapter_without_an_acp_command_or_unknown_is_refused(project, capsys
 
 def test_an_acp_command_a_user_s_or_a_project_s_layer_declares_is_never_started(project, tmp_path, capsys,
                                                                               monkeypatch):
-    """A layer is a file an agent writes: an adapter of its own, or another command for one ao ships, would start a
+    """A layer is a file an agent writes: an adapter of its own, or another command for one polyctl ships, would start a
     program the agent chose when a person probes (PROBE-SHIPPED)."""
     marker = tmp_path / "started"
     chosen = [sys.executable, "-c", f"open({str(marker)!r}, 'w').close()"]
-    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user"))
-    _layer(os.path.join(project["root"], ".ao", "adapters"), "planted", chosen)
+    monkeypatch.setenv("POLYCTL_USER_ADAPTERS", str(tmp_path / "user"))
+    _layer(os.path.join(project["root"], ".polyctl", "adapters"), "planted", chosen)
     _layer(str(tmp_path / "user"), "kiro", chosen)
-    with open(os.path.join(project["root"], ".ao", "adapters", "dressed.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(project["root"], ".polyctl", "adapters", "dressed.json"), "w", encoding="utf-8") as fh:
         json.dump(dict(_declared("dressed\x1b[2J", chosen)), fh)
 
     assert _probe(project, "planted") == 2
-    assert "not started: ao ships no adapter planted" in capsys.readouterr().out
+    assert "not started: polyctl ships no adapter planted" in capsys.readouterr().out
 
     assert _probe(project) == 0
     out = capsys.readouterr().out
     assert "Not started: the ACP command a user's or a project's layer declares for dressed\\x1b[2J, kiro, planted" in out
     assert "\x1b" not in out
-    assert "kiro         not installed: kiro-cli is on no path ao searches" in out
+    assert "kiro         not installed: kiro-cli is on no path polyctl searches" in out
 
     assert _probe(project, "kiro") == 0
     assert "layer declares for kiro;" in capsys.readouterr().out

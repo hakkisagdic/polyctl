@@ -12,9 +12,9 @@ import os
 
 import pytest
 
-from ao import cli, lib as A, procs
+from polyctl import cli, lib as A, procs
 
-LANE_OF_ANOTHER_CHECKOUT = "a lane another checkout started: `ao lane remove` there retires it"
+LANE_OF_ANOTHER_CHECKOUT = "a lane another checkout started: `polyctl lane remove` there retires it"
 
 
 def test_windows_keeps_its_own_backend_whatever_its_first_reading_gave(monkeypatch):
@@ -41,12 +41,12 @@ def test_a_snapshot_that_lists_no_process_is_not_kept(monkeypatch):
 
 
 def test_a_file_in_the_home_is_named_with_slashes_on_windows_too(monkeypatch):
-    monkeypatch.setattr(A, "HOME", "D:\\ao-home")
+    monkeypatch.setattr(A, "HOME", "D:\\polyctl-home")
     with monkeypatch.context() as patch:
         patch.setattr(os, "sep", "\\")
-        shown = cli._home_relative("D:\\ao-home\\.ao\\nudge-acme-api.log")
+        shown = cli._home_relative("D:\\polyctl-home\\.polyctl\\nudge-acme-api.log")
 
-    assert shown == "~/.ao/nudge-acme-api.log"
+    assert shown == "~/.polyctl/nudge-acme-api.log"
 
 
 def test_a_lane_another_checkout_started_is_known_where_paths_are_compared_case_folded(tmp_path, monkeypatch):

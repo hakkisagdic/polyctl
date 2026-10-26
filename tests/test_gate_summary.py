@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from ao import cli, lib as A
+from polyctl import cli, lib as A
 from tests.standin import program
 
 

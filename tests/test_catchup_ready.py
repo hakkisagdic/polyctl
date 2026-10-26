@@ -1,7 +1,7 @@
 """Catch-up is ready for the reviews the owner deferred (CATCHUP-READY).
 
 A waived range is reviewed by a model family other than the one that wrote it,
-whoever is configured to implement by then; a family ao did not record waits for a
+whoever is configured to implement by then; a family polyctl did not record waits for a
 person to name it, on the record; a run can be previewed and bounded; and the
 decision request it leaves is English and addressed to a role.
 """
@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, matrix as M, storage, watchdog as W
+from polyctl import cli, lib as A, matrix as M, storage, watchdog as W
 from tests.test_capability_matrix import _strict_config
 from tests.test_review_chain import _fake
 from tests.test_switches_and_bypass import _allow_candidate_verification
@@ -41,7 +41,7 @@ def _land(root, name, text, message):
 
 
 def _configure(root, cfg):
-    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(root, ".polyctl", "config.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value for key, value in cfg.items() if key != "root"}, fh)
     return A.load_config(root)
 
@@ -88,14 +88,14 @@ def _marking(marker, *lines):
 
 def test_a_reviewer_of_the_architects_family_is_refused_for_the_range_it_landed_with_no_implementer(
         project, monkeypatch, capsys, tmp_path):
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     root = project["root"]
     _land(root, "a.py", "value = 1\n", "base")
     architect = {"name": "lead", "family": "writer-family", "argv": ["architect-cli", "-p", "{prompt}"]}
     cfg = _configure(root, dict({key: value for key, value in project.items() if key != "implementer"},
                                 architect=architect))
     assert "implementer" not in cfg
-    board = os.path.join(root, ".ao", "board.md")
+    board = os.path.join(root, ".polyctl", "board.md")
     text = open(board, encoding="utf-8").read()
     open(board, "w", encoding="utf-8").write(text.replace("## running\n", "## running\n- [B7] slice · since: 2026-09-15 10:00\n"))
     with open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8") as fh:
@@ -104,9 +104,9 @@ def test_a_reviewer_of_the_architects_family_is_refused_for_the_range_it_landed_
     _allow_candidate_verification(monkeypatch, A.index_candidate(root))
     waiver = A.waive(root, "review", "B7", "the implementer is out of credits", by="A. Person")
 
-    monkeypatch.setenv("AO_ROLE", "architect")          # a turn ao started for the architect lands it
+    monkeypatch.setenv("POLYCTL_ROLE", "architect")          # a turn polyctl started for the architect lands it
     assert cli.cmd_commit_ok(cfg, SimpleNamespace(verify=False, profile=None)) == 0
-    monkeypatch.delenv("AO_ROLE")
+    monkeypatch.delenv("POLYCTL_ROLE")
     grant = A.latest_authority_decision(root)
     assert grant["waiver"] == waiver["id"]
     assert grant["author"] == {"role": "architect", "actor": "lead", "adapter": None, "family": "writer-family"}
@@ -204,14 +204,14 @@ def test_plan_lists_each_waiver_its_range_and_size_and_writes_nothing(project, m
                          (W, "run")):
         monkeypatch.setattr(target, name, written)
     A.open_waivers(root)                          # every reader takes the ledger's lock file first
-    before = _snapshot(root, A.HOME, os.path.dirname(os.environ["AO_LEDGER_CHECKPOINTS"]))
+    before = _snapshot(root, A.HOME, os.path.dirname(os.environ["POLYCTL_LEDGER_CHECKPOINTS"]))
 
     assert _catchup(cfg, plan=True) == 0
     unnamed = capsys.readouterr().out
     assert _catchup(cfg, plan=True, **PERSON) == 0
     out = capsys.readouterr().out
 
-    assert _snapshot(root, A.HOME, os.path.dirname(os.environ["AO_LEDGER_CHECKPOINTS"])) == before
+    assert _snapshot(root, A.HOME, os.path.dirname(os.environ["POLYCTL_LEDGER_CHECKPOINTS"])) == before
     assert f"{first['id']} (B7): {first['head'][:12]}..{second['head'][:12]}, 1 commit(s), 3 changed line(s)" in out
     assert f"{second['id']} (B8): {second['head'][:12]}..{head[:12]}, 1 commit(s), 1 changed line(s)" in out
     assert "totals: 2 waiver(s); 2 review(s) of 2 commit(s) and 4 changed line(s); 0 refused" in out
@@ -253,7 +253,7 @@ def test_limit_starts_at_most_that_many_reviews_and_slice_takes_one_slices_waive
 
 
 def test_the_needs_changes_request_is_english_and_addressed_to_the_architect_role(project, monkeypatch, capsys):
-    monkeypatch.delenv("AO_ROLE", raising=False)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     root = project["root"]
     cfg = _configure(root, dict(project, architect=dict(project["architect"], name="lead")))
     _land(root, "a.py", "value = 1\n", "base")

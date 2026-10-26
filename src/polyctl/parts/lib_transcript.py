@@ -1,0 +1,4118 @@
+"""Sessions and transcripts: discovery, stores, progress and anomalies read from a transcript.
+
+A part of src/polyctl/lib.py (#44): moved out byte for byte and run in its namespace by `_part`,
+where it stood; it is not importable on its own.
+"""
+
+
+# ── session discovery ─────────────────────────────────────────────────────────
+
+_PACKAGE_ADAPTERS = {}
+
+
+def package_adapters():
+    """{id: adapter} for the adapters in the package alone (#76).
+
+    Whatever decides authority - which directories are coordination rather than
+    product, which processes are agents - reads only these. A user's or a project's
+    adapter layer is writable by the agents it describes, and must not be able to
+    move a product path out of review by declaring it a harness's directory. Read
+    once per state of the directory: a path check runs this for every changed path.
+    """
+    directory = adapters_dir()
+    try:
+        key = (directory, os.stat(directory).st_mtime_ns)
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return {}
+    if key in _PACKAGE_ADAPTERS:
+        return _PACKAGE_ADAPTERS[key]
+    found = {}
+    for name in names:
+        if not name.endswith(".json") or name in DATA_FILES:
+            continue
+        try:
+            with open(os.path.join(directory, name), encoding=UTF8) as fh:
+                adapter = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(adapter, dict):
+            found[str(adapter.get("id") or name[:-5])] = adapter
+    _PACKAGE_ADAPTERS.clear()
+    _PACKAGE_ADAPTERS[key] = found
+    return found
+
+
+def _home_path(template):
+    """A declared path with a leading ~ resolved against polyctl's HOME, so every reader of it agrees."""
+    text = str(template or "")
+    if text == "~":
+        return HOME
+    if text.startswith("~/"):
+        return os.path.join(HOME, *text[2:].split("/"))
+    return text
+
+
+# The kinds of session store this polyctl knows how to reach. An adapter that names none of them has no
+# transcript polyctl can resolve, whatever its records look like once they are in hand, which is why a
+# conformance report says "declared" for one rather than "read".
+SESSION_STORE_KINDS = ("escaped-cwd", "workspace-meta", "sqlite-sessions")
+
+
+def _read_only_uri(path):
+    """A `file:` URI for a SQLite store opened read-only, built in one place because a raw path breaks it.
+
+    Interpolating a path into `file:{path}?mode=ro` reads a `?`, `#` or `%` in a directory name as URI
+    syntax of its own, and the store then opens as something other than the file the adapter named, or
+    not at all. `pathname2url` percent-encodes each of those and writes a Windows drive path as the
+    `///C:/...` a file URI takes, so the query that follows is the only `?` in the string.
+
+    A UNC store keeps an empty authority: it converts to `//server/share/...`, and a URI that made the
+    server its authority is one SQLite refuses, so the prefix is chosen to leave the authority empty
+    and the path whole in both shapes. The adapter's own path is what is opened; a symlink is not
+    resolved away, because what a store is named is the store's to say.
+    """
+    import urllib.request
+    url = urllib.request.pathname2url(os.path.abspath(str(path)))
+    return ("file:" if url.startswith("///") else "file://") + url + "?mode=ro"
+
+
+def session_stores(kind):
+    """[(adapter id, store)] for each adapter whose `sessions` store is of this kind (#76)."""
+    return [(ident, adapter["sessions"]) for ident, adapter in sorted(package_adapters().items())
+            if isinstance(adapter.get("sessions"), dict) and adapter["sessions"].get("kind") == kind]
+
+
+def _workspace_sessions(store):
+    """Every session a workspace-meta store holds: its id, workspace directory, workspaces and transcript age."""
+    base = _home_path(store.get("dir"))
+    # A directory gone between the listing and the read, and a metadata file that holds no JSON object, are
+    # a session this store does not have; each stopped every reader of the store (REVIEWER-IDENTITY-2).
+    try:
+        workspaces = os.listdir(base) if os.path.isdir(base) else []
+    except OSError:
+        workspaces = []
+    for ws in workspaces:
+        wsd = os.path.join(base, ws)
+        try:
+            sessions = os.listdir(wsd) if os.path.isdir(wsd) else []
+        except OSError:
+            continue
+        for sess in sessions:
+            meta = os.path.join(wsd, sess, store["meta"])
+            msgs = os.path.join(wsd, sess, store["transcript"])
+            if not (os.path.exists(meta) and os.path.exists(msgs)):
+                continue
+            try:
+                with open(meta, encoding=UTF8) as fh:
+                    m = json.load(fh)
+                mtime = os.path.getmtime(msgs)
+            except Exception:
+                continue
+            if not isinstance(m, dict):
+                continue
+            yield {"session": sess, "workspace_hash": ws, "paths": m.get(store["workspaces"]) or [], "mtime": mtime,
+                   "title": m.get(store.get("title") or "title", ""), "status": m.get(store.get("status") or "status", "")}
+
+
+def _declared_store(ident):
+    """The `sessions` store the package adapter `ident` declares, or {}."""
+    store = (package_adapters().get(str(ident or "")) or {}).get("sessions")
+    return store if isinstance(store, dict) else {}
+
+
+def _sqlite_tail(ident):
+    """How one session of the package adapter `ident` is read: the store and the queries, or None.
+
+    The store is named by `transcript.path` and how to query it by `transcript.record`, so a
+    session found here and a session named in a role's block resolve the same way.
+    """
+    declared = _block((package_adapters().get(str(ident or "")) or {}), "transcript")
+    db = _home_path(declared.get("path")) if _name(declared.get("kind")) == "sqlite" else ""
+    return (db, _block(declared, "record"), _block(declared, "freshness"),
+            _block(declared, "subagent_sessions")) if db else None
+
+
+def _sqlite_sessions(ident, store, cwd):
+    """[{session, workspace_hash, title, status, mtime, transcript}]: each session a database store keeps for `cwd`.
+
+    A database names a session's working directory in a column rather than in the name of the
+    directory holding it, so the store declares the query and the columns to read from its rows.
+    The working directory is bound as a parameter, never written into the query: it comes from a
+    checkout on disk, and a path with a quote in it is a path a person can name.
+    """
+    sql, tail = _read_query(store.get("query")), _sqlite_tail(ident)
+    if not sql or not tail or not cwd or not os.path.exists(tail[0]):
+        return []
+    try:
+        import sqlite3
+        connection = sqlite3.connect(_read_only_uri(tail[0]), uri=True, timeout=2.0)
+    except Exception:
+        return []
+    connection.row_factory = sqlite3.Row
+    try:
+        rows = [dict(row) for row in connection.execute(sql, (cwd,))]
+    except Exception:
+        rows = []
+    finally:
+        connection.close()
+    milliseconds = str(store.get("mtime_unit")) in ("ms", "milliseconds")
+    found = []
+    for row in rows:
+        session, stamp = row.get(_store_name(store.get("session"))), row.get(_store_name(store.get("mtime")))
+        number = stamp if isinstance(stamp, (int, float)) and not isinstance(stamp, bool) else None
+        if not isinstance(session, str) or not session:
+            continue
+        found.append({"session": session, "workspace_hash": None,
+                      "title": _name(row.get(_store_name(store.get("title")))), "status": "",
+                      "mtime": (number / 1000.0 if milliseconds else float(number)) if number is not None else 0.0,
+                      "transcript": DatabaseTail(tail[0], session, tail[1], tail[2], tail[3]), "meta": None})
+    return found
+
+
+def store_sessions(ident, cwd):
+    """[{adapter, session, workspace_hash, transcript, meta, mtime}], newest first: each session that the store
+    the package adapter `ident` declares keeps for the working directory `cwd` (SESSION-IDENTITY).
+
+    A workspace-meta store names a session's workspaces in its metadata; an escaped-cwd store
+    keeps a directory's sessions in a directory named for it, one transcript each. A helper polyctl
+    starts - a reviewer, a hunter - runs in a directory of its own outside the repository, so
+    no session of one is ever a workspace's.
+    """
+    store = _declared_store(ident)
+    rows = []
+    if store.get("kind") == "workspace-meta":
+        base = _home_path(store.get("dir"))
+        for row in _workspace_sessions(store):
+            if isinstance(row["paths"], list) and cwd in row["paths"]:
+                folder = os.path.join(base, row["workspace_hash"], row["session"])
+                rows.append({"adapter": ident, "session": row["session"], "workspace_hash": row["workspace_hash"],
+                             "transcript": os.path.join(folder, store["transcript"]),
+                             "meta": os.path.join(folder, store["meta"]), "mtime": row["mtime"]})
+    elif store.get("kind") == "escaped-cwd" and cwd:
+        rows = [{"adapter": ident, "session": session, "workspace_hash": None, "transcript": path, "meta": None,
+                 "mtime": mtime} for session, path, mtime in _escaped_transcripts(store, escaped_cwd_dir(store, cwd))]
+    elif store.get("kind") == "sqlite-sessions" and cwd:
+        rows = [dict(row, adapter=ident) for row in _sqlite_sessions(ident, store, cwd)]
+    return sorted(rows, key=lambda row: row["mtime"], reverse=True)
+
+
+def _escaped_transcripts(store, directory):
+    """[(session, transcript, mtime)], newest first: each transcript an escaped-cwd store keeps in one directory."""
+    prefix, _, suffix = _name(store.get("transcript")).partition("{session}")
+    found = []
+    try:
+        entries = list(os.scandir(directory))
+    except OSError:
+        return found
+    for entry in entries:
+        name = entry.name
+        if len(name) <= len(prefix) + len(suffix) or not name.startswith(prefix) or not name.endswith(suffix):
+            continue
+        try:
+            if entry.is_file():
+                found.append((name[len(prefix):len(name) - len(suffix)], entry.path, entry.stat().st_mtime))
+        except OSError:
+            continue
+    return sorted(found, key=lambda item: item[2], reverse=True)
+
+
+# How much of a transcript's end and of its beginning is read to place its directory: a
+# directory is placed from the last or the first records of one of its newest transcripts.
+WORKSPACE_READ_BYTES = 65_536
+
+
+def _escaped_workspaces(store):
+    """[(workspace, newest session, its mtime)] for each directory of an escaped-cwd store polyctl can place.
+
+    A directory's name cannot be read back into a path - one dash stood for "/", for "." and
+    for every other character that is not a letter or a digit - so the path is one the
+    store's own records name at the field it declares as `cwd`, taken only where it escapes to
+    that directory's name: a session moved to another directory is kept under the new one, and
+    its first records still name the old. The ends of the three newest transcripts are read,
+    never a whole one. A store that declares no such field places no directory.
+    """
+    field = _name(store.get("cwd"))
+    if not field:
+        return []
+    try:
+        directories = list(os.scandir(_home_path(store.get("dir"))))
+    except OSError:
+        return []
+    out = []
+    for entry in directories:
+        try:
+            if not entry.is_dir():
+                continue
+        except OSError:
+            continue
+        transcripts = _escaped_transcripts(store, entry.path)
+        path = next((value for _, transcript, _ in transcripts[:3] for value in _recorded_values(transcript, field)
+                     if entry.name in escaped_cwd_names(value)), None)
+        if path:
+            out.append((path, transcripts[0][0], transcripts[0][2]))
+    return out
+
+
+def _recorded_values(path, field, nbytes=WORKSPACE_READ_BYTES):
+    """The text a transcript's records hold at `field`: its last records newest first, then its first ones."""
+    marker = '"' + field.split(".")[0].split("[")[0] + '"'
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as fh:
+            fh.seek(max(0, size - nbytes))
+            tail = fh.read(nbytes)
+            fh.seek(0)
+            head = fh.read(nbytes) if size > nbytes else b""
+    except OSError:
+        return []
+    values = []
+    for blob, newest_first in ((tail, True), (head, False)):
+        lines = blob.decode(UTF8, "replace").split("\n")
+        if newest_first and size > nbytes:
+            lines = lines[1:]                               # the tail starts inside a record
+        for line in (reversed(lines) if newest_first else lines):
+            if marker not in line:
+                continue
+            try:
+                value = _path_value(json.loads(line), field)
+            except (ValueError, RecursionError):
+                continue
+            if isinstance(value, str) and value:
+                values.append(value)
+    return values
+
+
+def discover_session(cwd, exclude=()):
+    """Find the most recently active local agent session whose workspace is cwd.
+
+    Every store an adapter declares is read (`sessions`): a workspace-meta store's
+    metadata resolves the opaque per-workspace directory, and an escaped-cwd store keeps
+    the directory's transcripts under its escaped name, without asking the vendor CLI.
+    Only one harness's store was read, and a project running the other one had no
+    session at all. `exclude` holds the sessions another role pins.
+    """
+    best = None
+    for ident in sorted(package_adapters()):
+        for row in store_sessions(ident, cwd):
+            if row["session"] in exclude:
+                continue
+            if best is None or row["mtime"] > best["_mtime"]:
+                best = {"adapter": ident, "session": row["session"], "workspace_hash": row["workspace_hash"],
+                        "cwd": cwd, "_mtime": row["mtime"]}
+            break
+    return best
+
+
+def all_workspaces():
+    """Every local agent session grouped by the workspace it belongs to, for workspaces that still exist.
+
+    Lets `polyctl` answer "which projects can I watch?" without any configuration —
+    the vendor stores already record their own workspace paths. A workspace-meta store
+    names them in each session's metadata; an escaped-cwd store's directories are placed
+    by the working directory their records name (`sessions.cwd`). A directory gone from
+    disk - a reviewer's temporary one, a deleted checkout - is no project to watch.
+    """
+    found = {}
+
+    def keep(path, row):
+        current = found.get(path)
+        if current is None or row["mtime"] > current["mtime"]:
+            found[path] = dict(row, path=path)
+
+    for ident, store in session_stores("workspace-meta"):
+        for row in _workspace_sessions(store):
+            for path in row["paths"] if isinstance(row["paths"], list) else []:
+                keep(path, {"mtime": row["mtime"], "session": row["session"], "workspace_hash": row["workspace_hash"],
+                            "adapter": ident, "title": row["title"], "status": row["status"]})
+    for ident, store in session_stores("escaped-cwd"):
+        for path, session, mtime in _escaped_workspaces(store):
+            keep(path, {"mtime": mtime, "session": session, "workspace_hash": None, "adapter": ident,
+                        "title": "", "status": ""})
+    rows = [row for path, row in found.items() if isinstance(path, str) and os.path.isdir(path)]
+    return sorted(rows, key=lambda r: r["mtime"], reverse=True)
+
+
+def session_paths(cfg):
+    """Transcript and metadata paths for the configured implementer.
+
+    This was hard-wired to one harness's store, which made the watchdog work for
+    that harness only: an implementer on another resolved to no transcript, the
+    watchdog said "nothing to watch" and quietly never ran. Every adapter declares
+    its store (`sessions`); an implementer whose adapter declares none has no paths,
+    and neither has an `auto` polyctl could not resolve: `auto` is no session's id.
+    """
+    return role_session_paths(cfg, "implementer")
+
+
+def role_session_paths(cfg, role):
+    """(transcript, metadata) of the session a role's block names, or (None, None) (SESSION-IDENTITY).
+
+    A session pinned by its id alone in a workspace-meta store is found in the workspace
+    directory that keeps it. A store that keeps every session in one database has no transcript
+    path to name, so what comes back is a `DatabaseTail`: it is the database to a reader that asks
+    only whether the transcript exists, and the session to a reader that asks what it says.
+    """
+    block = cfg.get(role) if isinstance(cfg.get(role), dict) else {}
+    sess = _concrete_session(block.get("session"))
+    if not sess:
+        return None, None
+    adapter = load_adapter(block_adapter(block) or "")
+    store = adapter.get("sessions") or {}
+    if store.get("kind") not in SESSION_STORE_KINDS:
+        return None, None                                        # a shape polyctl has no way to load
+    if store.get("kind") == "escaped-cwd":
+        cwd = block.get("cwd") or cfg.get("root", "")
+        return os.path.join(escaped_cwd_dir(store, cwd), store["transcript"].replace("{session}", sess)), None
+    if store.get("kind") == "sqlite-sessions":
+        declared = _block(adapter, "transcript")
+        db = _home_path(declared.get("path")) if _name(declared.get("kind")) == "sqlite" else ""
+        return (DatabaseTail(db, sess, _block(declared, "record"), _block(declared, "freshness"),
+                             _block(declared, "subagent_sessions")) if db
+                else None), None
+    ws = block.get("workspace_hash") or _session_workspace(store, sess)
+    if not ws:
+        return None, None
+    d = os.path.join(_home_path(store["dir"]), ws, sess)
+    return os.path.join(d, store["transcript"]), os.path.join(d, store["meta"])
+
+
+def _session_workspace(store, session):
+    """The workspace directory a workspace-meta store keeps a session in, or None."""
+    base = _home_path(store.get("dir"))
+    steps = _plain_steps(session)
+    if not steps or len(steps) != 1:
+        return None                                        # an id is one name, never a path
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return None
+    return next((ws for ws in names if os.path.exists(os.path.join(base, ws, session, store["meta"]))), None)
+
+
+# ── session identity: which session is whose (SESSION-IDENTITY) ───────────────
+#
+# Every `polyctl init --profile` writes `session: auto`, and it was read as a session's id: the
+# implementer's transcript was named auto, the watchdog had nothing to watch, and the nudge
+# would have resumed a session called auto. Where two roles run one harness in one
+# directory, the newest transcript was whichever role wrote last, and a wake resumed the
+# implementer's own session as the architect. `auto` is resolved when the config is loaded,
+# from the store the role's adapter declares, and a role that cannot be resolved says why.
+
+SESSION_ROLES = ("implementer", "architect")
+RESOLVED_HOW = ("discovered", "recorded")       # how a session polyctl put into a block got there
+
+
+def _concrete_session(value):
+    """The session id a block names: any text but `auto`; else None."""
+    text = value.strip() if isinstance(value, str) else ""
+    return text if text and text != "auto" else None
+
+
+def _pinned_session(block):
+    """The id a block pins itself, never one polyctl resolved into it."""
+    resolved = block.get("_session") if isinstance(block, dict) and isinstance(block.get("_session"), dict) else {}
+    return None if resolved.get("how") in RESOLVED_HOW else _concrete_session((block or {}).get("session"))
+
+
+def _resumes_session(role, block):
+    """Whether a role holds a session of its own: every implementer, whose nudge resumes one, and
+    an architect whose argv says {session} or whose block names one."""
+    if not isinstance(block, dict) or not block:
+        return False
+    return role == "implementer" or "session" in block or any("{session}" in str(part)
+                                                              for part in block.get("argv") or [])
+
+
+def _role_cwd(root, role, block):
+    """Where a role's sessions are kept: its own `cwd`, else the project root. An architect that
+    resumes no session starts a new one in the project root at every wake."""
+    if role == "architect" and not _resumes_session(role, block):
+        return root
+    return (block or {}).get("cwd") or root
+
+
+def _role_rows(role, ident, cwd):
+    """[{session, workspace_hash}], newest first: the sessions a role could hold in its adapter's store.
+
+    An architect's are read through discover_architect, where every wake has read them,
+    unless its adapter keeps its sessions in another kind of store.
+    """
+    kind = _declared_store(ident).get("kind")
+    if role == "architect" and (not ident or kind == "escaped-cwd"):
+        found = discover_architect(cwd) or {}
+        ids = found.get("sessions") if isinstance(found.get("sessions"), list) else [found.get("session")]
+        return [{"session": str(sid), "workspace_hash": None} for sid in ids if sid]
+    return [{"session": row["session"], "workspace_hash": row["workspace_hash"]} for row in store_sessions(ident, cwd)]
+
+
+def sessions_path(root):
+    """Where polyctl keeps the sessions it settled for this checkout's roles; never committed."""
+    return os.path.join(root, ".polyctl", "sessions.json")
+
+
+def session_records(root):
+    """{role: {adapter, session, cwd, workspace_hash, at}} as `.polyctl/sessions.json` keeps them; {} when it keeps none."""
+    try:
+        with open(sessions_path(root), encoding=UTF8) as fh:
+            document = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    roles = document.get("roles") if isinstance(document, dict) else None
+    if not isinstance(roles, dict):
+        return {}
+    return {role: dict(entry) for role, entry in roles.items()
+            if role in SESSION_ROLES and isinstance(entry, dict) and _concrete_session(entry.get("session"))}
+
+
+def record_session(root, role, found):
+    """Keep the session polyctl settled for a role in `.polyctl/sessions.json`, written whole; True when it changed.
+
+    Nothing is written outside a project, or when the record already says it.
+    """
+    if not os.path.isdir(os.path.join(root, ".polyctl")):
+        return False
+    records = session_records(root)
+    kept = {key: found.get(key) for key in ("adapter", "session", "cwd", "workspace_hash")}
+    if {key: (records.get(role) or {}).get(key) for key in kept} == kept:
+        return False
+    records[role] = dict(kept, at=int(time.time()))
+    from .storage import replace_file_durably
+    try:
+        replace_file_durably(sessions_path(root), (json.dumps({"roles": records}, indent=2, sort_keys=True)
+                                                    + "\n").encode(UTF8))
+    except OSError:
+        return False
+    return True
+
+
+def resolve_session(root, cfg, role, avoid=()):
+    """The session a role holds, and how polyctl knows: {session, workspace_hash, adapter, cwd, how, why, trusted,
+    record, count} (SESSION-IDENTITY).
+
+    `how` is pinned (the block names an id), recorded (`.polyctl/sessions.json` keeps the one polyctl
+    settled on), discovered, ambiguous or unresolved, and `why` is what a person reads beside
+    it. A pinned id wins. Otherwise the candidates are the sessions the role's adapter's store
+    keeps for its working directory, less `avoid`. Where no other role runs that adapter over
+    them, the newest is the role's: a newer one is a conversation a person opened, and `auto`
+    follows it. Where the other role's sessions sit among them, the newest is whichever role
+    wrote last, so what settles identity is a pin, a record, or the one session the other role
+    does not hold. The implementer is resolved first and takes a lone session; the architect
+    never takes the implementer's, and beside an implementer that is not settled it cannot
+    tell its own. Two sessions neither holds are ambiguous. A session taken beside a role that
+    is not settled is read but never resumed (`trusted` false) and never recorded: only what
+    settles identity is kept, and `record` says a result is that.
+    """
+    block = cfg.get(role) if isinstance(cfg.get(role), dict) else {}
+    ident = block_adapter(block) if block else None
+    cwd = _role_cwd(root, role, block)
+    out = {"role": role, "adapter": ident, "cwd": cwd, "session": None, "workspace_hash": None, "how": "unresolved",
+           "why": None, "trusted": False, "record": False, "count": 0}
+    if not block:
+        return dict(out, why=f"no {role} is configured")
+    pinned = _pinned_session(block)
+    if pinned:
+        return dict(out, session=pinned, workspace_hash=block.get("workspace_hash"), how="pinned", trusted=True)
+    if ident and _declared_store(ident).get("kind") not in ("workspace-meta", "escaped-cwd"):
+        return dict(out, why=f"the {ident} adapter declares no session store polyctl reads; pin the {role}'s session")
+    if not ident and role != "architect":
+        return dict(out, why=f"no adapter says where the {role}'s sessions are; pin its session")
+    rows = [row for row in _role_rows(role, ident, cwd) if row["session"] not in avoid]
+    where = "this workspace" if cwd == root else cwd
+    none_yet = f"no {ident or 'agent'} session for {where}" + (" but the one that failed" if avoid else " yet")
+    other = SESSION_ROLES[1 - SESSION_ROLES.index(role)]
+    oblock = cfg.get(other) if isinstance(cfg.get(other), dict) else {}
+    ocwd = _role_cwd(root, other, oblock)
+    orows = _role_rows(other, ident, ocwd) if ident and oblock and block_adapter(oblock) == ident else []
+    oids = {row["session"] for row in orows}
+    if not {row["session"] for row in rows} & oids:
+        if not rows:
+            return dict(out, why=none_yet)
+        return dict(out, session=rows[0]["session"], workspace_hash=rows[0]["workspace_hash"], how="discovered",
+                    trusted=True, count=len(rows),
+                    why=f"the newest of {len(rows)} {ident or 'agent'} session(s) for {where}")
+    records = session_records(root) if root else {}
+    mine, theirs = records.get(role) or {}, records.get(other) or {}
+    kept = mine.get("session") if (mine.get("adapter"), mine.get("cwd")) == (ident, cwd) else None
+    held = theirs.get("session") if (theirs.get("adapter"), theirs.get("cwd")) == (ident, ocwd) \
+        and _resumes_session(other, oblock) and theirs.get("session") in oids \
+        and theirs.get("session") != kept else None
+    opinned = _pinned_session(oblock) if _resumes_session(other, oblock) else None
+    # A pin settles the other role's session only while the store still holds it, as a record does: a pinned
+    # transcript the harness cleaned up left the one session in the store taken for this role's, which may
+    # be the other's new one (SESSION-IDENTITY-2).
+    opinned = opinned if opinned in oids else None
+    oresolved = oblock.get("_session") if isinstance(oblock.get("_session"), dict) else {}
+    if opinned or held:
+        claim, settled = opinned or held, True
+    elif role == "architect" and oresolved.get("how") in RESOLVED_HOW and _concrete_session(oblock.get("session")):
+        claim, settled = oblock["session"], bool(oresolved.get("trusted"))
+    else:
+        claim, settled = None, False
+    own = [row for row in rows if row["session"] != claim]
+    kept_row = next((row for row in own if row["session"] == kept), None)
+    if kept_row:
+        return dict(out, session=kept, workspace_hash=kept_row["workspace_hash"], how="recorded", trusted=True,
+                    count=len(own), why="kept in .polyctl/sessions.json since polyctl settled it")
+    if not own:
+        return dict(out, why=f"the only {ident} session for {where} is the {other}'s" if rows else none_yet)
+    if role == "architect" and claim is None:
+        return dict(out, how="ambiguous", count=len(own),
+                    why=f"the {other}'s sessions are kept beside the {role}'s in the {ident} store and the "
+                        f"{other}'s is not settled, so polyctl cannot tell them apart; pin the {other}'s session "
+                        f"in .polyctl/config.json")
+    if len(own) > 1:
+        return dict(out, how="ambiguous", count=len(own),
+                    why=f"{len(own)} {ident} sessions for {where} that the {other} does not hold, and polyctl cannot "
+                        f"tell which is the {role}'s; pin it in .polyctl/config.json")
+    found = dict(out, session=own[0]["session"], workspace_hash=own[0]["workspace_hash"], how="discovered", count=1)
+    if settled:
+        return dict(found, trusted=True, record=True,
+                    why=f"the one {ident} session for {where} that the {other} does not hold")
+    return dict(found, why=f"the only {ident} session for {where}, where the {other}'s sessions are kept too and "
+                           f"the {other}'s is not settled: read, but not resumed until one of the two is pinned "
+                           f"in .polyctl/config.json")
+
+
+def resolve_sessions(root, cfg, record=True):
+    """Resolve each role's `auto` into the block the role is read from, and record what settles it; the config.
+
+    The implementer is resolved before the architect. A block polyctl resolved keeps `_session`:
+    how, why, whether its session may be resumed, and how many sessions it chose among. A
+    role whose block names a session, or that holds none, is left as written, and nothing is
+    read for a config whose roles all name theirs.
+    """
+    for role in SESSION_ROLES:
+        block = cfg.get(role)
+        if not _resumes_session(role, block) or _concrete_session(block.get("session")):
+            continue
+        found = resolve_session(root, cfg, role)
+        block["_session"] = {key: found[key] for key in ("how", "why", "trusted", "count")}
+        if found["session"]:
+            block["session"] = found["session"]
+            if found["workspace_hash"]:
+                block["workspace_hash"] = found["workspace_hash"]
+        if record and found["record"]:
+            record_session(root, role, found)
+    return cfg
+
+
+def session_state(cfg, role):
+    """{session, how, why, trusted, count} of a role's session as the loaded config holds it; None for a role
+    that holds none. A block that did not come through load_config is resolved here."""
+    block = cfg.get(role)
+    if not _resumes_session(role, block):
+        return None
+    if isinstance(block.get("_session"), dict):
+        return dict(block["_session"], session=_concrete_session(block.get("session")))
+    found = resolve_session(cfg.get("root") or "", cfg, role)
+    return {key: found[key] for key in ("session", "how", "why", "trusted", "count")}
+
+
+def session_to_resume(cfg, role):
+    """(the session a turn of this role may resume, None), or (None, why none may) (SESSION-IDENTITY).
+
+    Pinned, recorded, or discovered where nothing else could hold it; (None, None) for a role
+    that holds no session of its own.
+    """
+    state = session_state(cfg, role)
+    if state is None:
+        return None, None
+    if state["session"] and state["trusted"]:
+        return state["session"], None
+    return None, state["why"] or f"the {role}'s session is {state['how']}"
+
+
+# ── transcript ────────────────────────────────────────────────────────────────
+
+def _open_regular(path):
+    """A binary handle on `path` when, opened, it is a regular file reached through no final link; OSError otherwise.
+
+    A subagent's file is checked by its real path when the directory is listed and opened later: one swapped in
+    between for a link is not followed, and one swapped for a FIFO - or a sidecar that is one - is refused at
+    once, opened without blocking, where reading it hung the reader (SUBAGENT-BOUNDS-2).
+
+    Windows has no O_NOFOLLOW, and the flag that asked for it was 0 there: a final link was followed
+    as if the flag were not asked for. Where the platform has none, the path is looked at before it
+    is opened - a link is refused - and what was opened must be the file that was looked at, by its
+    file id, so a link swapped in between is refused too (WINDOWS-SAY-WHY).
+    """
+    import stat as _stat
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    before = None
+    if nofollow is None:
+        before = os.lstat(path)
+        if _stat.S_ISLNK(before.st_mode):
+            raise OSError(f"{path} is a link")
+    flags = (nofollow or 0) | getattr(os, "O_NONBLOCK", 0)
+    handle = open(path, "rb", opener=lambda name, mode: os.open(name, mode | flags))
+    try:
+        opened = os.fstat(handle.fileno())
+        if not _stat.S_ISREG(opened.st_mode):
+            raise OSError(f"{path} is not a regular file")
+        if before is not None and (not before.st_ino or not opened.st_ino or before.st_ino != opened.st_ino
+                                   or before.st_dev != opened.st_dev):
+            # A file system that numbers no file - FAT - cannot tell a file swapped in from the one looked at: read as
+            # changed, not passed (the review of WINDOWS-SAY-WHY).
+            raise OSError(f"{path} changed as it was opened, or its file system cannot say it did not")
+    except BaseException:
+        handle.close()
+        raise
+    return handle
+
+
+def read_tail(path, nbytes=900_000, regular=False):
+    """Last nbytes of a JSONL transcript, first (partial) line dropped; a database's rows when it keeps them there.
+
+    With `regular`, the file is read only if it is a regular file reached through no final link (`_open_regular`).
+
+    A store that holds every session of every project in one database has no file whose tail can
+    be read: its transcript is a query bound to one session id. Such a read asks a `DatabaseTail`
+    and gets the same kind of answer - a list of record objects - so every reader below sees one
+    transcript and names no store's schema (#76).
+    """
+    if isinstance(path, DatabaseTail):
+        return path.read(nbytes)
+    recs = []
+    try:
+        with (_open_regular(path) if regular else open(path, "rb")) as f:
+            size = os.fstat(f.fileno()).st_size
+            f.seek(max(0, size - nbytes))
+            blob = f.read().decode("utf-8", "ignore")
+    except Exception:
+        return recs
+    lines = blob.split("\n")
+    if size > nbytes:
+        lines = lines[1:]
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            recs.append(json.loads(line))
+        except Exception:
+            pass
+    return recs
+
+
+# ── a transcript kept as rows ─────────────────────────────────────────────────
+#
+# A JSONL store gives a transcript as a file, so `session_paths` can hand back a path and every
+# reader can ask it for a tail. A database store gives no such thing: one file holds every
+# session, and which records belong to one is a fact inside a column. What makes the two readable
+# by the same readers is that the difference is only how a record is *fetched*: once a row's JSON
+# column is promoted onto the record and its child rows nested beside it, a store that writes a
+# message and its parts as rows of two tables holds exactly what a store that nests blocks in a
+# record holds, and `transcript.messages.blocks` and `transcript.tool_call.blocks` read both.
+#
+# So the reader below is a fetcher and nothing else. It promotes, nests and converts; it renames
+# nothing, because every name it uses - table, session column, order column, JSON column, child
+# table and the key its records are held under - comes from `transcript.record`. A store whose
+# column is called something else says so in its adapter, and a store that declares nothing is
+# read as holding nothing.
+
+_STORE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+# How many rows one query of a store is asked for. A session's records are bounded by what an
+# agent writes in a sitting, so this bounds only a store that has outgrown itself: a panel asks
+# these questions every second, and reading a million rows to show eight messages is not a cheap
+# answer but a slow one.
+_STORE_ROW_CAP = 20_000
+
+
+def _store_name(value):
+    """A declared table or column name, when it is one word a query may hold.
+
+    These names are written into SQL rather than bound as values, because SQLite binds no name.
+    An adapter is package-controlled where authority is decided, but a project's own layer is
+    writable by the agent it describes, so a name is taken only in the shape one identifier has
+    and anything else reads as no declaration at all.
+    """
+    text = _name(value)
+    return text if _STORE_NAME.match(text) else ""
+
+
+def _read_query(text):
+    """A declared SELECT, when it reads nothing but one statement.
+
+    A store's path and session are bound as parameters, never written into the text; the query
+    itself has to come from the adapter, since only it knows the schema. That makes it the one
+    piece of a declaration that is executed rather than read, so it is taken only when it starts
+    as a SELECT and holds no second statement.
+    """
+    text = str(text or "").strip()
+    return text if text.upper().startswith("SELECT") and ";" not in text else ""
+
+
+def _epoch_iso(value, unit):
+    """A number of seconds or milliseconds since the epoch, as the ISO text every time reader expects."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return ""
+    millis = int(round(value * (1 if str(unit) in ("ms", "milliseconds") else 1000)))
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(millis // 1000)) + ".%03dZ" % (millis % 1000)
+
+
+class DatabaseTail:
+    """A session's transcript where a database holds it: a path to the store, an id, and how to query it.
+
+    It stands for the database file to a reader that only wants to know whether the transcript is
+    there - `os.path.exists` and `os.path.getmtime` reach the file through `__fspath__` - while
+    carrying the session the records are read for, which a path alone cannot say.
+    """
+
+    __slots__ = ("db", "session", "record", "freshness", "descendants")
+
+    def __init__(self, db, session, record, freshness=None, descendants=None):
+        self.db, self.session = _name(db), _name(session)
+        self.record = record if isinstance(record, dict) else {}
+        self.freshness = freshness if isinstance(freshness, dict) else {}
+        self.descendants = descendants if isinstance(descendants, dict) else {}
+
+    def __fspath__(self):
+        return self.db
+
+    def __str__(self):
+        return f"{self.db}#{self.session}"
+
+    def __repr__(self):
+        return f"<DatabaseTail {self.db}#{self.session}>"
+
+    def __eq__(self, other):
+        return isinstance(other, DatabaseTail) and (other.db, other.session) == (self.db, self.session)
+
+    def __hash__(self):
+        return hash((self.db, self.session))
+
+    def _connect(self):
+        """A read-only connection, or None when the store cannot be opened.
+
+        Read-only because the agent owns this database and a second writer corrupts its state.
+        A short timeout because a panel and a watchdog ask this question repeatedly, and a store
+        mid-commit is a store that answers later, not one that answers never.
+        """
+        try:
+            import sqlite3
+        except ImportError:
+            return None
+        try:
+            connection = sqlite3.connect(_read_only_uri(self.db), uri=True, timeout=2.0)
+        except Exception:
+            return None
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _fetch(self, connection, sql, arguments, limit):
+        """[dict] for each row a declared query reaches, its columns named, capped at `limit`."""
+        try:
+            cursor = connection.execute(sql, (*arguments, limit) if limit is not None else arguments)
+            return [dict(row) for row in cursor]
+        except Exception:
+            return []
+
+    def read(self, nbytes=900_000):
+        """This session's records, oldest first: its newest rows, and no more of them than `nbytes` of stored text.
+
+        A record is its row's columns with one declared column's JSON promoted onto it, so a path
+        the adapter writes reaches either kind of field the same way. A JSON column that does not
+        parse promotes nothing, and the record still holds that column as the text it is.
+        """
+        declared = self.record
+        table, session_key = _store_name(declared.get("table")), _store_name(declared.get("session_key"))
+        order = _store_name(declared.get("order")) or _store_name(declared.get("time"))
+        if not (self.session and table and session_key and order and os.path.exists(self.db)):
+            return []
+        connection = self._connect()
+        if connection is None:
+            return []
+        try:
+            rows = self._fetch(connection,
+                               f"SELECT * FROM {table} WHERE {session_key} = ? ORDER BY {order} DESC LIMIT ?",
+                               (self.session,), min(max(int(nbytes) // 256, 1), _STORE_ROW_CAP))
+        finally:
+            connection.close()
+        rows.reverse()
+        return self._nest(self._promote(rows, declared, nbytes))
+
+    def _promote(self, rows, declared, nbytes=None):
+        """[record] for each row, oldest first: its columns with its declared JSON column promoted onto it.
+
+        A column that holds no object promotes nothing rather than dropping the row, and a number
+        in the declared time column becomes the ISO text every reader of `record.time` expects,
+        because a store that counts in milliseconds is the store's own fact to say. With no
+        `nbytes` every row is kept; a child table is read whole, since a record's blocks are
+        asked for complete and a tail of them is not a tail but a message with parts missing.
+        """
+        body, time_column = _store_name(declared.get("body")), _store_name(declared.get("time"))
+        kept, spent = [], 0
+        for row in reversed(rows) if nbytes else rows:
+            record = dict(row)
+            blob = _name(row.get(body)) if body else ""
+            for key, value in (_json_object(blob) or {}).items():
+                record.setdefault(key, value)
+            stamp = _epoch_iso(row.get(time_column), declared.get("time_unit")) if time_column else ""
+            if stamp:
+                record[time_column] = stamp
+            kept.append(record)
+            if nbytes:
+                spent += len(blob) or len(json.dumps(record, default=str))
+                if spent >= nbytes:
+                    break
+        return kept[::-1] if nbytes else kept   # a budget walks the rows newest first; turn them back
+
+    def _nest(self, records):
+        """Attach each record's child records under the key its adapter names, when it declares them.
+
+        A store that writes a message's parts beside it rather than inside it declares the child
+        table, the column of the child that names its parent, the column of the parent the child
+        names, and the key to hold them under. Children are read for the whole session in one
+        query and hung on by that name, because a store's rows are one session's either way, and
+        a child naming a parent outside this tail is dropped rather than guessed a home for.
+        """
+        declared = _block(self.record, "children")
+        table, as_key = _store_name(declared.get("table")), _name(declared.get("as"))
+        key, parent_key = _store_name(declared.get("key")), _store_name(declared.get("parent_key"))
+        session_key = _store_name(declared.get("session_key")) or key
+        order = _store_name(declared.get("order")) or _store_name(declared.get("time"))
+        if not (table and as_key and key and parent_key and order and records):
+            return records
+        connection = self._connect()
+        if connection is None:
+            return records
+        try:
+            rows = self._fetch(connection,
+                               f"SELECT * FROM {table} WHERE {session_key} = ? ORDER BY {order} ASC LIMIT ?",
+                               (self.session,), _STORE_ROW_CAP)
+        finally:
+            connection.close()
+        grouped = {}
+        for child in self._promote(rows, declared):
+            grouped.setdefault(child.get(key), []).append(child)
+        return [dict(record, **{as_key: grouped.get(record.get(parent_key), [])}) for record in records]
+
+    def last_activity(self):
+        """Epoch seconds the store says this session last wrote, or None when it declares no reading.
+
+        A database file is written by every session in it, so its modification time says a machine
+        is busy rather than that this agent is. A store that keeps a per-session clock can say
+        more, and `transcript.freshness` declares the query that reads it. A session whose rows
+        the store updates in place has no row written lately and still working, so this is the
+        only reading that sees it.
+        """
+        sql = _read_query(self.freshness.get("query"))
+        if not sql or not os.path.exists(self.db):
+            return None
+        connection = self._connect()
+        if connection is None:
+            return None
+        try:
+            rows = self._fetch(connection, sql, (self.session,), None)
+        finally:
+            connection.close()
+        value = next(iter(rows[0].values()), None) if rows else None
+        if isinstance(value, str) and value:
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return value / 1000.0 if _name(self.freshness.get("time_unit")) in ("ms", "milliseconds") else float(value)
+
+    def descendant_tails(self):
+        """[DatabaseTail] for each session the store says descends from this one, nearest first.
+
+        A store that holds a subagent as a session of its own has no file beside the parent for polyctl
+        to list: the link is a value in a row, so the store declares the query that names one
+        session's children and which column of its rows holds a session id. The query is asked
+        again of every session it finds, so a subagent's own subagent is reached by the same one
+        declaration, and each id is asked of once - which is what stops a store whose parent links
+        closed a loop from being walked for as long as it is read. A tail that declares no query
+        has no descendants, and says so without opening the store.
+        """
+        sql, column = _read_query(self.descendants.get("query")), _store_name(self.descendants.get("session"))
+        if not (sql and column and self.session and os.path.exists(self.db)):
+            return []
+        connection = self._connect()
+        if connection is None:
+            return []
+        found, seen, queued = [], {self.session}, [self.session]
+        try:
+            while queued:
+                for row in self._fetch(connection, sql, (queued.pop(0),), None):
+                    child = _name(row.get(column))
+                    if child and child not in seen:
+                        seen.add(child)
+                        queued.append(child)
+                        found.append(DatabaseTail(self.db, child, self.record, self.freshness,
+                                                  self.descendants))
+        finally:
+            connection.close()
+        return found
+
+
+def _json_object(text):
+    """The object a stored JSON column holds, or None when it holds nothing readable."""
+    try:
+        document = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    return document if isinstance(document, dict) else None
+
+
+# What a record looks like is its adapter's to declare (#76): where the kind and the time
+# are, which kinds open, close and follow a turn, where a tool call keeps its name and
+# arguments and which tools write a file, and where usage, context and failures are.
+# The readers below ask these helpers and name no harness's field.
+
+def _path_values(obj, path):
+    """Every value a declared path reaches: `a.b` descends, `a[].b` reads `b` in each element of the list `a`.
+
+    A `[]` step yields one value per element, None where an element lacks the rest of
+    the path, so two paths through one list stay aligned element by element.
+    """
+    values = [obj]
+    for step in str(path or "").split("."):
+        many = step.endswith("[]")
+        key = step[:-2] if many else step
+        found = []
+        for value in values:
+            value = value.get(key) if isinstance(value, dict) and key else None
+            if many:
+                found.extend(value if isinstance(value, list) else [])
+            else:
+                found.append(value)
+        values = found
+    return values
+
+
+def _path_value(obj, path):
+    """The first value a declared path reaches, or None."""
+    values = _path_values(obj, path)
+    return values[0] if values else None
+
+
+def _name(value):
+    """A declared name, kind or path: the string itself, or "" for anything else."""
+    return value if isinstance(value, str) else ""
+
+
+def _names(value):
+    """A declared list of names, kinds or paths, as the strings in it; one may be written bare."""
+    return [item for item in (value if isinstance(value, list) else [value]) if _name(item)]
+
+
+def _block(document, key):
+    """The object a declaration keeps under `key`, or {} when it keeps none there."""
+    value = document.get(key) if isinstance(document, dict) else None
+    return value if isinstance(value, dict) else {}
+
+
+def transcript_shape(adapter):
+    """How an adapter's transcript records are read, from what it declares (#76).
+
+    `transcript.record.kind` is the path to a record's kind, and every other field is
+    read from the object holding it: the payload when the kind is `payload.type`, the
+    record itself when it is `type`. `record.time` is read from the record. A part the
+    adapter does not declare comes back empty or None, and a reader then reads nothing
+    for it rather than another harness's field. Usage carries the reading that adds it
+    up (`billing.fallback.reading`, `sum` when none is declared); under a reading polyctl
+    does not implement there is no usage to read, rather than usage misread.
+
+    `transcript.messages.not_words` lists the values a prompt or a reply holds when it is
+    no one speaking - a harness's own note, a summary it wrote of a compacted
+    conversation - each a `match` of paths and values; a record holding every value of
+    one of them has no words. `transcript.messages.harness_replies` lists, the same way,
+    the values a reply holds when the harness wrote it in the model's place
+    (`in_place_reply`), and `telemetry.failure.ends` the records that tell a session a
+    task it ran in the background ended (`ended_shape`). `telemetry.cost.tokens`, `model`
+    and `priced_when` say how the tokens a usage record holds are priced (`token_shape`).
+    """
+    transcript, signals = _block(adapter, "transcript"), _block(adapter, "telemetry")
+    record, message_kinds, turn = (_block(transcript, key) for key in ("record", "messages", "turn"))
+    body, _, kind = _name(record.get("kind")).rpartition(".")
+    matches = {key: [match for match in message_kinds[key] if isinstance(match, dict) and match]
+               if isinstance(message_kinds.get(key), list) else [] for key in ("not_words", "harness_replies")}
+    shape = {"time": _name(record.get("time")), "body": body, "kind": kind,
+             "text_keys": [key.rpartition(".")[2] for key in _names(record.get("text_keys"))],
+             "prompt": _names(message_kinds.get("prompt")), "reply": _names(message_kinds.get("reply")),
+             "not_words": matches["not_words"], "harness_replies": matches["harness_replies"],
+             "start": _names(turn.get("start")), "end": _names(turn.get("end")),
+             "bookkeeping": _names(turn.get("bookkeeping")),
+             "tool": None, "usage": None, "context": None, "failure": None}
+    tool = _block(transcript, "tool_call")
+    if _name(tool.get("type")):
+        shape["tool"] = {"type": tool["type"], "name": _name(tool.get("name")), "args": _name(tool.get("args")),
+                         "id": _name(tool.get("id")),
+                         "path_keys": _names(tool.get("path_keys")), "write_tools": _names(tool.get("write_tools")),
+                         "write_words": [word.lower() for word in _names(tool.get("write_words"))]}
+    cost = _block(signals, "cost")
+    shape["unit"] = _name(cost.get("unit")) or "unit"
+    fields = _names(cost.get("fields")) or _names(cost.get("field"))
+    reading = _block(_block(adapter, "billing"), "fallback").get("reading", "sum")
+    if cost.get("from") == "transcript" and _name(cost.get("type")) and fields and reading in USAGE_READINGS:
+        shape["usage"] = {"type": cost["type"], "fields": fields, "tools": _name(cost.get("tools")),
+                          "reading": reading}
+    context = _block(signals, "context")
+    if context.get("from") == "transcript" and _name(context.get("type")) and _name(context.get("field")):
+        shape["context"] = {"type": context["type"], "match": _block(context, "match"), "field": context["field"]}
+    failure = _block(signals, "failure")
+    if failure.get("from") == "transcript" and _name(failure.get("type")) and _name(failure.get("field")) \
+            and "failed_when" in failure:
+        shape["failure"] = {"type": failure["type"], "field": failure["field"],
+                            "failed_when": failure["failed_when"], "text": _name(failure.get("text"))}
+    shape["ends"] = ended_shape(_block(failure, "ends")) if failure.get("from") == "transcript" else None
+    shape = nested_shape(shape, transcript, signals)
+    shape["tokens"] = token_shape(cost, shape["usage"])
+    return subagent_shape(shape, transcript)
+
+
+def ended_shape(declared):
+    """What the end of a task run in the background looks like, from `telemetry.failure.ends`; None if unusable.
+
+    A harness may tell a session that a task it started in the background ended - a command, a
+    subagent - in a record of its own rather than in a tool's result, the call that started the
+    task having returned when the task began. `records` are the records that tell it, each a kind,
+    the `match` it holds and the `field` holding its text; the text says the end between pairs of
+    markers: `status` the end's status, of which `failed_when` lists the ones that are a failure,
+    `id` the task it ends, and `text` what a person reads of it. Without a status, a failing status
+    or a record to read, nothing is read.
+    """
+    records = declared.get("records") if isinstance(declared.get("records"), list) else []
+    records = [{"type": record["type"], "match": _block(record, "match"), "field": record["field"]}
+               for record in records if isinstance(record, dict) and _name(record.get("type"))
+               and _name(record.get("field"))]
+    markers = {key: list(declared[key]) for key in ("status", "id", "text") if isinstance(declared.get(key), list)
+               and len(declared[key]) == 2 and all(_name(marker) for marker in declared[key])}
+    failed = _names(declared.get("failed_when"))
+    return dict(markers, records=records, failed_when=failed) if records and failed and "status" in markers else None
+
+
+def nested_shape(shape, transcript, signals):
+    """A transcript shape with what a store that nests its records declares beside it.
+
+    One harness writes each tool call, tool result and turn end as a record of its own.
+    Another holds calls and results as blocks of a message, ends a turn in a field of
+    the response that ends it, and writes one response as several records that repeat
+    its usage. That store declares `blocks`, the path to the blocks a record holds, and
+    the `match` a block holds, in `transcript.tool_call` and `telemetry.failure`, and in
+    `transcript.messages` for the blocks that are a message's words; `turn.end_when`,
+    the kind, field and values that close a turn; `turn.conversation`, the kinds a turn
+    is made of, every other kind being bookkeeping; and, for the `per-response` reading,
+    `telemetry.cost.response`, the path to a response's id. Usage read per response
+    without that path is not read, rather than counted once per record. A shape that
+    declares none of these reads as it did.
+    """
+    turn, words = _block(transcript, "turn"), _block(transcript, "messages")
+    conditions = turn.get("end_when") if isinstance(turn.get("end_when"), list) else [turn.get("end_when")]
+    shape["end_when"] = [{"type": when["type"], "field": when["field"], "values": when["values"]}
+                         for when in conditions if isinstance(when, dict) and _name(when.get("type"))
+                         and _name(when.get("field")) and isinstance(when.get("values"), list)]
+    shape["conversation"] = _names(turn.get("conversation"))
+    shape["words"] = {"blocks": words["blocks"], "match": _block(words, "match")} if _name(words.get("blocks")) \
+        else None
+    for part, declared in (("tool", _block(transcript, "tool_call")), ("failure", _block(signals, "failure"))):
+        if shape[part] is not None:
+            shape[part].update(blocks=_name(declared.get("blocks")), match=_block(declared, "match"))
+    if shape["usage"] is not None and shape["usage"]["reading"] == "per-response":
+        response = _name(_block(signals, "cost").get("response"))
+        shape["usage"] = dict(shape["usage"], response=response) if response else None
+    return shape
+
+
+def token_shape(cost, usage):
+    """How a usage record's tokens are priced, from what `telemetry.cost` declares: {model, kinds, when}, or None.
+
+    A vendor prices a token by its model and by its kind - read, written to a cache, read from
+    one, written out - and one count of every kind added up cannot be priced (USD-COST).
+    `tokens` maps each kind of token a price table names to the path of its count in a usage
+    record, or to a list of paths of which the first holding a count is read: a store that
+    broke a count down in a later release declares the breakdown first and the whole after it.
+    `model` is the path to the model that answered. `priced_when` lists the fields whose value
+    sets the rate a vendor charged, each `{field, values}`; a record is at a table's prices
+    when every field holds one of its values, null standing for a field the record does not
+    hold. Tokens are read with usage and under its reading, so a shape with no usage to read
+    has no tokens either, and a declaration polyctl cannot read whole prices nothing rather than
+    part of it, or every rate alike (`token_problems` says why).
+    """
+    if usage is None or "tokens" not in cost or token_problems(cost):
+        return None
+    return {"model": cost["model"], "kinds": {kind: _names(paths) for kind, paths in cost["tokens"].items()},
+            "when": [{"field": item["field"], "values": item["values"]} for item in cost.get("priced_when", [])]}
+
+
+def subagent_shape(shape, transcript):
+    """A transcript shape with the subagent transcripts a session's records start, when its adapter declares them.
+
+    A harness that delegates to subagents may write each one's records to a transcript of
+    its own beside the session's, and no reading of the session's records then holds that
+    spend or those writes. `transcript.subagents` declares them: `dir`, the directory of a
+    session's subagent transcripts relative to the session transcript's own, `{session}`
+    standing for the session transcript's name without its extension; `transcripts`, each
+    a `path` under that directory, `*` standing for any name and `{id}` for the value a
+    record of the session holds at `named_by` when it starts that transcript; and
+    `sidecar`, a file beside a subagent's transcript (`{name}` its name without its
+    extension) whose `call` field holds the id of the tool call that started it, the id
+    of a call being at `transcript.tool_call.id`. A shape declaring no `dir` or no
+    transcript under it has no subagents.
+
+    Each of these paths is read below the directory it is relative to, and one that is not
+    plain names (`_plain_steps`) - `..`, an absolute path, a drive - is refused where it is
+    declared: a `dir` gives the shape no subagents, a transcript or a sidecar is left out. A
+    `dir` names its session, `{session}` standing in it, so no session reads another's.
+    """
+    declared = _block(transcript, "subagents")
+    entries = declared.get("transcripts") if isinstance(declared.get("transcripts"), list) else []
+    entries = [{"path": entry["path"], "named_by": _name(entry.get("named_by"))} for entry in entries
+               if isinstance(entry, dict) and _name(entry.get("path")) and entry["path"].count("{id}") <= 1
+               and _plain_steps(entry["path"])]
+    sidecar = _block(declared, "sidecar")
+    shape["subagents"] = {"dir": declared["dir"], "transcripts": entries,
+                          "sidecar": {"path": sidecar["path"], "call": sidecar["call"]}
+                          if _name(sidecar.get("path")) and _name(sidecar.get("call")) and _plain_steps(sidecar["path"])
+                          else None} \
+        if "{session}" in _name(declared.get("dir")) and _plain_steps(declared["dir"]) and entries else None
+    return shape
+
+
+def subagent_problems(adapter):
+    """Each path `transcript.subagents` declares that polyctl will not read, and why; [] when it reads them all (#77).
+
+    `subagent_shape` refuses such a path without a word, since a reading must not fail on a
+    layer's mistake; `polyctl adapters validate` says why before anyone relies on the declaration.
+    """
+    declared = _block(_block(adapter, "transcript"), "subagents")
+    if not declared:
+        return []
+    plain = "names joined by `/`, with no empty step, `.`, `..`, absolute path or drive"
+    problems = [] if "{session}" in _name(declared.get("dir")) and _plain_steps(declared["dir"]) else [
+        f"`transcript.subagents.dir` must be {plain}, and hold {{session}}"]
+    entries = declared.get("transcripts") if isinstance(declared.get("transcripts"), list) else []
+    problems += [f"`transcript.subagents.transcripts` path {entry.get('path')!r} must be {plain}"
+                 for entry in entries if isinstance(entry, dict) and not _plain_steps(_name(entry.get("path")))]
+    sidecar = _block(declared, "sidecar")
+    if sidecar and not _plain_steps(_name(sidecar.get("path"))):
+        problems.append(f"`transcript.subagents.sidecar.path` must be {plain}")
+    return problems
+
+
+def token_problems(cost):
+    """What of a `telemetry.cost` block's pricing declaration polyctl will not read, and why; [] when it reads it all.
+
+    `token_shape` prices nothing from a declaration it cannot read whole, without a word, since a
+    reading must not fail on a layer's mistake; `polyctl adapters validate` says why before anyone
+    relies on the estimate (USD-COST).
+    """
+    if not any(key in cost for key in ("tokens", "model", "priced_when")):
+        return []
+    problems = [] if cost.get("from") == "transcript" else [
+        "`telemetry.cost.from` must be transcript: tokens are read from the transcript's usage records"]
+    declared = cost.get("tokens")
+    if not isinstance(declared, dict) or not declared or not all(
+            _names(paths) and len(_names(paths)) == (len(paths) if isinstance(paths, list) else 1)
+            for paths in declared.values()):
+        problems.append("`telemetry.cost.tokens` must map each kind of token to a path, or to a list of paths")
+    elif not all(isinstance(kind, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,31}", kind) for kind in declared):
+        # A kind's name is printed as it is declared, and a project's own adapter is written by the agents
+        # it describes: a name that is not a plain word could write a line of the estimate's own.
+        problems.append("`telemetry.cost.tokens` names each kind in lowercase letters, digits and `_`")
+    if not _name(cost.get("model")):
+        problems.append("`telemetry.cost.model` must be the path to the model that answered; without it no token "
+                        "is priced")
+    when = cost.get("priced_when", [])
+    if not isinstance(when, list) or not all(isinstance(item, dict) and _name(item.get("field"))
+                                             and isinstance(item.get("values"), list) for item in when):
+        problems.append("`telemetry.cost.priced_when` must be a list of {field, values}, with values a list")
+    return problems
+
+
+def _plain_steps(path):
+    """A declared path's steps when each names an entry below the directory it is read in, else None.
+
+    A declared path is names joined by `/`. An empty step (a path starting or ending with `/`, or
+    holding `//`), `.`, `..`, and a step holding this platform's separator or a drive name no entry
+    below: they are how a path leaves the directory it is read in, so it is refused, never
+    followed.
+    """
+    steps = str(path).split("/")
+    if any(step in ("", ".", "..") or os.sep in step or (os.altsep and os.altsep in step)
+           or os.path.splitdrive(step)[0] for step in steps):
+        return None
+    return steps
+
+
+def _inside(path, directory):
+    """Is a real path inside a real directory, and not the directory itself, as this platform compares names?"""
+    path, directory = os.path.normcase(path), os.path.normcase(directory)
+    return path.startswith(directory.rstrip(os.sep) + os.sep)
+
+
+def _declared_files(directory, steps):
+    """[(real path, what `{id}` stood for or None)] for each file a declared path's steps reach below a real directory.
+
+    A step names entries of the directory reached so far, `*` standing for any run of characters
+    and `{id}` for one or more, and a name starting with a dot is reached only by a step starting
+    with one, as a shell's glob reads them; a step with neither is the one name it spells. Every
+    step but the last reaches directories, and the last reaches files. An entry that is a symbolic
+    link - or on Windows any directory, since a junction does not say it is a link before Python
+    3.12 - is followed only when its real path is inside `directory`: a path is read inside the
+    directory it is declared in, or not at all.
+    """
+    reached = [(directory, None)]
+    for depth, step in enumerate(steps):
+        last = depth == len(steps) - 1
+        pattern = re.compile(re.escape(step).replace(re.escape("{id}"), "(?P<id>[^/]+)")
+                             .replace(re.escape("*"), "[^/]*"))
+        wild = pattern.pattern != re.escape(step)
+        following = []
+        for parent, ident in reached:
+            try:
+                if wild:
+                    with os.scandir(parent) as listing:
+                        entries = [(entry.name, entry) for entry in listing]
+                else:
+                    entries = [(step, None)]
+            except OSError:
+                continue
+            for name, entry in entries:
+                match = pattern.fullmatch(name)
+                if match is None or (wild and name.startswith(".") and not step.startswith(".")):
+                    continue
+                path = os.path.join(parent, name)
+                try:
+                    if entry is None or entry.is_symlink() or (os.name == "nt" and not last):
+                        path = os.path.realpath(path)
+                        if not _inside(path, directory) or not (os.path.isfile(path) if last else os.path.isdir(path)):
+                            continue
+                    elif not (entry.is_file() if last else entry.is_dir()):
+                        continue
+                except OSError:
+                    continue
+                following.append((path, match.groupdict().get("id") or ident))
+        reached = following
+    return sorted(reached)
+
+
+def record_body(rec, shape):
+    """The object a record's kind and fields are read from, or None when the record has none."""
+    if not shape["kind"] or not isinstance(rec, dict):
+        return None
+    body = _path_value(rec, shape["body"]) if shape["body"] else rec
+    return body if isinstance(body, dict) else None
+
+
+def record_kind(rec, shape):
+    """A record's kind where its adapter says it is, or None."""
+    body = record_body(rec, shape)
+    kind = body.get(shape["kind"]) if body is not None else None
+    return kind if isinstance(kind, str) else None
+
+
+def record_time(rec, shape):
+    """A record's ISO timestamp where its adapter says it is, or ""."""
+    value = _path_value(rec, shape["time"]) if shape["time"] and isinstance(rec, dict) else None
+    return value if isinstance(value, str) else ""
+
+
+def usage_entries(body, usage):
+    """[(values, tools)]: one entry per element a `[]` usage field reaches, else one for the record.
+
+    `values` holds the entry's value at each declared field, in order, and `tools` the
+    value of `tools` beside it; each reader adds the values up as it always has.
+    """
+    columns = [_path_values(body, field) for field in usage["fields"]]
+    tools = _path_values(body, usage["tools"]) if usage["tools"] else []
+    return [([column[i] if i < len(column) else None for column in columns], tools[i] if i < len(tools) else None)
+            for i in range(max(len(column) for column in columns))]
+
+
+# How usage records add up to spend is the adapter's to declare too (`billing.fallback.reading`):
+# `sum` when every record is the whole usage of the turn it reports, `peak-per-turn` when a
+# record is the running total of the turn in progress, `per-response` when a response is
+# written as several records that each repeat its usage. The panel, `polyctl cost` and the credit
+# estimate apply the same reading over the same turns, so no two of them tell a different spend.
+USAGE_READINGS = ("sum", "peak-per-turn", "per-response")
+
+
+def record_usage(body, usage):
+    """The usage one record reports: the numbers at every declared field of every entry, added up."""
+    return sum(value for values, _ in usage_entries(body, usage) for value in values
+               if isinstance(value, (int, float)) and not isinstance(value, bool))
+
+
+def add_usage(turn, body, usage, counted, subagent=None):
+    """Charge a usage record to its turn under the declared reading, and return how much the turn's usage grew.
+
+    Under `sum` the record adds on; under `peak-per-turn` the turn costs the highest total its
+    records reached; under `per-response` a response costs the highest total its records reached,
+    once in this reading. `counted` holds what a reading has charged each response, one dict for
+    everything it adds up: every turn of a transcript, every subagent transcript read with it,
+    and every transcript of the credit estimate. What grew is what a reader adds to a total, or
+    to the day the record was written, so a total is always the sum of its turns.
+
+    A subagent's record (`subagent`, the reading's state of its transcript, from
+    `with_subagents`) is read under the reading in the subagent's own turn, and what grew there
+    is charged to `turn`, the session's turn that started the subagent, as delegated too.
+    """
+    if subagent is not None:
+        subagent["turn"] = {} if subagent["turn"] is None else subagent["turn"]
+        grown = add_usage(subagent["turn"], body, usage, counted)
+        turn["usage"] = (turn.get("usage") or 0.0) + grown
+        turn["delegated"] = (turn.get("delegated") or 0.0) + grown
+        return grown
+    value, before = record_usage(body, usage), turn.get("usage") or 0.0
+    if usage["reading"] == "per-response":
+        value = _response_growth(counted, body, usage, value)
+    if usage["reading"] in ("sum", "per-response"):
+        turn["usage"] = before + value
+        return value
+    turn["usage"] = max(before, value)
+    return turn["usage"] - before
+
+
+def _response_growth(counted, body, usage, value):
+    """What a record adds to its response, by the id at `response`: what it holds beyond the response's charge so far.
+
+    A session's store repeats a response's whole usage in every record of it, so only the
+    first record the reading meets is charged, whichever record a tail begins at. A subagent's
+    transcript writes a response's records as it streams them, each with the output tokens so
+    far, so the response costs the most its records reached. A store can also write a response
+    again later - the same records, turns after the first, or a session's records copied into
+    another session's transcript - and a copy is not a second spend, so a response is charged
+    once per reading, not once per turn. A record that names no response is its own.
+    """
+    ident = _path_value(body, usage["response"])
+    if not isinstance(ident, (str, int)) or isinstance(ident, bool):
+        return value
+    charged = counted.get(ident)
+    counted[ident] = value if charged is None else max(charged, value)
+    return value if charged is None else max(0.0, value - charged)
+
+
+def add_tokens(turn, body, usage, priced, counted, subagent=None):
+    """Charge a usage record's tokens of each priced kind to its turn, by model and rate (USD-COST).
+
+    They are read under the reading `add_usage` applies to the same record, one kind at a time:
+    under `sum` the record adds on; under `per-response` a response's tokens of a kind count once
+    in a reading, at the most its records reached (`counted`, by response and kind); under
+    `peak-per-turn` a turn's tokens of a kind are the most its records reached. A subagent's
+    record is read in the subagent's own turn and charged to `turn`, the session's turn that
+    started it, as `add_usage` charges its usage.
+
+    `turn["tokens"]` maps (model, rate, kind) to a count. The model is None when the record names
+    none, and its JSON string when it holds a character that is not printable: polyctl prints it on a
+    line of its own, and a line break or an escape in it stays visible there, as in a review
+    header (`review_header_value`). The rate is None when every `priced_when` field holds a value
+    it lists, and otherwise names the first field that does not, by the last step of its path,
+    and what it holds - such as `speed "fast"` - so a response at a rate no table lists is never
+    priced at the rate one does.
+    """
+    counts = {kind: _first_count(body, paths) for kind, paths in priced["kinds"].items()}
+    if not any(counts.values()):
+        return
+    model = _path_value(body, priced["model"])
+    model = review_header_value(model) if isinstance(model, str) and model.strip() else None
+    rate = None
+    for when in priced["when"]:
+        value = _path_value(body, when["field"])
+        if not any(_declared_value(value, listed) for listed in when["values"]):
+            rate = f"{when['field'].rpartition('.')[2]} {json.dumps(value, default=str)}"
+            break
+    ident = _path_value(body, usage["response"]) if usage["reading"] == "per-response" else None
+    peaks = None
+    if usage["reading"] == "peak-per-turn":
+        # A subagent's record reaches its peak in the subagent's own turn, as `add_usage` reads its usage.
+        if subagent is not None and subagent["turn"] is None:
+            subagent["turn"] = {}
+        peaks = (turn if subagent is None else subagent["turn"]).setdefault("token_peaks", {})
+    tokens = turn.setdefault("tokens", {})
+    for kind, count in counts.items():
+        # Keyed by model and rate as well as kind, so a turn whose records name two models keeps both.
+        grown = _token_growth(count, usage["reading"], peaks, counted, (model, rate, kind), ident)
+        if grown:
+            tokens[(model, rate, kind)] = tokens.get((model, rate, kind), 0) + grown
+
+
+def _token_growth(count, reading, peaks, counted, kind, ident):
+    """What a record's count of one kind adds to its turn under a reading, as `add_usage` adds a record's usage.
+
+    `peaks` holds the most each kind reached in the turn read under `peak-per-turn`, and
+    `counted` what each response was charged of each kind under `per-response`.
+    """
+    if reading == "per-response" and isinstance(ident, (str, int)) and not isinstance(ident, bool):
+        charged = counted.get((ident, kind))
+        counted[(ident, kind)] = count if charged is None else max(charged, count)
+        return count if charged is None else max(0, count - charged)
+    if reading == "peak-per-turn":
+        before = peaks.get(kind, 0)
+        peaks[kind] = max(before, count)
+        return peaks[kind] - before
+    return count
+
+
+def _first_count(body, paths):
+    """The count at the first declared path that reaches one - a finite number of zero or more - else 0.
+
+    A path whose `[]` step reaches several entries counts them all, added up, as `record_usage`
+    adds up every entry of a usage field. A later path is read where an earlier one reaches no count,
+    unless the earlier one reads in an object the later ones do not - a breakdown beside a total -
+    and that object is in the record: the breakdown then says the kind is none, and a total is not
+    counted again as this kind while the breakdown names another (USD-COST). Paths in one object are
+    alternatives, and each is tried.
+    """
+    for index, path in enumerate(paths):
+        counts = [value for value in _path_values(body, path) if isinstance(value, (int, float))
+                  and not isinstance(value, bool) and 0 <= value < float("inf")]
+        if counts:
+            return sum(counts)
+        parent, later = str(path).rpartition(".")[0], paths[index + 1:]
+        if parent and later and not all(str(other).startswith(parent + ".") for other in later) \
+                and any(isinstance(value, dict) for value in _path_values(body, parent)):
+            return 0
+    return 0
+
+
+def next_turn(turn, rec, shape, subagent=None):
+    """(the turn a record falls in, whether the record opened it); None until a turn opens.
+
+    A start marker opens a turn, and a prompt opens one when none is open or the open one
+    ended. A harness may write its prompt before the start marker of the same turn, so a
+    start marker opens no second turn while the open one holds only its prompt: opened by a
+    prompt, not started and not ended. A call the harness makes of its own between the two
+    does not split them. An end marker ends the turn it falls in, and so does a record whose
+    field holds a value the adapter declares to end one (`closes_turn`).
+
+    A subagent's record (`subagent`, from `with_subagents`) falls in the session's turn that
+    started the subagent: its prompts and ends move only the subagent's own turn.
+    """
+    if subagent is not None:
+        subagent["turn"], _ = next_turn(subagent["turn"], rec, shape)
+        return turn, False
+    kind = record_kind(rec, shape)
+    waiting = turn is not None and turn.get("prompted") and not turn.get("started") and not turn.get("closed")
+    ended = turn is None or turn.get("closed")
+    opened = (kind in shape["start"] and not waiting) or (kind in shape["prompt"] and ended)
+    if opened:
+        turn = {"prompted": kind in shape["prompt"]}
+    if turn is not None:
+        turn["started"] = bool(turn.get("started")) or kind in shape["start"]
+        turn["closed"] = bool(turn.get("closed")) or closes_turn(rec, shape)
+    return turn, bool(opened)
+
+
+def tool_writes_file(name, tool):
+    """Does a tool of this name write a file: named in `write_tools`, or holding one of `write_words` in any case?"""
+    return name in tool["write_tools"] or any(word in name.lower() for word in tool["write_words"])
+
+
+def tool_path(args, tool):
+    """The file a tool call's arguments name, under the first of the adapter's `path_keys` that is set, or None."""
+    if not isinstance(args, dict):
+        return None
+    return next((args[key] for key in tool["path_keys"] if args.get(key)), None)
+
+
+def _declared_value(value, expected):
+    """A field holds the declared value: by identity for true, false and null, by equality otherwise."""
+    return value is expected if expected is None or isinstance(expected, bool) else value == expected
+
+
+def _matches(body, matches):
+    """Does a body hold every value of one of the declared matches, each a mapping of paths to values?"""
+    return any(all(_declared_value(_path_value(body, path), value) for path, value in match.items())
+               for match in matches)
+
+
+def declared_items(body, declared):
+    """The objects a tool call's or a tool result's fields are read from, in one record's body.
+
+    The body itself, or each block its `blocks` path reaches when the store nests them
+    in a message; either counts only when it holds every value its `match` declares.
+    """
+    items = _path_values(body, declared["blocks"]) if declared.get("blocks") else [body]
+    match = declared.get("match") or {}
+    return [item for item in items if isinstance(item, dict)
+            and all(_declared_value(_path_value(item, path), value) for path, value in match.items())]
+
+
+def tool_calls(body, tool):
+    """[(name, arguments)] for each tool call a record of the declared tool-call kind holds."""
+    return [(str(_path_value(item, tool["name"]) or ""), _path_value(item, tool["args"]))
+            for item in declared_items(body, tool)]
+
+
+def closes_turn(rec, shape):
+    """Does a record close a turn: a kind `turn.end` names, or one whose field holds a value `turn.end_when` declares?
+
+    A store that writes no closing record ends a turn in a field of the response that
+    ends it; the response's kind cannot say so, since every response has that kind.
+    """
+    kind = record_kind(rec, shape)
+    if kind in shape["end"]:
+        return True
+    body = record_body(rec, shape)
+    return any(kind == when["type"] and any(_declared_value(_path_value(body, when["field"]), value)
+                                            for value in when["values"]) for when in shape.get("end_when") or [])
+
+
+def is_bookkeeping(kind, shape):
+    """May a record of this kind follow a turn's end without meaning a turn is running?
+
+    `turn.bookkeeping` names such kinds; `turn.conversation` names the kinds a turn is
+    made of instead, and every other kind is bookkeeping, so a store that adds kinds of
+    its own from release to release still reads as ended when its turn has ended.
+    """
+    conversation = shape.get("conversation") or []
+    return kind in shape["bookkeeping"] or (bool(conversation) and kind not in conversation)
+
+
+# A subagent's spend is its session's, charged to the turn that started it (`transcript.subagents`).
+
+def subagents(transcript, shape, sidecars=True):
+    """What names each subagent transcript beside a session transcript: {"files", "named", "calls"}; None if undeclared.
+
+    `files` holds every transcript a declared `path` reaches under the session's subagent
+    directory; `named` maps (the declaration's index, the name its `{id}` stands for) to the
+    transcripts of that name, and `calls` a tool call's id to the transcripts whose sidecar
+    names it. One listing of the directory serves a whole reading. A reader that needs only
+    the transcripts asks without `sidecars`, and no sidecar is opened.
+
+    Every path stays inside the session's own subagent directory. `dir` names a directory for the
+    session inside the session transcript's own, and every transcript and sidecar must be inside
+    that one, their real paths compared, so neither `..`, an absolute path, a wildcard nor a
+    symbolic link takes a reading anywhere else the user can read. The paths returned are the
+    real ones. A declaration may come from an adapter layer the agent it describes can write;
+    confined, it chooses only which of the files the store keeps for that session are its
+    subagents.
+    """
+    declared = shape.get("subagents")
+    if not declared or not transcript:
+        return None
+    found = {"files": [], "named": {}, "calls": {}}
+    session = os.path.splitext(os.path.basename(transcript))[0]
+    steps = _plain_steps(declared["dir"].replace("{session}", session))
+    directory = os.path.realpath(os.path.join(os.path.dirname(transcript), *steps)) if steps else ""
+    if not _inside(directory, os.path.realpath(os.path.dirname(transcript))) or not os.path.isdir(directory):
+        return found
+    listed = set()
+    for number, entry in enumerate(declared["transcripts"]):
+        for path, ident in _declared_files(directory, entry["path"].split("/")):
+            if path not in listed:
+                listed.add(path)
+                found["files"].append(path)
+            if entry["named_by"] and ident:
+                found["named"].setdefault((number, ident), []).append(path)
+    sidecar = declared["sidecar"] if sidecars else None
+    for path in found["files"] if sidecar else []:
+        steps = _plain_steps(sidecar["path"].replace("{name}", os.path.splitext(os.path.basename(path))[0]))
+        meta = os.path.realpath(os.path.join(os.path.dirname(path), *steps)) if steps else ""
+        if not _inside(meta, directory):
+            continue
+        try:
+            with _open_regular(meta) as fh:
+                call = _path_value(json.loads(fh.read().decode(UTF8)), sidecar["call"])
+        except (OSError, ValueError):
+            continue
+        if isinstance(call, str) and call:
+            found["calls"].setdefault(call, []).append(path)
+    return found
+
+
+def started_subagents(rec, shape, found, joined):
+    """The subagent transcripts a record starts that no record before it in the reading started.
+
+    A record starts the transcripts the value at a declared `named_by` names, and a tool
+    call the transcripts whose sidecar names its id. `joined` holds what the reading has
+    started, so a transcript that two records name - the call that started it and its
+    result - is read once, after the first.
+    """
+    body = record_body(rec, shape) if found else None
+    if body is None:
+        return []
+    paths = []
+    for number, entry in enumerate(shape["subagents"]["transcripts"]):
+        value = _path_value(body, entry["named_by"]) if entry["named_by"] else None
+        if isinstance(value, str) and value:
+            paths += found["named"].get((number, value), [])
+    tool = shape["tool"]
+    if found["calls"] and tool and tool["id"] and record_kind(rec, shape) == tool["type"]:
+        for item in declared_items(body, tool):
+            value = _path_value(item, tool["id"])
+            if isinstance(value, str) and value:
+                paths += found["calls"].get(value, [])
+    fresh = [path for path in dict.fromkeys(paths) if path not in joined]
+    joined.update(fresh)
+    return fresh
+
+
+def subagent_records(path):
+    """A subagent transcript's records: all of them, since its whole spend is charged to the turn that started it."""
+    return read_tail(path, 400_000_000, regular=True)
+
+
+def with_subagents(recs, shape, transcript, read=subagent_records):
+    """(record, subagent) for each record of a session, each followed by the records of the subagents it starts.
+
+    `subagent` is None for a record of the session, and for a subagent's record the reading's
+    state of the transcript it came from, {"path", "turn"}: `next_turn` and `add_usage` charge
+    it to the session's turn it falls in, which is the turn that started it. A subagent a
+    subagent starts follows the record that starts it, charged to the same turn. `read(path)`
+    gives a subagent transcript's records. A transcript no record of `recs` starts is not
+    read: its spend belongs to no turn of the reading - in the panel, a subagent started
+    before the tail it reads - and a total stays the sum of its turns.
+    """
+    found = subagents(transcript, shape)
+    if not (found or {}).get("files"):
+        return ((rec, None) for rec in recs)
+    joined = set()
+
+    def spliced(records, subagent):
+        for rec in records:
+            yield rec, subagent
+            for path in started_subagents(rec, shape, found, joined):
+                yield from spliced(read(path), {"path": path, "turn": None})
+    return spliced(recs, None)
+
+
+def subagent_tails(transcript, shape, since, nbytes):
+    """The records of every subagent transcript beside a session's that was written since `since`, joined or not.
+
+    A subagent's tool calls are the implementer's whether or not a record of the tail read
+    starts it, so what one wrote is never taken for another writer's.
+    """
+    out = []
+    for path in (subagents(transcript, shape, sidecars=False) or {}).get("files") or []:
+        try:
+            if os.path.getmtime(path) < since:
+                continue
+        except OSError:
+            continue
+        out += read_tail(path, nbytes, regular=True)
+    return out
+
+
+# A subagent at work is its implementer at work (`transcript.subagents`, or `transcript.subagent_sessions`
+# where a store keeps one session per subagent): whether the implementer is working, idle or done is read
+# from the subagents too. Those readers run every watchdog cycle, so they look up what a subagent wrote and
+# open none of its records.
+
+def subagent_writes(transcript, shape):
+    """[(modification time, size)] of each subagent transcript of a session; [] if it declares none.
+
+    Read from one listing and a stat of each transcript: no subagent transcript and no
+    sidecar is opened, however many a session holds or however long they grew.
+
+    A database store joins differently, because a subagent there is a session of its own in the
+    same tables rather than a file beside the parent's: `transcript.subagent_sessions` names the
+    query that finds one session's children, and each child is asked its own clock. No size comes
+    of it, because the parent's size is the whole store and already holds a child's rows: what the
+    join adds is when a child wrote, not how much more of the store there is.
+    """
+    if isinstance(transcript, DatabaseTail):
+        return [(tail.last_activity() or 0, 0) for tail in transcript.descendant_tails()]
+    out = []
+    for path in (subagents(transcript, shape, sidecars=False) or {}).get("files") or []:
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+        out.append((stat.st_mtime, stat.st_size))
+    return out
+
+
+def session_write(transcript):
+    """When a session wrote to its own transcript last, in epoch seconds - and to nothing else.
+
+    A database file is written by every session held in it, so its modification time says a machine
+    is busy rather than that this agent is. A store that keeps a per-session clock can say more, and
+    `transcript.freshness` declares the query that reads it. A session whose rows the store updates
+    in place has no row written lately and is still working, so this is the only reading that sees
+    it. A reader that compares what a session wrote with what its subagent wrote has to take both
+    from one clock, or the machine's answer swamps the agent's.
+    """
+    return (transcript.last_activity() or os.path.getmtime(transcript)) if isinstance(transcript, DatabaseTail) \
+        else os.path.getmtime(transcript)
+
+
+def last_write(transcript, shape):
+    """When the implementer last wrote, in epoch seconds: to its session transcript or to a subagent's.
+
+    A session waits for a subagent with its own transcript quiet, or ends its turn while the
+    subagent works on in the background, and the session transcript alone then reads as an
+    implementer silent for as long as the subagent works: over an hour, measured. A subagent
+    that has finished writes no more, so its last write only ages.
+    """
+    return max([session_write(transcript)] + [mtime for mtime, _ in subagent_writes(transcript, shape)])
+
+
+def _strings(o, out, keys, depth=0, shortest=31):
+    if depth > 7:
+        return
+    if isinstance(o, str):
+        if len(o) >= shortest:
+            out.append(o)
+    elif isinstance(o, dict):
+        for k, v in o.items():
+            if k in keys:
+                _strings(v, out, keys, depth + 1, shortest)
+            elif isinstance(v, (dict, list)):
+                _strings(v, out, keys, depth + 1, shortest)
+    elif isinstance(o, list):
+        for x in o:
+            _strings(x, out, keys, depth + 1, shortest)
+
+
+def local_hhmm(ts):
+    """Render an ISO timestamp in the reader's own timezone.
+
+    Transcripts store UTC. Slicing "…T00:44:12.525Z" for its characters prints
+    00:44 next to a panel header showing local 03:44, and a message written
+    thirty seconds ago then reads as three hours stale. In an observation tool
+    that is not cosmetic: it is the difference between "the agent just said this"
+    and "the agent stopped saying things", which are opposite conclusions.
+    """
+    if not ts or len(ts) < 16:
+        return "--:--"
+    try:
+        t = ts.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(t)
+        if dt.tzinfo is None:                 # naive stamps are already local
+            return dt.strftime("%H:%M")
+        return dt.astimezone().strftime("%H:%M")
+    except ValueError:
+        return ts[11:16]
+
+
+def message_words(body, shape, shortest=31):
+    """The text a message record holds, as one line: all of it, or only its word blocks when it holds blocks.
+
+    A store that nests blocks in a message writes a tool's result as a block of the
+    prompt's kind and a tool call as a block of the reply's, and neither is a person or
+    the agent speaking. `transcript.messages.blocks` and `match` declare the blocks that
+    are words; a record holding blocks of which none match holds no words, and a record
+    whose content is not blocks - a prompt typed as one string - is read whole.
+
+    A store also writes notes of its own, and the summary of a compacted conversation, as
+    records of the prompt's kind. They are no one speaking, and a record holding what one of
+    `transcript.messages.not_words` declares holds no words either.
+
+    A string shorter than `shortest` is passed over, as the panel's lines have always passed short
+    strings over; a reader asking whether anyone spoke at all counts a short answer too.
+    """
+    if _matches(body, shape.get("not_words") or []):
+        return ""
+    words = shape.get("words")
+    parts = declared_items(body, words) if words and _path_values(body, words["blocks"]) else [body]
+    buf = []
+    for part in parts:
+        _strings(part, buf, shape["text_keys"], shortest=shortest)
+    return " ".join(" ".join(buf).split())
+
+
+def in_place_reply(rec, shape):
+    """Is a record a reply the harness wrote in the model's place, reporting no usage (`harness_replies`)?
+
+    A store may write a reply of its own where the model gave none - the error its service
+    returned, or an answer to a note that asked the model nothing - holding no usage. It answers
+    nothing and spends nothing: no reading counts it as the implementer's turn, and a turn that
+    holds no other reply was not answered. A reply of those that did report usage is read as any
+    other.
+    """
+    kind = record_kind(rec, shape) if shape.get("harness_replies") else None
+    if kind not in shape["reply"]:
+        return False
+    body, usage = record_body(rec, shape), shape["usage"]
+    return _matches(body, shape["harness_replies"]) and not (usage and kind == usage["type"]
+                                                             and record_usage(body, usage))
+
+
+def _between(text, markers):
+    """Each piece of a text that stands between the two markers of a declared pair, in order."""
+    start, end = markers
+    pieces, at = [], 0
+    while True:
+        first = text.find(start, at)
+        last = text.find(end, first + len(start)) if first >= 0 else -1
+        if last < 0:
+            return pieces
+        pieces.append(text[first + len(start):last])
+        at = last + len(end)
+
+
+def failed_ends(rec, shape):
+    """[(task, text)] when a record tells of a background task's end whose status is a failure (`telemetry.failure.ends`).
+
+    `task` names the end: the ids its text holds between the `id` markers, or the whole text when it
+    holds none, so an end told twice - once while a turn ran, once after it - is one end to a reader
+    that keeps the names it has read. `text` is what stands between the `text` markers, else all of it.
+    """
+    ends = shape.get("ends")
+    body = record_body(rec, shape) if ends else None
+    kind = record_kind(rec, shape) if body is not None else None
+    for record in ends["records"] if kind else []:
+        value = _path_value(body, record["field"]) if kind == record["type"] and _matches(body, [record["match"]]) \
+            else None
+        if not isinstance(value, str):
+            continue
+        status = _between(value, ends["status"])
+        if not status or status[0].strip() not in ends["failed_when"]:
+            return []
+        ids = _between(value, ends["id"]) if "id" in ends else []
+        text = _between(value, ends["text"]) if "text" in ends else []
+        return [(" ".join(ident.strip() for ident in ids) if ids else value, text[0] if text else value)]
+    return []
+
+
+def messages(recs, limit=8, adapter=None):
+    """[(HH:MM, "user" | "assistant", text)] oldest→newest.
+
+    A prompt and a reply are the kinds the adapter declares in `transcript.messages`,
+    and their words the text `message_words` reads; asked without an adapter, the
+    implementer's adapter says which they are.
+    """
+    shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
+    roles = dict.fromkeys(shape["reply"], "assistant")
+    roles.update(dict.fromkeys(shape["prompt"], "user"))
+    out = []
+    for r in reversed(recs):
+        kind = record_kind(r, shape)
+        if kind not in roles:
+            continue
+        text = message_words(record_body(r, shape), shape)
+        if len(text) < 40:
+            continue
+        out.append((local_hhmm(record_time(r, shape)), roles[kind], text))
+        if len(out) >= limit:
+            break
+    return list(reversed(out))
+
+
+def telemetry(recs, adapter, transcript=None):
+    """Context %, per-turn and session cost, driven by the adapter's block.
+
+    Usage adds up under the adapter's reading, as `polyctl cost` and the credit estimate add it:
+    under `sum` every usage entry is one turn's cost, as written; under `peak-per-turn` a turn
+    - the one already under way where the records begin included - costs the highest total
+    its records reached; under `per-response` a turn costs each response it holds, at its
+    highest record, that no earlier turn of these records held. A turn whose usage names no
+    tools beside it has the tool calls its records hold.
+
+    Given the path of the session `transcript` the records were read from, the subagents a
+    record starts are read after it (`with_subagents`): their spend is in the total, in the
+    turn that started them and in `delegated`, and their tool calls are that turn's. Under
+    `sum`, where a usage record is a turn of its own, a subagent's adds to the total and to
+    `delegated` and is no turn of the session. The context is the session's own.
+
+    A reply the harness wrote in the model's place with no usage (`in_place_reply`) is not read:
+    a turn holding no other reply is no turn of the implementer's, and the average is over the
+    turns the model answered.
+    """
+    shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
+    ctx_spec, cost_spec = shape["context"], shape["usage"]
+    out = {"ctx": None, "total": 0.0, "turns": 0, "last": None, "unit": shape["unit"], "delegated": 0.0}
+    turn, counted = None, {}
+    for r, subagent in with_subagents(recs, shape, transcript if cost_spec else None):
+        pl = record_body(r, shape)
+        if pl is None:
+            continue
+        t = record_kind(r, shape)
+        if ctx_spec and subagent is None and t == ctx_spec["type"]:
+            if all(pl.get(k) == v for k, v in ctx_spec["match"].items()):
+                val = _path_value(pl, ctx_spec["field"])
+                if isinstance(val, (int, float)):
+                    out["ctx"] = val
+        if not cost_spec:
+            continue
+        turn, _ = next_turn(turn, r, shape, subagent)
+        # A turn read from its records, not from a summary, has the tool calls those records hold.
+        calls = len(tool_calls(pl, shape["tool"])) if cost_spec["reading"] != "sum" and shape["tool"] \
+            and t == shape["tool"]["type"] else 0
+        if t != cost_spec["type"]:
+            if calls and turn is not None:
+                turn["calls"] = turn.get("calls", 0) + calls
+            continue
+        if in_place_reply(r, shape):
+            continue
+        if cost_spec["reading"] == "sum":
+            for values, tools in usage_entries(pl, cost_spec):
+                values = [value or 0 for value in values]
+                if all(isinstance(value, (int, float)) for value in values):
+                    u = sum(values)
+                    out["total"] += u
+                    if subagent is not None:
+                        out["delegated"] += u
+                        continue
+                    out["turns"] += 1
+                    out["last"] = (u, len(tools or []))
+            continue
+        entries = usage_entries(pl, cost_spec)
+        if not entries:
+            continue
+        turn = {} if turn is None else turn
+        turn["calls"] = turn.get("calls", 0) + calls
+        if "usage" not in turn:
+            out["turns"] += 1
+        grown = add_usage(turn, pl, cost_spec, counted, subagent)
+        out["total"] += grown
+        out["delegated"] += grown if subagent is not None else 0.0
+        out["last"] = (turn["usage"], sum(len(tools or []) for _, tools in entries) if cost_spec["tools"]
+                       else turn["calls"])
+    return out
+
+
+_QUOTA = {}                     # command -> {"at", "lines"}: the readings this process holds
+QUOTA_READINGS = 16             # how many commands ~/.polyctl/quota.json keeps a reading for, newest first
+# A word a POSIX shell passes on as it is written: nothing it would split, quote, expand or glob.
+_PLAIN_WORD = re.compile(r"[\w./:@%+,=-]+")
+
+
+def quota_readings_path():
+    return os.path.join(HOME, ".polyctl", "quota.json")
+
+
+def _quota_readings():
+    """{command: {"at", "lines"}} as polyctl's processes kept them; a file that cannot be read keeps none."""
+    try:
+        with open(quota_readings_path(), encoding=UTF8) as fh:
+            document = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(document, dict):
+        return {}
+    return {command: reading for command, reading in document.items()
+            if isinstance(reading, dict) and isinstance(reading.get("at"), (int, float))
+            and isinstance(reading.get("lines"), list) and all(isinstance(line, str) for line in reading["lines"])}
+
+
+def _quota_output(argv):
+    """(what `sh(" ".join(argv) + " 2>/dev/null", cwd=HOME)` returned, whether the command exited 0).
+
+    Without a shell when the program is on the binary search path and no word is one a
+    shell would change: run as the shell ran it, from the home directory, its standard
+    error discarded, the program named as written. Anything else - a word the shell would
+    split, quote or expand, a program found nowhere, and every command on Windows, whose
+    cmd.exe has rules of its own - goes through sh()'s shell as before.
+    """
+    program = argv[0]
+    plain = os.name != "nt" and all(_PLAIN_WORD.fullmatch(word) for word in argv) \
+        and "=" not in program and (os.path.isabs(program) or "/" not in program)
+    found = binary_candidates(program) if plain else []
+    if found:
+        try:
+            done = subprocess.run(list(argv), executable=found[0], cwd=HOME, stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL, text=True, encoding=UTF8, errors="replace", timeout=20)
+            return done.stdout.strip(), done.returncode == 0
+        except OSError:
+            pass                # not started - a script with no #! line only a shell runs - so the shell runs it
+        except Exception:
+            return "", False
+    out, status = _sh_run(" ".join(argv) + " 2>/dev/null", cwd=HOME)
+    return out, status == 0
+
+
+def _quota_write(readings):
+    """Replace ~/.polyctl/quota.json with the newest of these readings, for every other polyctl process."""
+    from .storage import replace_file_durably
+    newest = sorted(readings.items(), key=lambda item: item[1]["at"], reverse=True)[:QUOTA_READINGS]
+    try:
+        replace_file_durably(quota_readings_path(), (json.dumps(dict(newest), indent=1) + "\n").encode(UTF8))
+    except OSError:
+        pass                    # a reading that cannot be kept is still this call's answer
+
+
+def _quota_keep(command, facts):
+    """Keep one reading for this process and, the file replaced whole, for every other polyctl process."""
+    reading = _QUOTA[command] = dict(facts, at=time.time())
+    readings = _quota_readings()
+    readings[command] = reading
+    _quota_write(readings)
+    return reading
+
+
+def _kept_reading(argv, window, take):
+    """A command's reading: the one kept under the command while it is younger than `window` seconds, else a new one.
+
+    `take()` runs the command and returns (reading, whether it may be kept): a dict whose
+    "lines" hold what was read, beside any other facts its reader keeps. Only a command
+    that answered is kept: a failure is asked again next time, not served for the whole
+    window.
+    """
+    command = " ".join(argv)
+    now = time.time()
+
+    def fresh(reading):
+        return reading is not None and 0 <= now - reading["at"] < window
+
+    reading = _QUOTA.get(command)
+    if not fresh(reading):
+        reading = _quota_readings().get(command)
+    if fresh(reading):
+        _QUOTA[command] = reading
+        return reading
+    reading, keep = take()
+    return _quota_keep(command, reading) if keep else reading
+
+
+def metered_adapter(cfg):
+    """The adapter the implementer's quota is read through: the one the package ships under the adapter id its block
+    names, else {} (TRIAGE-HIGHS).
+
+    Reading the quota runs the command its adapter declares (`telemetry.quota.argv`), and `polyctl status` and the
+    watchdog's quota gate read it from the adapter as every layer loads it - the project's .polyctl/adapters/ among them,
+    a file the implementer writes, where a planted `touch` ran. A command polyctl runs comes from the package alone, as a
+    turn's, a route's, an MCP registration's and a probe's do (TURN-ARGV, ROUTE-ARGV, HARNESS-SETUP-2, PROBE-SHIPPED);
+    a layer still says how a transcript reads.
+    """
+    return turn_adapter(((cfg or {}).get("implementer") or {}).get("adapter")) or {}
+
+
+def quota(adapter, ttl=300):
+    """Provider quota via the adapter's command, kept for its window across polyctl's processes. Silent if absent.
+
+    `polyctl status` and every watchdog cycle are processes of their own, so a reading held in
+    memory was taken again by each of them, through a shell, although the adapter declares
+    how long one lasts (`cache_seconds`). A reading is kept under its command in
+    ~/.polyctl/quota.json and read back while it is younger than that. Only a command that
+    exited 0 is kept: a failure is asked again next time, not served as no lines for the
+    whole window.
+
+    `adapter` is one the package ships - metered_adapter's, or the window's - since the command it names runs
+    (TRIAGE-HIGHS).
+    """
+    spec = (adapter.get("telemetry") or {}).get("quota") or {}
+    argv = spec.get("argv")
+    if not argv:
+        return []
+
+    def take():
+        out, ok = _quota_output(argv)
+        return {"lines": [l.strip() for l in out.split("\n")[1:] if l.strip() and "unknown" not in l]}, ok
+
+    return _kept_reading(argv, spec.get("cache_seconds", ttl), take)["lines"]
+
+
+def forget_quota(adapter):
+    """Drop the reading kept for this adapter's quota command, here and for every other polyctl process.
+
+    For when what it read has moved - an account rotation - so the next read asks again.
+    """
+    argv = ((adapter.get("telemetry") or {}).get("quota") or {}).get("argv")
+    if not argv:
+        return
+    command = " ".join(argv)
+    _QUOTA.pop(command, None)
+    readings = _quota_readings()
+    if readings.pop(command, None) is not None:
+        _quota_write(readings)
+
+
+# keyflip's budget status as one JSON document: {"budget": {"defaults", "accounts", "alerts", "breached"}}.
+QUOTA_BUDGET_ARGV = ("keyflip", "budget", "status", "--json")
+
+
+def quota_budget(adapter, ttl=300):
+    """keyflip's budgets, kept like the quota reading: {"accounts": [name], "breached": [{name, metric, pct, limit}]}.
+
+    The watchdog asked `keyflip budget status` through a shell on every call and looked in
+    its prose for words keyflip does not print, so a budget a person set never stopped a
+    turn. With `--json` keyflip writes the status as one document: every account with a
+    budget, and on each an alert per window at or near its limit, `"breached": true` once
+    usage has reached the limit. The account names and each breach are kept under that
+    command in ~/.polyctl/quota.json for the adapter's `cache_seconds`, when keyflip exited 0
+    and wrote the document.
+
+    Which breach counts: the document names no active account and no provider, so a
+    breach on any account counts for every adapter asked about. keyflip runs without a
+    shell from the home directory, found on the binary search path; absent, failing or
+    unreadable, it reports no account, and the quota window decides.
+    """
+    spec = (adapter.get("telemetry") or {}).get("quota") or {}
+
+    def take():
+        out, status = _run_program(QUOTA_BUDGET_ARGV, cwd=HOME)
+        try:
+            accounts = json.loads(out)["budget"]["accounts"]
+            names = [str(account["name"]) for account in accounts]
+            breached = [{"name": str(account["name"]), "metric": alert.get("metric"), "pct": alert.get("pct"),
+                         "limit": alert.get("limit")}
+                        for account in accounts for alert in account.get("alerts") or [] if alert.get("breached") is True]
+        except (ValueError, TypeError, KeyError, AttributeError):
+            return {"lines": [], "breached": []}, False
+        return {"lines": names, "breached": breached}, status == 0
+
+    reading = _kept_reading(QUOTA_BUDGET_ARGV, spec.get("cache_seconds", ttl), take)
+    breached = reading.get("breached")
+    return {"accounts": list(reading["lines"]),
+            "breached": [fact for fact in breached if isinstance(fact, dict)] if isinstance(breached, list) else []}
+
+
+def busy(cfg, adapter):
+    """(state, seconds_since_write, description). Conservative: status AND age.
+
+    The age is the implementer's last write, a subagent's included (`last_write`): a session
+    whose transcript is quiet while its subagent writes is working, not idle.
+    """
+    msgs, meta = session_paths(cfg)
+    if not msgs or not os.path.exists(msgs):
+        return "unknown", None, ""
+    age = int(time.time() - last_write(msgs, transcript_shape(adapter)))
+    status, desc = "", ""
+    if meta and os.path.exists(meta):
+        try:
+            m = json.load(open(meta, encoding=UTF8))
+            status = m.get(
+                (adapter.get("busy") or {}).get("status_field", "status"), "")
+            desc = m.get(
+                (adapter.get("busy") or {}).get("description_field", "description"), "") or ""
+        except Exception:
+            pass
+    idle_s = (adapter.get("busy") or {}).get("idle_seconds", 240)
+    running = status in ((adapter.get("busy") or {}).get("running_values") or [])
+
+    # A freshly-written transcript does not mean a live turn. The file keeps its
+    # mtime after the process exits, so a killed agent reads as WORKING for the
+    # whole idle window — the observation layer asserting the opposite of the
+    # truth, at exactly the moment someone is looking to find out what happened.
+    # Only ask the OS when the mtime would otherwise claim "working"; that is the
+    # only case where the answer changes anything, and it keeps the panel cheap.
+    # Where the OS cannot be asked the state is unknown, and says why, rather than
+    # whatever the mtime claims (WINDOWS-TABLE-CLOSED).
+    from . import procs
+    try:
+        turns = agent_pids(cfg["root"], adapter) if age < idle_s else None
+    except procs.TableUnreadable as exc:
+        return "unknown", age, str(exc)
+    if age < idle_s and not turns:
+        return "stopped", age, desc
+
+    if age < 120:
+        state = "working"
+    elif age < idle_s:
+        state = "slowing"
+    else:
+        state = "idle" if not running else "idle"
+    return state, age, desc
+
+
+_SURFACES = {"at": 0.0, "rows": {}}
+
+
+def tool_availability(ttl=600):
+    """Which agent tools are actually usable on this machine.
+
+    Two independent facts, and both matter: can polyctl find a runnable CLI, and is
+    there an authenticated account for it. keyflip already answers the second for
+    a range of tools and never reads the secret itself, so ask it rather than
+    reinventing credential detection — align, do not depend: if keyflip is absent
+    the CLI check still works on its own. Which tools and which binaries come from
+    the vendor list and the adapters, never from a table here (#89). A CLI is installed where
+    polyctl would start it from, including declared install directories past PATH
+    (WARP-ADAPTER), never the current directory (WINDOWS-NO-CWD-EXEC).
+    """
+    if time.time() - _SURFACES["at"] < ttl and _SURFACES["rows"]:
+        return _SURFACES["rows"]
+    rows = {}
+    out = _run_program(["keyflip", "surfaces"], cwd=HOME)[0]
+    for line in out.split("\n"):
+        line = line.strip()
+        if not (line.startswith("●") or line.startswith("○")):
+            continue
+        body = line[1:].strip()
+        name = re.split(r"\s{2,}", body)[0].strip().lower()
+        rows[name] = {"account": line.startswith("●")}
+    vendors = [vendor for vendor in vendor_list() if vendor.get("adapter")]
+    alias = {str(surface).lower(): vendor["adapter"] for vendor in vendors for surface in vendor.get("surfaces") or []}
+    named = {}
+    for k, v in rows.items():
+        named[alias.get(k, k)] = v
+    catalog = adapter_catalog()
+    for vendor in vendors:
+        binaries = adapter_binaries((catalog.get(vendor["adapter"]) or {}).get("adapter"))
+        if not binaries:
+            continue
+        found = next((binary for binary in binaries if runnable_binary(binary)), None)
+        entry = named.setdefault(vendor["adapter"], {})
+        entry["installed"] = bool(found)
+        entry["binary"] = found or binaries[0]
+    _SURFACES.update(at=time.time(), rows=named)
+    return named
+
+
+BOARD_STATES = ("running", "blocked", "queued", "inbox", "verified", "done", "rejected")
+
+# A2A (Agent2Agent) task states, for the day an A2A endpoint serialises this
+# board. Kept as a table rather than adopted as the vocabulary: `inbox` and
+# `queued` are both A2A `submitted`, and `verified` has no A2A equivalent at all
+# — it is evidence gathered *before* completion, which is the distinction this
+# whole tool exists to make. Renaming our states to match would delete it.
+A2A_STATE = {
+    "inbox": "submitted",       # pulled from a source, not yet admitted
+    "queued": "submitted",      # admitted: has a written acceptance boundary
+    "running": "working",
+    "blocked": "input-required",
+    "verified": "working",      # gates passed; authority to land not yet granted
+    "done": "completed",
+    "rejected": "rejected",
+}
+
+
+def _board_heading(line):
+    """Only a state's whole heading line opens its section (SLICE-LIFECYCLE-3)."""
+    match = re.match(r"^##\s+([a-z]+)\s*$", line.strip())
+    return match.group(1) if match and match.group(1) in BOARD_STATES else None
+
+
+def board(root, data=None):
+    """.polyctl/board.md — where each pre-authorised item currently is.
+
+    A flat backlog answers "what is next" but not "what stopped, and on what".
+    Once an agent is allowed to park a blocked slice and pick up the next item,
+    that second question is the one a human actually needs on returning: the
+    parked item is invisible precisely because work continued without it.
+
+    The file is the single source of truth and the agent edits it directly, the
+    way it edits mail and reviews. Parsing here stays deliberately forgiving —
+    a board a human cannot hand-edit during an incident is a board that goes
+    stale during exactly the incident it was built for.
+
+    `data` is the board's bytes as one reading took them, read as the file is: a
+    decision made on a BoardEdit reads the board its moves are made on
+    (SLICE-LIFECYCLE-2).
+
+    Returns {state: [{"id", "title", "notes": {k: v}}]}.
+    """
+    p = os.path.join(root, ".polyctl", "board.md")
+    out = {st: [] for st in BOARD_STATES}
+    if data is None and not os.path.exists(p):
+        return out
+    import io
+    state = None
+    for line in (open(p, errors="replace", encoding=UTF8) if data is None
+                 else io.TextIOWrapper(io.BytesIO(data), errors="replace", encoding=UTF8)):
+        line = line.rstrip()
+        if line.lstrip().startswith("##"):
+            # Every heading ends a section; only a state's own heading starts one (#33).
+            state = _board_heading(line)
+            continue
+        if not state or not line.lstrip().startswith("- "):
+            continue
+        item = line.lstrip()[2:].strip()
+        m = re.match(r"^\[([^\]]+)\]\s*(.*)$", item)
+        if not m:
+            continue
+        rest = [x.strip() for x in m.group(2).split("·")]
+        notes = {}
+        for chunk in rest[1:]:
+            k, _, v = chunk.partition(":")
+            if v:
+                notes[k.strip()] = v.strip()
+            elif chunk:
+                notes[chunk] = ""
+        out[state].append({"id": m.group(1), "title": rest[0] if rest else "",
+                           "notes": notes})
+    return out
+
+
+def sources(root):
+    """.polyctl/sources.json — external work queues feeding this project's board.
+
+    `polyctl` speaks no tracker API and holds no tracker credential. The MCP client is
+    the *agent*: it pulls from Linear/Jira/GitHub with a server that already
+    exists, normalises the result to a file, and this side admits it. That keeps
+    the zero-install, file-only core intact — a tracker is an addition for people
+    who install one, never a prerequisite.
+    """
+    p = os.path.join(root, ".polyctl", "sources.json")
+    if not os.path.exists(p):
+        return {}
+    try:
+        cfg = json.load(open(p, encoding=UTF8))
+    except Exception:
+        return {}
+    cfg.setdefault("sources", [])
+    cfg.setdefault("wip_limit", 1)
+    cfg.setdefault("refill_below", 3)
+    return cfg
+
+
+def inbox_files(root):
+    """Normalised pulls waiting to be admitted: .polyctl/inbox/<source-id>.json."""
+    d = os.path.join(root, ".polyctl", "inbox")
+    if not os.path.isdir(d):
+        return []
+    return [os.path.join(d, f) for f in sorted(os.listdir(d)) if f.endswith(".json")]
+
+
+def binding_error(root, declared):
+    """Refuse work that belongs to another project.
+
+    A source is bound to exactly one repository. Without this check a tracker
+    feeding project A can put an item on project B's board, and an agent that
+    grinds boards without reading URLs will happily implement it there. The
+    damage is silent and lands as a commit in the wrong repository, so the check
+    belongs at the boundary rather than in anyone's memory.
+    """
+    if not declared:
+        return "item file declares no bound_root"
+    if os.path.realpath(declared) != os.path.realpath(root):
+        return f"bound to {declared}, not {root}"
+    return None
+
+
+def plan_digest(root, item_id):
+    """Content hash of the plan an item is worked against, or None."""
+    base = item_id.split("/")[0]
+    p = os.path.join(root, ".polyctl", "plans", f"{base}.md")
+    if not os.path.exists(p):
+        return None
+    h = hashlib.sha256()
+    with open(p, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return "sha256:" + h.hexdigest()
+
+
+PLAN_CHAIN = "polyctl-plan-row-v1"
+
+
+def _plan_baselines(rows):
+    """Reject a missing baseline and an unrecorded replacement (TRIAGE-2-MEDIUM)."""
+    from .storage import LedgerCorruption
+    out = {}
+    for rec in rows:
+        if not isinstance(rec, dict) or not all(isinstance(rec.get(key), str) and rec[key]
+                                               for key in ("item", "digest")):
+            raise LedgerCorruption("plan baseline needs a nonempty item and digest; restore the ledger")
+        item = rec["item"]
+        if item in out and (rec.get("event") != "readmitted" or rec.get("replaces") != out[item]):
+            raise LedgerCorruption(f"plan baseline {item} was replaced without re-admission; restore the ledger")
+        out[item] = rec["digest"]
+    return out
+
+
+def plan_baseline(root):
+    """Plan hashes at admission, chained from the legacy prefix (TRIAGE-2-MEDIUM)."""
+    from .storage import read_chained_jsonl
+    return _plan_baselines(read_chained_jsonl(os.path.join(root, ".polyctl", "ledger", "plans.jsonl"),
+                                             PLAN_CHAIN, legacy_prefix=True))
+
+
+def plan_drift(root):
+    """Items whose plan changed after admission.
+
+    The implementer reads its plan; it does not write to it. When the document a
+    slice is measured against can be edited by the thing being measured, every
+    later check is circular. Recording the hash at admission turns that from an
+    invisible failure into a line of output.
+    """
+    base = plan_baseline(root)
+    drifted = []
+    for item, was in base.items():
+        now = plan_digest(root, item)
+        if now and now != was:
+            drifted.append(item)
+    return drifted
+
+
+def record_plan(root, item_id, digest):
+    from .storage import append_chained_jsonl
+
+    def admission(rows):
+        base = _plan_baselines(rows)
+        _plan_baselines([{"item": item_id, "digest": digest}])
+        return {"event": "readmitted", "replaces": base[item_id]} if item_id in base else {"event": "admitted"}
+
+    append_chained_jsonl(os.path.join(root, ".polyctl", "ledger", "plans.jsonl"),
+                         {"item": item_id, "digest": digest, "at": int(time.time())},
+                         PLAN_CHAIN, legacy_prefix=True, prepare=admission)
+
+
+SLICE_CHAIN = "polyctl-slice-row-v1"
+# The note in which a blocked item keeps the `needs:` it carried before the block, as the watchdog's quota park keeps
+# it (QUOTA_HELD there): the block's reason takes `needs:`, and the move that resumes the slice gives the old one back.
+HELD_NEEDS = "held-needs"
+
+
+def slice_ledger_path(root):
+    return os.path.join(root, ".polyctl", "ledger", "slices.jsonl")
+
+
+def slice_moves(root, voided=False):
+    """Every move between the board's sections polyctl made, oldest first; raises on a broken chain (SLICE-LIFECYCLE).
+
+    A move is recorded before the board is written, and one whose write failed is followed by a line that voids
+    it (`voids`: the ordinal of the line it voids, `why`: what stopped the write). Neither is a move the slice
+    made, so both are left out: a reader that counts moves, takes the newest or says since when reads only what
+    reached the board. `voided` keeps the voided moves in their place, each with the line that voids it as
+    `void`, for a history that shows them (SLICE-LIFECYCLE-2).
+    """
+    from .storage import read_chained_jsonl
+    rows = [row for row in read_chained_jsonl(slice_ledger_path(root), SLICE_CHAIN) if isinstance(row, dict)]
+    voids = {row["voids"]: row for row in rows if isinstance(row.get("voids"), int)}
+    out = []
+    for row in rows:
+        if "voids" in row:
+            continue
+        void = voids.get(row.get("ordinal"))
+        if void is not None and void.get("slice") == row.get("slice"):
+            if voided:
+                out.append(dict(row, void=void))
+            continue
+        out.append(row)
+    return out
+
+
+def _line_notes(chunks):
+    """{key: value} of a board line's notes, as `board` reads them: a chunk with no colon is a key with no value."""
+    out = {}
+    for chunk in chunks:
+        key, _, value = chunk.partition(":")
+        if chunk and key.strip() not in out:
+            out[key.strip()] = value.strip()
+    return out
+
+
+def record_slice_move(root, item_id, before, after, by=None, why=None, notes=None, replaced=None, title=None):
+    """Append one move of a board item to the slice ledger: from one section to another, by whom, when and why.
+
+    A slice's state was the section its row sat in and nothing more: nothing said when it moved, who moved it
+    or why, and a slice dropped from the board left no trace at all, although docs/slices.md calls abandoning
+    one an outcome to record. `before` is None for an item that enters the board. `by` is the role of a turn
+    polyctl started, or "person" for a caller polyctl did not start, unless the caller names itself (the watchdog does).
+    `notes` are the notes the move set (None: removed) and `replaced` what they held before, so a boundary or a
+    reason a move overwrote stays on the record; the title says which slice it was once its row is gone.
+    Chained like every ledger that is evidence (SLICE-LIFECYCLE).
+    """
+    from .storage import append_chained_jsonl
+    row = {"slice": item_id, "from": before, "to": after, "by": by or invoking_role() or "person",
+           "at": int(time.time()), "why": why}
+    if title:
+        row["title"] = title
+    if notes:
+        row["notes"] = dict(notes)
+    if replaced:
+        row["replaced"] = dict(replaced)
+    return append_chained_jsonl(slice_ledger_path(root), scan_record(row), SLICE_CHAIN)
+
+
+class BoardChanged(RuntimeError):
+    """The board changed between polyctl's reading it and its writing it, so polyctl moved nothing (SLICE-LIFECYCLE-2)."""
+
+
+def board_lock(root, timeout=10.0):
+    """The lock polyctl's own writers of the board hold from their reading of it to their write (SLICE-LIFECYCLE-2).
+
+    It sits beside the board, as a ledger's lock sits beside the ledger. The implementer's hand edits take no
+    lock: BoardEdit compares the board for those.
+    """
+    from .storage import _exclusive_lock
+    return _exclusive_lock(os.path.join(root, ".polyctl", "board.md.lock"), timeout=timeout)
+
+
+def _board_bytes(path):
+    """What the board holds as it stands, or None when there is none."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except FileNotFoundError:
+        return None
+
+
+def _board_changed(recorded):
+    said = ", and the slice ledger voids the move it had recorded" if recorded else " and nothing was recorded"
+    return BoardChanged(f"the board changed while polyctl read it: .polyctl/board.md was edited after polyctl read it and before it "
+                        f"wrote it, so nothing moved{said}; run it again, and polyctl decides on the board as it stands")
+
+
+def _not_written(exc):
+    """Why a board write did not happen, in words a committed ledger may keep: no path, nothing of the machine."""
+    if isinstance(exc, BoardChanged):
+        return "the board was edited after polyctl read it and before polyctl wrote it; the edit stands"
+    said = exc.strerror if isinstance(exc, OSError) and exc.strerror else ""
+    return f"the board could not be written: {type(exc).__name__}" + (f": {said}" if said else "")
+
+
+def _void_slice_moves(root, rows, why):
+    """Append, for each recorded move the board never took, a line that voids it (SLICE-LIFECYCLE-2).
+
+    A move is recorded before the board is written, and a chained ledger is never cut back: a write that failed
+    after the line left a transition that never happened, and a retry recorded a second one. So the line stays
+    and the one after it says the move did not happen and why - `voids` is the ordinal of the line it voids - and
+    `slice_moves` leaves both out of what the slice did.
+    """
+    from .storage import append_chained_jsonl
+    for row in rows:
+        void = {"slice": row.get("slice"), "from": row.get("from"), "to": row.get("to"), "by": row.get("by"),
+                "at": int(time.time()), "why": why, "voids": row.get("ordinal")}
+        if row.get("title"):
+            void["title"] = row["title"]
+        append_chained_jsonl(slice_ledger_path(root), scan_record(void), SLICE_CHAIN)
+
+
+class BoardEdit:
+    """One reading of `.polyctl/board.md`, the moves and entries decided on it, and their one write (SLICE-LIFECYCLE-2).
+
+    `polyctl slice start` judged an item READY on one reading of the board and moved it on a later one, with no lock
+    and no second look: an implementer that wrote `waiting: architect` on the row in between had polyctl record an
+    authorized-looking start of a slice that was not READY. The watchdog's quota park, which decides on a reading
+    and may wait on keyflip before it writes, moved a row from wherever a hand had put it meanwhile. A caller now
+    decides on `board`, what this one reading holds (`data` is its bytes, for whatever else reads the board), and
+    `move` and `append` change that same text: nothing is read again.
+
+    polyctl's own writers hold `board_lock` from their reading to their write (`hold=True`, in a `with`), so two of
+    them take turns instead of each writing over the other's board. The watchdog reads without it, since its
+    decision can wait minutes on keyflip, and its write takes it. The implementer's hand edits take no lock, so
+    `write` looks at the board as it stands twice - before anything is recorded, and once the new board is on
+    disk beside it, right before the rename puts it in place - and anything but the bytes this reading took, an
+    edit or a board made or removed, moves nothing: `BoardChanged` says the board changed while polyctl read it, and
+    the command is run again on the board as it stands.
+
+    What stays open is the instant between that last look and the rename: a read and a rename, measured on a
+    laptop's disk at a third of a millisecond (under one at the 99th percentile; Windows adds the retries of a
+    rename while another handle holds the board open), against the milliseconds a command's decision takes and
+    the minutes the watchdog's can. An edit landing in it is replaced by polyctl's board and lost, though what polyctl
+    decided on is still what stood at its last look. A plain file cannot close it: an editor takes no lock, an
+    advisory lock binds only the processes that take it, and a rename replaces whatever the name holds at that
+    moment - no file system polyctl runs on replaces a file only while it holds given bytes. Only edits made through
+    polyctl could close it, and the board is the file the implementer edits by hand.
+    """
+
+    def __init__(self, root, hold=False):
+        import contextlib
+        import io
+        self.root, self.path = root, os.path.join(root, ".polyctl", "board.md")
+        # A directory with no .polyctl/ has no board to hold, and its lock is not made there: a write takes it.
+        self.holding = hold and os.path.isdir(os.path.dirname(self.path))
+        self.held, self.moves, self.changed = contextlib.ExitStack(), [], False
+        try:
+            if self.holding:
+                self.held.enter_context(board_lock(root))
+            self.data = _board_bytes(self.path)
+        except BaseException:
+            self.held.close()
+            raise
+        # Read as a move always read it: a byte that is not UTF-8 is written back as it was.
+        self.lines = ["# Board", ""] if self.data is None else io.TextIOWrapper(
+            io.BytesIO(self.data), errors="surrogateescape", encoding=UTF8).read().split("\n")
+        self.board = board(root, self.data) if self.data is not None else {state: [] for state in BOARD_STATES}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *raised):
+        self.held.close()
+        return False
+
+    def _bytes(self):
+        return "\n".join(self.lines).encode(UTF8, errors="surrogateescape")
+
+    def _changed_to(self, lines):
+        self.lines, self.changed = lines, True
+        self.board = board(self.root, self._bytes())
+
+    def move(self, item_id, state, notes=None, by=None, why=None):
+        """Move one item's line under `## <state>`, its notes changed as `notes` says; False when it is not here.
+
+        Like an append, a move changes one line of what was read and leaves every other line as the implementer
+        wrote it. It also takes that line out of its section, so the file is replaced whole: a reader finds the
+        board before the move or after it, never half of each. A note given None is removed and any other is set;
+        the title and the other notes stay as they were. An item moved to the section it is already in keeps its
+        place there. The item is the first line with its id that `board` reads under a state's heading
+        (QUOTA-PARK).
+
+        A byte that is not UTF-8 - an editor that saved the board in another code page - is read as `board`
+        reads past it, and written back as it was: moving one line rewrites no other.
+
+        A move to another section is recorded in the slice ledger, by `by` and for `why`, when the board is
+        written; a move within a section changes notes, and is no transition (SLICE-LIFECYCLE).
+        """
+        lines, section, found = list(self.lines), None, None
+        for index, line in enumerate(lines):
+            if line.lstrip().startswith("##"):
+                section = _board_heading(line)
+                continue
+            m = re.match(r"^\s*- \s*\[([^\]]+)\]\s*(.*)$", line)
+            if section and m and m.group(1) == item_id:
+                found = (index, section, m.group(2))
+                break
+        if found is None:
+            return False
+        index, section, rest = found
+        chunks = [chunk.strip() for chunk in rest.split("·")]
+        changed = dict(notes or {})
+        kept = [chunk for chunk in chunks[1:] if chunk and chunk.partition(":")[0].strip() not in changed]
+        line = " · ".join([f"- [{item_id}] {chunks[0]}".rstrip()] + kept
+                          + [f"{key}: {value}" for key, value in changed.items() if value is not None])
+        if section == state:
+            lines[index] = line
+        else:
+            held = _line_notes(chunks[1:])
+            self.moves.append({"item_id": item_id, "before": section, "after": state, "by": by, "why": why,
+                               "notes": changed, "title": chunks[0],
+                               "replaced": {key: held[key] for key in changed
+                                            if held.get(key) and held[key] != changed[key]}})
+            del lines[index]
+            head = next((i for i, text in enumerate(lines) if _board_heading(text) == state), None)
+            if head is None:
+                while lines and not lines[-1].strip():
+                    lines.pop()
+                lines += ["", f"## {state}", line, ""]
+            else:
+                lines.insert(head + 1, line)
+        self._changed_to(lines)
+        return True
+
+    def append(self, state, line, by=None, why=None):
+        """Put one item line first under the state's heading, refusing a board without it.
+
+        The rest of the board stays as the implementer wrote it. The item's entry is recorded in the slice
+        ledger, with the title and the notes it entered with, when the board is written (SLICE-LIFECYCLE).
+        A title, note or another heading containing `## <state>` is no section (SLICE-LIFECYCLE-3).
+        """
+        lines = list(self.lines)
+        head = next((i for i, text in enumerate(lines) if _board_heading(text) == state), None)
+        if head is None:
+            raise ValueError(f"the board has no ## {shown_text(state)} heading; nothing was appended: "
+                             "add that heading on its own line in .polyctl/board.md and run it again")
+        if head == len(lines) - 1:
+            lines.append("")
+        lines.insert(head + 1, line.rstrip())
+        entered = re.match(r"^\s*- \s*\[([^\]]+)\]\s*(.*)$", line.rstrip())
+        if entered:
+            chunks = [chunk.strip() for chunk in entered.group(2).split("·")]
+            self.moves.append({"item_id": entered.group(1), "before": None, "after": state, "by": by, "why": why,
+                               "notes": _line_notes(chunks[1:]), "title": chunks[0]})
+        self._changed_to(lines)
+
+    def write(self):
+        """Record what this edit moved and write the board once, if it still holds what was read; False: nothing to.
+
+        The moves are recorded first, as before: a ledger that cannot take a line leaves the board as it was. A
+        board that cannot be written after them - a full disk, a permission, a rename refused, or a hand edit that
+        landed meanwhile - leaves a line voiding each move it recorded, saying why, and the error goes to the
+        caller: the ledger never holds a move the board did not make, and a retry records the move once
+        (SLICE-LIFECYCLE-2). Only a directory that could not be synced after the rename leaves the moves standing,
+        since the board took them.
+        """
+        import contextlib
+        from .storage import replace_file_durably
+        data = self._bytes()
+        if not self.moves and (not self.changed or data == self.data):
+            return False
+        with contextlib.ExitStack() as held:
+            if not self.holding:
+                held.enter_context(board_lock(self.root))
+            if _board_bytes(self.path) != self.data:
+                raise _board_changed(())
+            recorded = []
+            try:
+                for move in self.moves:
+                    recorded.append(record_slice_move(self.root, **move))
+            except BaseException as exc:
+                _void_slice_moves(self.root, recorded, "the board was not written: the slice ledger refused another "
+                                                       f"move of the same write ({type(exc).__name__})")
+                raise
+            looked = []
+
+            def as_read():
+                if _board_bytes(self.path) != self.data:
+                    raise _board_changed(recorded)
+                looked.append(True)
+
+            try:
+                replace_file_durably(self.path, data, before_replace=as_read)
+            except BaseException as exc:
+                if not (looked and _board_bytes(self.path) == data):
+                    _void_slice_moves(self.root, recorded, _not_written(exc))
+                raise
+        self.data, self.moves, self.changed = data, [], False
+        return True
+
+
+def board_append(root, state, line, by=None, why=None):
+    """Append one item line under an existing `## <state>` heading: one BoardEdit, held and written.
+
+    Append rather than rewrite: the implementing agent edits this same file, and a write that replaced what it
+    wrote between our read and our write would silently drop it. The edit's write refuses that instead
+    (SLICE-LIFECYCLE-2), and records the item's entry in the slice ledger (SLICE-LIFECYCLE).
+    """
+    with BoardEdit(root, hold=True) as edit:
+        edit.append(state, line, by=by, why=why)
+        edit.write()
+
+
+def board_move(root, item_id, state, notes=None, by=None, why=None):
+    """Move one item's line under `## <state>` as BoardEdit.move does; False when it is not on the board.
+
+    One BoardEdit, held and written (QUOTA-PARK, SLICE-LIFECYCLE): a caller that decides on what it read moves on
+    that reading instead, so the move is made on the board the decision was made on (SLICE-LIFECYCLE-2).
+    """
+    with BoardEdit(root, hold=True) as edit:
+        moved = edit.move(item_id, state, notes, by=by, why=why)
+        edit.write()
+    return moved
+
+
+def record_progress(root, cfg):
+    """One line per watchdog check: what actually moved.
+
+    Cheap by construction — the watchdog already runs, and this is a git call
+    plus an append. The point is to have *history* of the artifacts, because a
+    single snapshot cannot tell activity from progress.
+    """
+    msgs, _ = session_paths(cfg)
+    # Coordination state is left out: the watchdog appends to this very ledger and
+    # to its notices every cycle, and while those writes counted as editing the
+    # spin check could never see a frozen run (#96).
+    porcelain, churn = _product_changes(root, cfg)
+    size = 0
+    if msgs and os.path.exists(msgs):
+        # A subagent that writes keeps its implementer working (`last_write`), so what it writes is the
+        # transcript growing too: a subagent looping on nothing is busy without progress, not busy.
+        shape = transcript_shape(implementer_adapter(cfg))
+        size = os.path.getsize(msgs) + sum(grown for _, grown in subagent_writes(msgs, shape))
+    # Content churn, not file count. A slice deep in editing its established file
+    # set holds the dirty *count* stable for many minutes — same eight files, new
+    # content each cycle — and a count-only check reads that as frozen and cries
+    # spin. The newest mtime across the changed set advances on every edit, so it
+    # tells editing apart from a genuine stall. A long gate run writes nothing, so
+    # it correctly stays frozen, and the minute threshold covers that case.
+    rec = {"at": int(time.time()),
+           "head": _git_text(root, "rev-parse", "--short", "HEAD"),
+           "dirty": len(porcelain), "churn": churn, "size": size}
+    d = os.path.join(root, ".polyctl", "ledger")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "progress.jsonl")
+    try:
+        with open(p, encoding=UTF8) as fh:
+            last = fh.readlines()[-1:]
+        if last:
+            prev = json.loads(last[0])
+            if (prev.get("head"), prev.get("dirty"), prev.get("churn"), prev.get("size")) == \
+               (rec["head"], rec["dirty"], rec["churn"], rec["size"]):
+                return                                # nothing changed; do not log noise
+    except Exception:
+        pass
+    with open(p, "a", encoding=UTF8) as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+
+def spinning(root, min_minutes=6, min_samples=3):
+    """Is the agent busy without producing anything?
+
+    An agent stuck in an observe-and-wait loop is the hardest failure to see,
+    because every health signal is green: the transcript grows, tool calls fire,
+    cost accrues. The watchdog never questions "working". What separates five
+    productive turns from five turns of re-checking whether the tree is stable is
+    not activity — it is whether any artifact moved.
+
+    So compare the two directly: transcript growing (busy) while HEAD and the
+    dirty-file count hold still (nothing produced), sustained long enough that a
+    slow gate cannot explain it. Returns minutes spent spinning, or None.
+
+    This exact failure cost roughly forty minutes in this project's own run,
+    while the panel showed WORKING in green the entire time.
+
+    The defaults are deliberately low because of what this is used for. Reporting
+    a false positive costs a line of output; acting on one costs a turn. So the
+    *report* threshold is a few watchdog cycles, while anything that spends money
+    or kills a process keeps its own, far more conservative bound. Set one
+    threshold for both and you get the worst of each: too slow to be useful, and
+    still not safe enough to act on.
+    """
+    p = os.path.join(root, ".polyctl", "ledger", "progress.jsonl")
+    if not os.path.exists(p):
+        return None
+    recs = []
+    for line in open(p, errors="replace", encoding=UTF8):
+        try:
+            recs.append(json.loads(line))
+        except Exception:
+            continue
+    recs = recs[-40:]
+    if len(recs) < min_samples:
+        return None
+    # Frozen means nothing was produced AND nothing was edited: same HEAD, same
+    # dirty count, and no newer mtime in the changed set. Editing the same files
+    # advances churn, so it breaks the run and is not spin.
+    head = recs[-1].get("head")
+    dirty = recs[-1].get("dirty")
+    churn = recs[-1].get("churn")
+    run = [r for r in reversed(recs)
+           if r.get("head") == head and r.get("dirty") == dirty and r.get("churn") == churn]
+    if len(run) < min_samples:
+        return None
+    grew = run[0].get("size", 0) > run[-1].get("size", 0)      # transcript still moving
+    span = (run[0]["at"] - run[-1]["at"]) / 60
+    return int(span) if grew and span >= min_minutes else None
+
+
+HOLD_FILE = ".polyctl/hold"
+
+
+def hold_state(root):
+    """Who has stopped this project's agent, and why. None when running free."""
+    p = os.path.join(root, HOLD_FILE)
+    if not os.path.exists(p):
+        return None
+    try:
+        st = json.load(open(p, encoding=UTF8))
+    except Exception:
+        st = {"by": "unknown", "reason": "unreadable hold file"}
+    st["minutes"] = int((time.time() - st.get("at", time.time())) / 60)
+    return st
+
+
+def agent_pids(root, adapter, headless_only=False):
+    """Agent processes whose working directory is this repository.
+
+    Match on the process's cwd rather than its command line. The command line is
+    unreliable — a long resume prompt gets truncated by `ps`, and the binary may
+    be a bare `node` under a version manager — whereas the cwd is exactly the
+    question being asked: is something editing *this* tree?
+
+    One pass over the process table through the platform API (procs.py): exact
+    argument vectors, cwd and parentage in milliseconds. The shell path this
+    replaced — `pgrep -f`, one `lsof` per candidate, `ps` output split on
+    whitespace — took seconds and mistook a shell that mentioned the agent, and
+    a runtime under "Application Support", for turns.
+
+    procs.TableUnreadable where the platform could not read its process table: the
+    empty list that stood for it read as no turn in this tree, so `polyctl hold` stopped
+    nothing and the watchdog could start a second turn (WINDOWS-TABLE-CLOSED).
+    """
+    from . import procs
+    names = set()
+    for key in ("send", "resume"):
+        argv = (adapter.get(key) or {}).get("argv") or []
+        if argv:
+            names.add(os.path.basename(argv[0]))
+    names.update(agent_process_names())
+    want = os.path.realpath(root)
+    me = os.getpid()
+    out = []
+    for pid in procs.all_pids():
+        if pid == me:
+            continue
+        av = procs.argv(pid)
+        if not av or not _is_agent_process(pid, names, av):
+            continue
+        cw = procs.cwd(pid)
+        if cw is None:
+            # No cwd on this platform (Windows): the repository path on the command
+            # line is the next best evidence that this turn works in this tree.
+            if any(os.path.realpath(a.rstrip("/\\")) == want for a in av if os.path.isabs(a)):
+                out.append(pid)
+        elif os.path.realpath(cw) == want:
+            out.append(pid)
+    # Processes polyctl itself started inside the repo — the reviewer above all — are
+    # agents by every other test and writers by none. Exclude them and their
+    # descendants: a reviewer's runtime child would otherwise surface as a root.
+    helpers = helper_pids(root)
+    if helpers and out:
+        table = _proc_table()
+
+        def under_helper(pid):
+            seen = set()
+            current = pid
+            while current > 1 and current not in seen:
+                if current in helpers:
+                    return True
+                seen.add(current)
+                current = table.get(current, (0, 0, ""))[0]
+            return False
+        out = [p for p in out if not under_helper(p)]
+    out = sorted(set(out))
+    if headless_only:
+        # Never a human's interactive session. `polyctl hold` once stopped seven
+        # processes in a repository; two were the orchestrator's own turn and
+        # five were the owner's live Claude sessions, cut mid-work. A hold
+        # exists to stop unattended turns — the ones started with an argument
+        # their harness declares for that — and an interactive session, by
+        # definition, has a person in it who did not ask to be stopped.
+        out = [p for p in out if _is_headless(p)]
+    return out
+
+
+def agent_process_names():
+    """Program names that are agent turns, as the shipped adapters declare them (`detect.processes`) (#76).
+
+    The package's adapters only: whether a process is a writer decides holds and
+    nudges, and a layer an agent can write must not be able to hide one.
+    """
+    return {str(name) for adapter in package_adapters().values()
+            for name in (adapter.get("detect") or {}).get("processes") or [] if name}
+
+
+_WINDOWS_PROGRAM_SUFFIXES = (".exe", ".cmd", ".bat", ".com")
+
+
+def _executable(t):
+    """A real executable file at this path (a hook, so scenarios can fabricate a world).
+
+    Windows names the path with backslashes and has no execute bit - os.access(X_OK)
+    holds for any file there - so a sibling agent binary such as C:\\...\\agent-chat.exe
+    was never one, and its process was not taken for the agent's (#71). There a path
+    takes either separator and a program is a file with a suffix Windows runs.
+    """
+    t = str(t)
+    if os.name == "nt":
+        return ("\\" in t or "/" in t) and t.lower().endswith(_WINDOWS_PROGRAM_SUFFIXES) and os.path.isfile(t)
+    return "/" in t and os.path.isfile(t) and os.access(t, os.X_OK)
+
+
+def _program_name(token):
+    """Case-folded command basename without a Windows PATHEXT suffix."""
+    base = os.path.basename(str(token).replace("\\", "/")).lower()
+    for suffix in _WINDOWS_PROGRAM_SUFFIXES:
+        if base.endswith(suffix):
+            return base[:-len(suffix)]
+    return base
+
+
+def _is_agent_process(pid, names, argv=None):
+    """Is an agent binary actually on this command line?
+
+    Works on the argument *vector*: a path with a space is one argument. The
+    program itself, a sibling executable (kiro-cli-chat), or a runtime (node…)
+    running something under the agent's install directory count; a shell whose
+    command text mentions the agent, or a file named after it, does not. Windows
+    PATHEXT suffixes and separators are normalized before matching.
+    """
+    from . import procs
+    toks = argv if argv is not None else (procs.argv(pid) or [])
+    if not toks:
+        return False
+    runtimes = ("node", "bun", "deno", "python", "python3")
+    runtime = _program_name(toks[0]) in runtimes
+    executable = _executable
+    normalized_names = {_program_name(name) for name in names if name}
+    for name in normalized_names:
+        for i, token in enumerate(toks):
+            base = _program_name(token)
+            path = str(token).replace("\\", "/").lower()
+            if base == name and (i == 0 or executable(token)):
+                return True                    # the program itself
+            if base.startswith(name + "-") and executable(token):
+                return True                    # a sibling binary: kiro-cli-chat — a real executable
+            if runtime and i <= 2 and f"/{name}/" in path:
+                return True                    # a runtime under the agent's install dir
+    return False
+
+
+# Programs that run another program an agent is: its identity is the program they run (JOURNAL-2-3).
+AGENT_RUNTIMES = frozenset({"node", "bun", "deno", "python", "python3"})
+
+
+def runtime_family(name):
+    """The runtime a program name is - python for `python3.12` too - or None (JOURNAL-2-5)."""
+    name = _program_name(name)
+    if re.fullmatch(r"python(\d+(\.\d+)*t?)?", name):
+        return "python"
+    return name if name in AGENT_RUNTIMES else None
+# What each runtime takes before the program it runs: options whose value is the next word, subcommands that name no
+# program, and options that run code given inline, which name none (JOURNAL-2-4).
+_RUNTIME_VALUE_OPTIONS = {
+    "python": {"-W", "-X", "--check-hash-based-pycs"},
+    "node": {"-r", "--require", "--import", "--loader", "--experimental-loader", "-C", "--conditions",
+             "--env-file", "--title", "--input-type", "--inspect-port", "--stack-size"},
+    "bun": {"-r", "--preload", "--cwd", "-c", "--config", "--env-file", "--tsconfig-override"},
+    "deno": {"-c", "--config", "--import-map", "--lock", "--cert", "--location", "--seed", "--v8-flags",
+             "--env-file", "--ext"},
+}
+_RUNTIME_SUBCOMMANDS = {"bun": {"run", "x", "exec"}, "deno": {"run", "x"}}
+_RUNTIME_INLINE = {"python": {"-c"}, "node": {"-e", "--eval", "-p", "--print"}, "bun": {"-e", "--eval", "-p", "--print"},
+                   "deno": {"eval"}}
+
+
+def runtime_program_word(argv):
+    """The word naming the program a runtime's command line runs, or None (JOURNAL-2-4).
+
+    `python -m claude` runs claude and `node --require x /opt/claude-code/cli.js` cli.js: the program is the module
+    after `-m`, or the first word that is no option, no option's value and no subcommand. The second word was taken
+    for it, so `python -m claude` named `-m`, and any `python -m` process carrying the session held every wake. Code
+    given inline names no program.
+    """
+    if not argv:
+        return None
+    family = runtime_family(argv[0])
+    if family not in _RUNTIME_VALUE_OPTIONS:
+        return None
+    words, at = [str(word) for word in argv[1:]], 0
+    while at < len(words):
+        word = words[at]
+        if family == "python" and word.startswith("-m"):
+            return (word[2:] or (words[at + 1] if at + 1 < len(words) else "")) or None
+        if word in _RUNTIME_INLINE[family] or family == "python" and word.startswith("-c"):
+            return None
+        if word in _RUNTIME_VALUE_OPTIONS[family]:
+            at += 2
+        elif word.startswith("-") or word in _RUNTIME_SUBCOMMANDS.get(family, ()):
+            at += 1
+        else:
+            return word
+    return None
+
+
+def _is_configured_agent_process(names, argv):
+    """Exact configured launcher or runtime-package identity for one agent role.
+
+    Writer discovery intentionally accepts sibling tools such as
+    ``kiro-cli-chat``. Architect presence must not: a reviewer or monitor that
+    shares a prefix is a different role and cannot suppress a wake.
+    """
+    if not argv:
+        return False
+    wanted = {_program_name(name) for name in names if name}
+    if _program_name(argv[0]) in wanted:
+        return True
+    if runtime_family(argv[0]) is None:
+        return False
+    # A runtime is the program it runs, named by that word alone: an option before it, `-m` among them, named
+    # no program, and matched one (JOURNAL-2-4).
+    word = runtime_program_word(argv)
+    components = {_program_name(part) for part in str(word or "").replace("\\", "/").split("/") if part}
+    return bool(components & wanted)
+
+
+def _is_headless(pid):
+    """A turn started without a person in it, by what its own harness declares (`_headless_argv`)."""
+    from . import procs
+    return _headless_argv(procs.argv(pid) or [])
+
+
+def _headless_argv(argv):
+    """Does a command line hold an argument its own harness declares for a turn started without a person?
+
+    Each shipped adapter declares those arguments (`detect.headless`, #76): a flag, alone or
+    with its value attached after `=`, or a subcommand. They were one list written here, and
+    any of them made any agent's process unattended, but a flag belongs to the grammar of its
+    own command - one harness prints a single answer with -p where another selects a profile
+    with it. An argument counts only for the harness whose names, its adapter's id, binaries
+    and processes, the command line runs as, and a command line no shipped adapter answers to
+    is not one. The package's adapters only: `polyctl hold` and the reaper stop what this calls
+    unattended, and a layer an agent can write must not make a person's session one.
+    """
+    args = [str(arg) for arg in argv or []]
+    for ident, adapter in sorted(package_adapters().items()):
+        detect = _block(adapter, "detect")
+        words = _names(detect.get("headless"))
+        if not any(arg == word or arg.startswith(word + "=") for arg in args for word in words):
+            continue
+        if _is_agent_process(None, {ident, *adapter_binaries(adapter), *_names(detect.get("processes"))}, args):
+            return True
+    return False
+
+
+def _proc_table():
+    """pid -> (ppid, pgid, tty) for every process, from the platform API (see procs.py); procs.TableUnreadable
+    where the platform could not read it, never an empty table (WINDOWS-TABLE-CLOSED)."""
+    from . import procs
+    return procs.table()
+
+
+def orphans(root, adapter, table=None):
+    """Agent processes left behind by a turn that already ended.
+
+    A turn is spawned in its own session (`start_new_session=True`), so the wrapper
+    leads the process group and every child it starts — runtime, engine — inherits
+    that group. When the wrapper dies and a child does not, the child is
+    re-parented to init but keeps the dead leader's group id. That is the whole
+    signature: no controlling terminal, and a process-group leader that no longer
+    exists. Nothing a person is sitting in looks like that — a terminal session has
+    a tty, a desktop-app session has the app as its live parent and leader.
+
+    These matter because they are invisible to the reaper (the headless flag is on
+    the wrapper, not on them) and visible to every writer count. Three of them sat
+    in one repository for hours at 0% CPU, and the implementer — correctly applying
+    its single-writer rule to what the process table showed — refused to write for
+    the entire time, while each of its empty turns tripped the reaper again and
+    made one more.
+    """
+    table = table or _proc_table()
+    out = []
+    for pid in agent_pids(root, adapter):
+        ppid, pgid, tty = table.get(pid, (None, None, None))
+        if pgid and tty == "??" and pgid != pid and pgid not in table:
+            out.append(pid)
+    return out
+
+
+def writers(root, adapter):
+    """Live turn roots in this tree, with orphans set aside.
+
+    Returns (roots, orphans). The number of roots is what a single-writer rule
+    should count: one root per turn, however many processes the turn is made of,
+    and none for what a finished turn left behind.
+    """
+    table = _proc_table()
+    dead = set(orphans(root, adapter, table))
+    live = [p for p in agent_pids(root, adapter) if p not in dead]
+    return process_trees(live, {pid: t[0] for pid, t in table.items()}), sorted(dead)
+
+
+def _tree_stopped():
+    """Forget the process snapshot taken before a tree was stopped on Windows (WINDOWS-LANE-5).
+
+    It lists the stopped tree for two seconds more, and a stopped process's directory can no longer be
+    read: `polyctl hold` then named the turn it had just stopped as one it could not place, and exited 1.
+    """
+    from . import procs
+    procs.refresh()
+
+
+# How long a stopped process tree is given to be gone before what still runs of it is named (WINDOWS-STOP-PROVEN).
+STOP_PROOF_SECONDS = 5.0
+
+
+def process_tree(pid, table=None):
+    """`pid` and every process started under it, parent link by parent link, as the process table reads now: what a
+    stop of the tree is proven against (WINDOWS-STOP-PROVEN).
+
+    `[pid]` alone where the table cannot be read. This process is never one of them: a hold run
+    from inside a turn would otherwise name itself among what it could not stop. A process that
+    started before the parent it names is not that parent's (_older_than).
+    """
+    from . import procs
+    if table is None:
+        try:
+            procs.refresh()
+            table = _proc_table()
+        except procs.TableUnreadable:
+            table = {}
+    children = {}
+    for child, row in table.items():
+        children.setdefault(row[0], []).append(child)
+    tree, waiting = [], [pid]
+    while waiting:
+        current = waiting.pop(0)
+        if current in tree or current == os.getpid():
+            continue
+        tree.append(current)
+        waiting.extend(child for child in sorted(children.get(current, [])) if not _older_than(child, current))
+    return tree
+
+
+def _older_than(child, parent):
+    """Whether `child` started more than a second before `parent`, so that the parent it names was an earlier process
+    with the same pid (WINDOWS-STOP-PROVEN).
+
+    Windows keeps the pid of a process's parent after that parent exits, and hands the pid to a
+    process started later: a turn given it would have counted an unrelated process of the person's
+    among its own, and a hold would have stopped it, or told them to. False where either age cannot
+    be read, and off Windows, where an orphan is handed to a parent that still runs.
+    """
+    if os.name != "nt":
+        return False
+    from . import procs
+    child_age, parent_age = procs.elapsed(child), procs.elapsed(parent)
+    return child_age is not None and parent_age is not None and child_age > parent_age + 1
+
+
+def _still_running(pids, seconds=None):
+    """Those of `pids` that still run, each asked of the process itself until none does or `seconds` have passed,
+    STOP_PROOF_SECONDS unless given (WINDOWS-STOP-PROVEN). A process neither Windows nor the table answers for is
+    taken as running."""
+    deadline = time.time() + (STOP_PROOF_SECONDS if seconds is None else seconds)
+    while True:
+        running = sorted(pid for pid in set(pids) if _pid_alive(pid))
+        if not running or time.time() >= deadline:
+            return running
+        time.sleep(0.1)
+
+
+def stop_windows_tree(pid, table=None):
+    """Stop a process and every process it started, with Windows' own taskkill, and return what of that tree still
+    runs after it (WINDOWS-NO-CWD-EXEC, WINDOWS-STOP-PROVEN).
+
+    Started by its bare name, taskkill was looked for in the current directory before Windows'
+    own, and polyctl stops turns from inside a tree an agent writes: a taskkill.exe left there would
+    have run as the person in its place. taskkill /T finds a process's children by the parent
+    each names, and is refused a process another user or an elevated prompt started; whatever
+    it answered, `polyctl hold` said the tree was stopped. Each process of the tree as the table read
+    it before the stop is now named to taskkill, not its first alone - a child whose parent had
+    exited by then, a turn's wrapper ending as it was stopped, was found by no parent and left
+    running - and each is asked whether it runs, until none does or STOP_PROOF_SECONDS have
+    passed, and what still runs is returned. FileNotFoundError where Windows' system directory
+    holds no taskkill, as a taskkill found nowhere raised before.
+    """
+    taskkill = program_path("taskkill")
+    if taskkill is None:
+        raise FileNotFoundError(f"taskkill is not in Windows' system directory {windows_system_directory()}")
+    tree = process_tree(pid, table)
+    named = [pid] + [other for other in tree if other != pid]
+    subprocess.run([taskkill, "/T", "/F"] + [word for each in named for word in ("/PID", str(each))],
+                   capture_output=True)
+    return _still_running(tree)
+
+
+def kill_turn(pid, sig):
+    """Signal a turn — the whole process group when this pid leads one.
+
+    Signalling only the wrapper is how orphans are made: it exits, its runtime and
+    engine children do not, and they keep the repository as their cwd. A turn we
+    started is its own session, so its pid is its group id and one killpg reaches
+    everything it spawned. A pid that leads no group is signalled alone. On
+    Windows there are no groups to signal; `taskkill /T` kills the tree.
+
+    Returns what of the turn still runs after a forced stop - taskkill on Windows,
+    SIGKILL elsewhere - each process of it asked: a stop that left something running
+    was reported as done (WINDOWS-STOP-PROVEN). A turn only signalled, and given time
+    to answer, returns []: its caller waits, and looks.
+    """
+    import signal as _sig
+    if os.name == "nt":
+        survivors = stop_windows_tree(pid)
+        _tree_stopped()
+        return survivors
+    forced = sig == getattr(_sig, "SIGKILL", None)
+    tree = process_tree(pid) if forced else []
+    try:
+        pgid = os.getpgid(pid)
+    except OSError:
+        return []
+    try:
+        if pgid == pid:
+            os.killpg(pgid, sig)
+        else:
+            os.kill(pid, sig)
+    except OSError:
+        pass
+    if forced:
+        # A process of the tree that moved into a group of its own is not reached by the group's signal: it ran on,
+        # named among what was left but never stopped. Each is signalled by its pid (LEADS-GATE-RUNS).
+        for member in tree:
+            try:
+                if member != pid and os.getpgid(member) != pgid:
+                    os.kill(member, sig)
+            except OSError:
+                pass
+    return _still_running(tree) if forced else []
+
+
+def run_as_group(argv, timeout, **popen):
+    """subprocess.run(argv, timeout=timeout, **popen), the program leading a session and a process group of its own,
+    so that a timeout or an interrupt stops it with what can be found of it: its process tree, its group and, on
+    POSIX, its session, read again until nothing of it is found - a worker that moved into a group of its own is
+    reached by its session, its parent gone or not (LEADS-GATE-RUNS). A cleanup, not a boundary: a process that
+    started a session of its own, or one forking faster than the table is read, outlives it, and a gate is code the
+    implementer wrote, run as theirs by design (docs/threat-model.md).
+
+    subprocess.run kills the program alone. A gate's shell was killed on its timeout and the test
+    workers it had started ran on, after `polyctl verify` had let go of the machine lock they ran under;
+    the hook Git ran for the execution proof outlived Git the same way, holding the pipes polyctl read.
+    On Windows subprocess.run then reads those pipes until their last holder closes them, so the
+    timeout bounded nothing. The tree is stopped with kill_turn, and on POSIX its group by its id
+    as well: macOS names no group for a leader that has exited while what it started runs on, and
+    the id is the group's until the leader is reaped, which is done here after the stop. What the
+    program wrote is then read for STOP_PROOF_SECONDS at most. TimeoutExpired carries it, `left`,
+    what of the tree still runs after the stop (WINDOWS-STOP-PROVEN), and `unasked`, why the tree could
+    be neither stopped nor asked after where that is so; an interrupt is raised again once the tree is
+    stopped. `capture_output` and `input` are taken as subprocess.run takes them.
+    """
+    import signal
+    if popen.pop("capture_output", False):
+        popen.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    given = popen.pop("input", None)
+    if given is not None:
+        popen["stdin"] = subprocess.PIPE
+    group = ({"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)} if os.name == "nt"
+             else {"start_new_session": True})
+    proc = subprocess.Popen(argv, **popen, **group)
+    try:
+        out, err = proc.communicate(given, timeout=timeout)
+    except (subprocess.TimeoutExpired, KeyboardInterrupt, SystemExit) as stopped:
+        unasked = None
+        try:
+            left = kill_turn(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM)) or []
+        except (OSError, subprocess.SubprocessError) as exc:
+            # No taskkill, or one that could not run: the program alone is ended, below, and what it started is
+            # neither stopped nor asked after. That is said, never read as nothing left (LEADS-GATE).
+            left, unasked = [], f"what it started could not be stopped or asked after ({' '.join(str(exc).split())})"
+        if os.name != "nt":
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            # The program leads a session of its own: a worker that moved into a group of its own and lost its parent
+            # is in neither the tree nor the group, and ran on, named nowhere. The session is read and stopped again
+            # until a reading finds nobody or STOP_PROOF_SECONDS have passed, while the program's pid is still its,
+            # unreaped, and what it leaves is named; a table that cannot be read is said (LEADS-GATE-RUNS). It is a
+            # cleanup, not a boundary: a gate is the implementer's code, and one written to outlive it can
+            # (docs/threat-model.md).
+            strays, deadline = set(), time.time() + STOP_PROOF_SECONDS
+            while True:
+                found = _session_members(proc.pid)
+                if found is None:
+                    unasked = "; ".join(filter(None, [unasked, "the process table could not be read for the rest of "
+                                                                "its session, which may still run"]))
+                    break
+                for pid in found:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+                strays.update(found)
+                if not found or time.time() >= deadline:
+                    break
+                time.sleep(0.05)
+            left = sorted(set(left) | set(_still_running(strays)))
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        out = err = None
+        if isinstance(stopped, subprocess.TimeoutExpired):
+            try:
+                out, err = proc.communicate(timeout=STOP_PROOF_SECONDS)
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                pass                                      # a holder outside the group keeps the pipes: closed below
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+        try:
+            proc.wait(timeout=STOP_PROOF_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+        if not isinstance(stopped, subprocess.TimeoutExpired):
+            raise
+        expired = subprocess.TimeoutExpired(argv, timeout, output=out, stderr=err)
+        expired.left = left
+        expired.unasked = unasked
+        raise expired from None
+    except BaseException:
+        # Anything else that broke the reading ends the program alone, as subprocess.run ends it: the tree is stopped
+        # for a timeout or an interrupt, what this is for (LEADS-GATE-RUNS).
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        raise
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
+
+def _session_members(sid):
+    """Every process of session `sid` the process table names, but this one; None where the table cannot be read
+    (LEADS-GATE-RUNS)."""
+    from . import procs
+    try:
+        procs.refresh()
+        pids = procs.all_pids()
+    except procs.TableUnreadable:
+        return None
+    members = []
+    for pid in pids:
+        if pid == os.getpid():
+            continue
+        try:
+            if os.getsid(pid) == sid:
+                members.append(pid)
+        except OSError:
+            pass
+    return members
+
+
+def sweep_orphans(pids, grace=3.0):
+    """Stop orphaned agent processes by their (leaderless) groups.
+
+    Each orphan still carries the group id of the turn that made it, and its own
+    children carry the same one, so signalling the group clears the whole remnant
+    at once — a child re-parented to an orphan would otherwise be orphaned a second
+    time by the very cleanup. Returns what of the remnant still runs after it, each
+    process asked, where it returned the pids it was handed whatever became of them
+    (WINDOWS-STOP-PROVEN).
+    """
+    import signal as _sig
+    from . import procs
+    try:
+        procs.refresh()
+        table = _proc_table()
+    except procs.TableUnreadable:
+        table = {}
+    if os.name == "nt":
+        survivors = []
+        for pid in pids:
+            survivors += stop_windows_tree(pid, table)
+        _tree_stopped()
+        return sorted(set(survivors))
+    groups = set()
+    for pid in pids:
+        try:
+            groups.add(os.getpgid(pid))
+        except OSError:
+            pass
+    for g in groups:
+        try:
+            os.killpg(g, _sig.SIGTERM)
+        except OSError:
+            pass
+    deadline = time.time() + grace
+    while time.time() < deadline and any(_pid_alive(p) for p in pids):
+        time.sleep(0.25)
+    for g in groups:
+        try:
+            os.killpg(g, _sig.SIGKILL)
+        except OSError:
+            pass
+    return _still_running(set(pids) | {pid for pid, row in table.items() if row[1] in groups})
+
+
+def _pid_alive(pid):
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if os.name == "nt":
+        # On Windows signal 0 is CTRL_C_EVENT, not a harmless existence probe.
+        # Sending it to the lock owner interrupts the very gate run whose
+        # liveness we are checking. The process itself is asked instead: the
+        # snapshot is kept two seconds, and a gate lock taken by a run started
+        # inside them read as a dead run's and was cleared (WINDOWS-PID-ALIVE).
+        # Where Windows does not answer, a fresh snapshot does; where neither
+        # answers, the process is taken as running. A table PowerShell could not
+        # read listed no process, and a lock its holder kept would read as a dead
+        # run's: what waits on a process waits on, and what holds it holds, until
+        # one of them can say (WINDOWS-TABLE-CLOSED).
+        from . import procs
+        answer = procs.alive(pid)
+        if answer is not None:
+            return answer
+        try:
+            procs.refresh()
+            return pid in set(procs.all_pids())
+        except (procs.TableUnreadable, OSError, subprocess.SubprocessError, ValueError):
+            return True
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    # A zombie answers the probe and does nothing: it has exited, only its pid is left.
+    from . import procs
+    return not procs.zombie(pid)
+
+
+def _process_start(pid, refresh=False, strict=False):
+    """Stable process-start identity, optionally forcing a fresh backend scan; None where it cannot be read.
+
+    A process table the platform could not read holds no start either, and reads as None, which
+    every caller takes for a start it cannot prove: a lane's command is unknown and not stopped, a
+    helper is no helper, a step's process is unproven, a turn is believed only for a bounded time.
+    With `strict` it raises procs.TableUnreadable instead, for a caller that must not take a
+    process it cannot see for one that has gone (WINDOWS-TABLE-CLOSED).
+    """
+    from . import procs
+    # A fresh Windows snapshot lists every live process, so a pid it lacks has exited, and
+    # each retry there is one more PowerShell query of a second or more (#71).
+    attempts = 3 if refresh and os.name != "nt" else 1
+    for attempt in range(attempts):
+        try:
+            if refresh:
+                procs.refresh()
+            start = (procs.info(int(pid)) or {}).get("start")
+        except procs.TableUnreadable:
+            if strict:
+                raise
+            start = None
+        except (OSError, TypeError, ValueError):
+            start = None
+        if start not in (None, 0, ""):
+            return start
+        if refresh and attempt + 1 < attempts:
+            time.sleep(0.02)
+    return None
+
+
+PROJECTION_CHECKS = ("burn_rate",)
+
+
+def notice_evidence(check, samples, source=None):
+    """What a notice was raised on: the check, and each sample's value, source and time (#37).
+
+    The owner received a quota-looking alert for a limit that did not exist and had no
+    way to ask why. A projection is only as good as the readings it projected from, so
+    one cannot be recorded without them.
+    """
+    rows = [{"value": sample.get("value"), "source": sample.get("source") or source,
+             "at": sample.get("at")} for sample in samples or []]
+    if check in PROJECTION_CHECKS and not rows:
+        raise ValueError(f"a {check} notice needs the samples it projected from")
+    return {"check": check, "samples": rows}
+
+
+def record_notice(root, title, msg, sent, key=None, evidence=None, named=None):
+    """Every notification we raise, kept where the architect can read it.
+
+    A desktop notification is fire-and-forget: it reaches the human and vanishes,
+    so the one participant who could act on a pattern of alerts — the architect
+    reading the panel — is the only one who never sees them. Recording them puts
+    both sides on the same evidence.
+
+    `sent=False` rows matter as much as sent ones: they are the alerts a human
+    would have received without the rate limit, and a long run of them is itself
+    the signal that something has been wrong for a while.
+    """
+    d = os.path.join(root, ".polyctl", "ledger")
+    try:
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "notices.jsonl"), "a", encoding=UTF8) as fh:
+            row = {"id": f"N-{unique_ms()}", "at": int(time.time()), "title": title,
+                   "msg": msg, "sent": bool(sent), "key": key or title}
+            if evidence:
+                row["evidence"] = evidence
+            if named:
+                row["named"] = list(named)      # the conditions one resume notice told (RESUME-QUIET)
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        # Folded before the bound can trim it, so a window still counts it (NOTICE-WINDOW), and observation is
+        # held to its bound as it is written (#50); a fold that could not be written trims nothing (NOTICE-WINDOW-2).
+        if fold_notice_times(root):
+            bound_store(os.path.join(d, "notices.jsonl"), settings.get(load_config(root), "retention.observation_kb"))
+    except OSError:
+        pass
+
+
+def evidence_lines(evidence, now=None):
+    """A notice's evidence as lines a person reads: the check, then each sample and its age."""
+    if not evidence:
+        return ["no evidence recorded (raised before notices kept it, or by a check that has none)"]
+    now = now or time.time()
+    lines = [f"check: {evidence.get('check')}"]
+    for sample in evidence.get("samples") or []:
+        at = sample.get("at")
+        age = f"{int((now - at) / 60)}m ago" if isinstance(at, (int, float)) else "time unknown"
+        lines.append(f"  {sample.get('value')}  from {sample.get('source') or '?'}, {age}")
+    return lines
+
+
+def notices(root, limit=10, include_suppressed=False):
+    """Recent notifications, newest first."""
+    p = os.path.join(root, ".polyctl", "ledger", "notices.jsonl")
+    if not os.path.exists(p):
+        return []
+    out = []
+    for line in open(p, errors="replace", encoding=UTF8):
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if rec.get("sent") or include_suppressed:
+            out.append(rec)
+    return list(reversed(out))[:limit]
+
+
+# ---- a window read whole: when each notice key was last recorded and sent (NOTICE-WINDOW) --------
+
+# A key not recorded for a week is forgotten, and no more than 500 keys are kept: the longest
+# window a check asks is a day, and a week of conditions names far fewer keys. A key younger
+# than that day is kept past the 500: the ledger the check would read for it in its place
+# may already be trimmed of it (NOTICE-WINDOW-2).
+NOTICE_TIMES_DAYS = 7
+NOTICE_TIMES_KEYS = 500
+NOTICE_TIMES_HOLD = 86400
+
+
+def notice_times_path(root):
+    """When each notice key was last recorded and last sent, beside the ledger it is folded from."""
+    return os.path.join(root, ".polyctl", "ledger", "notice-times.json")
+
+
+def _notice_rows_back(path, chunk=65536):
+    """(digest, row) for each line of the notices ledger, newest first, read a chunk at a time.
+
+    The digest names a line whatever its line ending; a line that is not a JSON object - a
+    write still under way, a foreign line - is skipped.
+    """
+    try:
+        fh = open(path, "rb")
+    except OSError:
+        return
+    with fh:
+        end, carry = fh.seek(0, os.SEEK_END), b""
+        while end > 0:
+            start = max(0, end - chunk)
+            fh.seek(start)
+            lines = (fh.read(end - start) + carry).split(b"\n")
+            carry, end = (lines.pop(0) if start else b""), start
+            for line in reversed(lines):
+                line = line.rstrip(b"\r")
+                try:
+                    row = json.loads(line) if line.strip() else None
+                except (ValueError, RecursionError):
+                    continue
+                if isinstance(row, dict):
+                    yield hashlib.sha256(line).hexdigest()[:16], row
+
+
+def _notice_times(root):
+    """The folded notice times: {"last": digest, "forgotten_through": at, "keys": {key: {"recorded", "sent"}}}."""
+    try:
+        with open(notice_times_path(root), encoding=UTF8) as fh:
+            index = json.load(fh)
+    except (OSError, ValueError, RecursionError):
+        return {"keys": {}}
+    if not isinstance(index, dict) or not isinstance(index.get("keys"), dict):
+        return {"keys": {}}
+    index["keys"] = {name: {field: entry[field] for field in ("recorded", "sent")
+                            if isinstance(entry.get(field), (int, float))}
+                     for name, entry in index["keys"].items()
+                     if isinstance(entry, dict) and isinstance(entry.get("recorded"), (int, float))}
+    return index
+
+
+def fold_notice_times(root):
+    """Fold the notices written since the last fold into when each key was last recorded and sent.
+
+    A window check read the last 100 KB of the ledger. Rebuilt after two weeks off, a day of
+    notices was more than that, and a review parked through the day rang the desktop and the
+    phone each time its last ring left those 100 KB; the ledger's own bound (#50) can keep less
+    than a window. So every notice is folded as it is written, and before anything trims the
+    ledger: a trimmed row has already been counted (NOTICE-WINDOW).
+
+    Each process folds from the newest line the file names to the end of the ledger, so a
+    fold another process overtakes, or one that could not be written, leaves only more lines
+    for the next fold and for a check to read. It is rebuilt from the ledger when it cannot be
+    read, and replaced whole. A key not recorded for
+    NOTICE_TIMES_DAYS goes, and past NOTICE_TIMES_KEYS the oldest go once NOTICE_TIMES_HOLD has
+    passed since they were recorded; `forgotten_through` says when the newest of them was
+    recorded, and a window reaching back to it reads the ledger.
+
+    Returns whether the fold stands written to the ledger's end: True when nothing was new,
+    False only when it could not be written, and then nothing may trim the ledger
+    (NOTICE-WINDOW-2).
+    """
+    ledger = os.path.join(root, ".polyctl", "ledger", "notices.jsonl")
+    index = _notice_times(root)
+    fresh = []
+    for digest, row in _notice_rows_back(ledger):
+        if digest == index.get("last"):
+            break
+        fresh.append((digest, row))
+    if not fresh:
+        return True
+    keys = index["keys"]
+    for _, row in reversed(fresh):
+        at, named = row.get("at"), row.get("named")
+        if not isinstance(at, (int, float)):
+            continue
+        # A resume notice is the ring of every condition it named (RESUME-QUIET).
+        for name in [row.get("key")] + (list(named) if isinstance(named, list) else []):
+            if not isinstance(name, str):
+                continue
+            entry = keys.setdefault(name, {})
+            entry["recorded"] = max(entry.get("recorded", at), at)
+            if row.get("sent"):
+                entry["sent"] = max(entry.get("sent", at), at)
+    forgotten = index.get("forgotten_through") if isinstance(index.get("forgotten_through"), (int, float)) else 0
+    old = time.time() - NOTICE_TIMES_DAYS * 86400
+    newest_first = sorted(keys, key=lambda name: keys[name]["recorded"], reverse=True)
+    held = time.time() - NOTICE_TIMES_HOLD
+    past = [name for name in newest_first[NOTICE_TIMES_KEYS:] if keys[name]["recorded"] < held]
+    for name in [name for name in newest_first if keys[name]["recorded"] < old] + past:
+        if name in keys:
+            forgotten = max(forgotten, keys.pop(name)["recorded"])
+    # Under a name no file had, never through a link: `.notice-times.json.<pid>.tmp` in `.polyctl/ledger/`, a folder the
+    # implementer writes, opened to truncate, wrote the target of a link left there for a likely pid (STORAGE-TMP).
+    from .storage import replace_file_durably
+    try:
+        replace_file_durably(notice_times_path(root), json.dumps(
+            {"last": fresh[0][0], "forgotten_through": forgotten, "keys": keys},
+            ensure_ascii=False, sort_keys=True).encode(UTF8))
+    except OSError:
+        return False
+    return True
+
+
+def _notice_within(root, key, window, sent):
+    """Whether `key` was recorded - or, with `sent`, delivered - inside the whole window (NOTICE-WINDOW).
+
+    The folded times answer for every line up to the newest one they name, whatever the ledger
+    still holds; the lines after it are read from the ledger. Where the fold has forgotten a key
+    the window may still need, the ledger is read back to the window's start. A check writes
+    nothing: a dry run and a read-only tool call it. A resume notice is the ring of every
+    condition it named (RESUME-QUIET).
+    """
+    cutoff = time.time() - window
+    index = _notice_times(root)
+    if index["keys"].get(key, {}).get("sent" if sent else "recorded", cutoff - 1) >= cutoff:
+        return True
+    forgotten = index.get("forgotten_through")
+    last = index.get("last") if not isinstance(forgotten, (int, float)) or cutoff > forgotten else None
+    for digest, row in _notice_rows_back(os.path.join(root, ".polyctl", "ledger", "notices.jsonl")):
+        at = row.get("at", 0)
+        if digest == last or not isinstance(at, (int, float)) or at < cutoff:
+            return False
+        if (row.get("sent") or not sent) and (row.get("key") == key or key in (row.get("named") or ())):
+            return True
+    return False
+
+
+def notice_recently_sent(root, key, window):
+    """Was this same alert already delivered inside the window? All of the window counts (NOTICE-WINDOW)."""
+    return _notice_within(root, key, window, sent=True)
+
+
+def _ledger_time(value):
+    """Epoch seconds from a ledger `at`: verifications write ISO text, the rest epochs."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _stall_reason(root, cfg, candidate, waiting, slice_id=None):
+    """Why the newest staged candidate has not landed, from what was recorded."""
+    try:
+        for row in reversed(authority_rows(root)):
+            if isinstance(row, dict) and row.get("granted") is False \
+                    and (row.get("candidate") or {}).get("digest") == candidate.get("digest"):
+                return "commit refused: " + "; ".join(str(r) for r in (row.get("reasons") or [])[:2])
+    except Exception:
+        pass
+    reviews_dir = cfg.get("reviews") or "semantic-review"
+    for name, verdict in reviews(root, reviews_dir, limit=20):
+        try:
+            with open(os.path.join(root, reviews_dir, name), encoding=UTF8, errors="replace") as fh:
+                head = fh.read(4000)
+        except OSError:
+            continue
+        if candidate.get("digest", "-") in head:
+            if "APPROVED" in (verdict or "").upper():
+                return f"review approved ({name}) but nothing committed"
+            return f"review {verdict} ({name})"
+    waiting = [d for d in waiting if slice_id and d.get("slice") == slice_id]
+    if waiting:
+        oldest = min(waiting, key=lambda d: d.get("asked_at") or 0)
+        return f"waiting on decision {oldest.get('id')}: {str(oldest.get('question') or '')[:80]}"
+    return "verified, then neither committed, refused nor reviewed"
+
+
+def throughput(root, cfg, hours=24.0, now=None):
+    """Candidates staged and landed, decisions asked and waiting, and what that makes the implementer (#91).
+
+    Busy-detection asks whether a process exists, so an implementer that is alive
+    and lands nothing reads as busy forever. On 2026-09-14 one ran full work
+    cycles for an hour - a candidate reached 255 passed and was staged - and
+    produced four blocked reports, three decision requests and one landing while
+    every surface read healthy. The ratio that would have shown it, candidates
+    staged against candidates landed, was computed nowhere.
+
+    A candidate is staged when `polyctl verify` recorded it ready, and landed when a
+    commit's tree is its index tree. The state is read in order: stalled (the
+    newest staged candidate has not landed for the `stall_minutes` setting),
+    landing (a candidate landed in the window), staging (staged, none landed yet),
+    busy (the transcript moved, nothing staged) and idle (nothing moved). None of
+    it reads the mailbox.
+    """
+    from .storage import read_jsonl
+    now = now or time.time()
+    cut = now - hours * 3600
+    try:
+        rows = read_jsonl(os.path.join(root, ".polyctl", "ledger", "verifications.jsonl"))
+    except Exception:
+        rows = []
+    ready = []
+    for row in rows:
+        candidate = row.get("candidate") if isinstance(row, dict) else None
+        if isinstance(candidate, dict) and row.get("passed") is True and row.get("candidate_ready") \
+                and candidate.get("index_tree"):
+            ready.append((_ledger_time(row.get("at")), candidate, row.get("slice")))
+    trees = {}
+    try:
+        log = _git_output(root, "log", "-n", "400", "--format=%T %ct").decode(UTF8, "replace")
+    except RuntimeError:
+        log = ""
+    for line in log.split("\n"):
+        parts = line.split()
+        if len(parts) == 2 and parts[1].isdigit():
+            trees.setdefault(parts[0], int(parts[1]))
+    staged = {candidate["digest"] for at, candidate, _ in ready if at >= cut}
+    landed = {candidate["index_tree"] for _, candidate, _ in ready
+              if trees.get(candidate["index_tree"], 0) >= cut}
+    every = decisions(root)
+    asked = [d for d in every if (d.get("asked_at") or 0) >= cut]
+    waiting = [d for d in every if d.get("state") == "open"]
+    oldest = min((d.get("asked_at") or now for d in waiting), default=None)
+    stall = None
+    if ready:
+        at, newest, slice_id = max(ready, key=lambda item: item[0])
+        minutes = (now - at) / 60
+        if newest["index_tree"] not in trees and minutes >= settings.get(cfg, "stall_minutes"):
+            stall = {"minutes": int(minutes), "candidate": newest.get("digest"),
+                     "paths": list(newest.get("changed_paths") or []),
+                     "reason": _stall_reason(root, cfg, newest, waiting, slice_id)}
+    msgs, _ = session_paths(cfg)
+    try:
+        moved = bool(msgs) and os.path.getmtime(msgs) >= cut
+    except OSError:
+        moved = False
+    state = ("stalled" if stall else "landing" if landed else "staging" if staged
+             else "busy" if moved else "idle")
+    return {"hours": hours, "staged": len(staged), "landed": len(landed),
+            "decisions_asked": len(asked), "decisions_open": len(waiting),
+            "oldest_open_minutes": int((now - oldest) / 60) if oldest is not None else None,
+            "state": state, "stall": stall}
+
+
+def digest(root, cfg, since_days=1.0):
+    """What actually happened in a window, from the ledgers rather than memory.
+
+    Event alerts answer "did something just occur". They cannot answer "is this
+    week going well", and asking a human to reconstruct that from thirty
+    notifications is asking them to do the tool's job. Everything here is already
+    on disk — commits, verifications, authority grants, decisions, notices — so
+    the summary is read, never estimated.
+    """
+    cut = time.time() - since_days * 86400
+    out = {"since_days": since_days, "at": int(time.time())}
+
+    # git's approxidate wants "N hours ago"; a bare "24.hours" parses to nothing
+    # and silently reports zero commits on a day that landed two.
+    # No shell: through one, a bare "|" in --pretty=%h|%ct|%s is a pipe, and on
+    # Windows a quoted one is too, so the commit list quietly came back empty (#71).
+    log = git_text(root, "log", f"--since={int(since_days * 24)} hours ago", "--pretty=%h|%ct|%s")
+    out["commits"] = [dict(zip(("sha", "at", "subject"), l.split("|", 2)))
+                      for l in log.split("\n") if l.count("|") >= 2]
+    out["unpushed"] = int(_git_text(root, "rev-list", "--count", "@{u}..HEAD") or 0) \
+        if _git_text(root, "rev-parse", "--abbrev-ref", "@{u}") else \
+        len([l for l in _git_text(root, "log", "--branches", "--not", "--remotes", "--pretty=%h").split("\n") if l])
+
+    def _window(rows):
+        fresh = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            # The ledgers disagree on the type of `at`: verifications write an
+            # ISO string, everything else an epoch. Read both.
+            at = r.get("at", 0)
+            if isinstance(at, str):
+                try:
+                    at = datetime.fromisoformat(at.replace("Z", "+00:00")).timestamp()
+                except ValueError:
+                    at = 0
+            if at >= cut:
+                fresh.append(r)
+        return fresh
+
+    def _jsonl(rel):
+        p = os.path.join(root, rel)
+        rows = []
+        if os.path.exists(p):
+            for line in open(p, errors="replace", encoding=UTF8):
+                try:
+                    rows.append(json.loads(line))
+                except Exception:
+                    continue
+        return _window(rows)
+
+    ver = _jsonl(".polyctl/ledger/verifications.jsonl")
+    out["verifications"] = {"total": len(ver),
+                            "passed": sum(1 for v in ver if v.get("passed")),
+                            "failed": sum(1 for v in ver if not v.get("passed"))}
+    try:
+        auth = _window(authority_rows(root))
+    except Exception as exc:
+        # This view cannot authorize, but it must not summarize manipulated
+        # authority as trustworthy counts. Preserve the rest of the digest and
+        # make the integrity failure explicit instead of skipping bad rows.
+        auth = []
+        out["authority"] = {
+            "granted": 0, "refused": 0,
+            "integrity": "broken", "error": str(exc),
+        }
+    else:
+        out["authority"] = {
+            "granted": sum(1 for a in auth if a.get("granted")),
+            "refused": sum(1 for a in auth if not a.get("granted")),
+            "integrity": "valid",
+        }
+    # Why authority was withheld is the actionable half — a refusal repeated all
+    # week is a process problem, not an incident.
+    reasons = {}
+    for a in auth:
+        for r in a.get("reasons") or []:
+            key = re.sub(r"[0-9a-f]{7,}|V-\d+|D-\d+|\d{4}-\d\d-\d\d\S*", "…", r)[:70]
+            reasons[key] = reasons.get(key, 0) + 1
+    out["refusal_reasons"] = sorted(reasons.items(), key=lambda x: -x[1])[:5]
+
+    notices = _jsonl(".polyctl/ledger/notices.jsonl")
+    out["alerts"] = {"sent": sum(1 for n in notices if n.get("sent")),
+                     "held": sum(1 for n in notices if not n.get("sent"))}
+
+    decs = [d for d in decisions(root) if d.get("asked_at", 0) >= cut]
+    answered = [d for d in decs if d.get("state") == "answered"]
+    out["decisions"] = {
+        "asked": len(decs), "answered": len(answered),
+        "open": len([d for d in decisions(root, "open")]),
+        "median_minutes": (sorted((d["answered_at"] - d["asked_at"]) // 60
+                                  for d in answered)[len(answered) // 2]
+                           if answered else None)}
+
+    b = board(root)
+    out["board"] = {k: len(v) for k, v in b.items() if v}
+    out["blocked"] = [{"id": i["id"], "title": i["title"],
+                       "needs": i["notes"].get("needs", "")} for i in b["blocked"]]
+
+    revs = reviews(root, cfg.get("reviews", "semantic-review"), limit=40)
+    fresh = []
+    for f, v in revs:
+        try:
+            if os.path.getmtime(os.path.join(root, cfg.get("reviews", "semantic-review"), f)) >= cut:
+                fresh.append(v)
+        except OSError:
+            pass
+    # Only a review that produced a verdict is a review (audit); the rest are counted apart.
+    out["reviews"] = {"total": sum(1 for v in fresh if v in ("APPROVED", "NEEDS_CHANGES")),
+                      "approved": sum(1 for v in fresh if v == "APPROVED"),
+                      "changes": sum(1 for v in fresh if v == "NEEDS_CHANGES"),
+                      "not_reviewed": sum(1 for v in fresh if v not in ("APPROVED", "NEEDS_CHANGES"))}
+
+    # The implementer's own account and estimate, never the first shipped adapter's: an
+    # implementer whose adapter declares no account polyctl can read is said to have none
+    # (ACCOUNT-READERS). An expired token or a reading without a limit is no figure.
+    ident = implementer_adapter_id(cfg)
+    out["account"] = {"adapter": ident, "readable": bool(usage_api(ident))}
+    acct = account_usage(adapter_id=ident) if out["account"]["readable"] else None
+    if acct and not acct.get("error") and not acct.get("expired") and acct.get("limit"):
+        out["credits"] = {"used": acct["used"], "limit": acct["limit"],
+                          "remaining": acct["limit"] - acct["used"]}
+    local = credit_usage(adapter_id=ident)
+    days = sorted(local.get("days", {}).items())
+    out["credit_days"] = [(d, v) for d, v in days
+                          if d >= time.strftime("%Y-%m-%d", time.localtime(cut))]
+    return out
+
+
+AGENT_LEDGERS = ("authority.jsonl", "decisions.jsonl", "fanouts.jsonl", "verifications.jsonl",
+                 "waivers.jsonl")
+
+
+def _product_changes(root, cfg):
+    """(porcelain lines, newest mtime) for uncommitted paths outside coordination state."""
+    lines = product_dirty(root, cfg)
+    churn = 0
+    for line in lines:
+        name = line[3:].split(" -> ")[-1].strip().strip('"')
+        try:
+            churn = max(churn, int(os.path.getmtime(os.path.join(root, name))))
+        except OSError:
+            pass
+    return lines, churn
+
+
+def work_fingerprint(root, cfg=None):
+    """Everything that moves when work is happening, in one short string.
+
+    A commit is one shape of progress, not the only one. A slice whose review
+    found real defects withholds its commit *because it is behaving correctly*,
+    and a HEAD-only progress check cannot tell that apart from an agent that
+    died — so the backoff exhausted itself on a live slice and stood down for two
+    hours. Count the product tree and its content, the reviews and the decisions
+    too: if any of them moved, something is being done.
+
+    Only what an agent produces counts. The watchdog appends to its own ledgers
+    every cycle - progress, notices, credits, the mail ledger - and while those
+    counted, the fingerprint changed on every cycle and a nudge's backoff reset
+    before it could grow: between 07:00 and 12:00 on 2026-09-15 the watchdog
+    nudged 29 times and never once backed off (#96).
+    """
+    cfg = cfg if cfg is not None else load_config(root)
+    lines, churn = _product_changes(root, cfg)
+    parts = [_git_text(root, "rev-parse", "--short", "HEAD"), "\n".join(lines)]
+    for line in lines:
+        name = line[3:].split(" -> ")[-1].strip().strip('"')
+        try:
+            stat = os.stat(os.path.join(root, name))
+            parts.append(f"{name}:{stat.st_mtime_ns}:{stat.st_size}")
+        except OSError:
+            pass
+    # A review that did not take place is a file, not progress: an unavailable
+    # reviewer written every turn reset the nudge backoff every turn (audit).
+    not_reviews = set()
+    try:
+        from .storage import read_chained_jsonl
+        not_reviews = {row.get("artefact") for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+                       if isinstance(row, dict) and row.get("verdict") not in ("APPROVED", "NEEDS_CHANGES")}
+    except Exception:
+        pass
+    for sub in (cfg.get("reviews") or "semantic-review", DECISION_DIR):
+        d = os.path.join(root, sub)
+        if os.path.isdir(d):
+            try:
+                parts.append("|".join(sorted(
+                    f"{f}:{os.stat(os.path.join(d, f)).st_mtime_ns}:{os.path.getsize(os.path.join(d, f))}"
+                    for f in os.listdir(d) if f not in not_reviews)))
+            except OSError:
+                pass
+    ledger = os.path.join(root, ".polyctl", "ledger")
+    for name in AGENT_LEDGERS:
+        try:
+            stat = os.stat(os.path.join(ledger, name))
+            parts.append(f"{name}:{stat.st_mtime_ns}:{stat.st_size}")
+        except OSError:
+            pass
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+
+
+def nudge_inputs(root, cfg):
+    """What an idle implementer could act on, in one short string (#96).
+
+    work_fingerprint measures what an agent produces; this measures what it is
+    given: the board, the backlog, the decisions and mail addressed to it. An
+    implementer that answered a nudge by changing nothing is not asked again
+    until one of these, or its work, moves.
+    """
+    parts = []
+    for rel in (".polyctl/board.md", ".polyctl/backlog.md"):
+        try:
+            with open(os.path.join(root, rel), "rb") as fh:
+                parts.append(hashlib.sha256(fh.read()).hexdigest())
+        except OSError:
+            parts.append("-")
+    d = os.path.join(root, DECISION_DIR)
+    try:
+        parts.append("|".join(sorted(f"{f}:{int(os.path.getmtime(os.path.join(d, f)))}"
+                                     for f in os.listdir(d))))
+    except OSError:
+        parts.append("-")
+    parts.append("|".join(sorted(implementer_inbox(root, cfg))))
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+
+
+def _coordination_dirs(cfg):
+    """Repository-relative directories generated or consumed by orchestration.
+
+    These files are evidence and coordination state, not the product tree being
+    measured. Keep one definition for review scope, dirty-product detection and
+    commit authority so one polyctl command cannot invalidate another command's
+    evidence merely by recording its result.
+    """
+    values = list(COORDINATION_DIRS) + list(harness_dirs()) + [
+        (cfg or {}).get("reviews", "semantic-review"),
+        (cfg or {}).get("mailbox", "agent-mail"),
+    ]
+    out = []
+    for value in values:
+        raw = str(value or "").replace("\\", "/")
+        while raw.startswith("./"):
+            raw = raw[2:]
+        normal = os.path.normpath(raw).replace("\\", "/")
+        # A coordination setting must never be able to exclude the repository
+        # root, escape it, or hide an absolute product path from authority.
+        if not normal or normal in (".", "..") or normal.startswith("../") \
+                or os.path.isabs(raw):
+            continue
+        prefix = normal.rstrip("/") + "/"
+        if prefix not in out:
+            out.append(prefix)
+    return tuple(out)
+
+
+def _is_coordination_path(path, cfg):
+    normal = str(path or "").replace("\\", "/")
+    while normal.startswith("./"):
+        normal = normal[2:]
+    return any(normal == prefix.rstrip("/") or normal.startswith(prefix)
+               for prefix in _coordination_dirs(cfg))

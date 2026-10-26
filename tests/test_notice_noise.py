@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, email, features as F, lib as A, telegram
-from ao import watchdog as W
+from polyctl import cli, email, features as F, lib as A, telegram
+from polyctl import watchdog as W
 from tests.scenarios import World
 
 NOTIFY = W.notify                  # the scenario world replaces it; these are about the real ladder
@@ -54,19 +54,19 @@ def _heartbeat(root, at):
 
 def _doctor_ran(root, at):
     """The scheduled check's record of its last run."""
-    path = os.path.join(A.HOME, ".ao", f"doctor-{A.project_key(root)}.json")
+    path = os.path.join(A.HOME, ".polyctl", f"doctor-{A.project_key(root)}.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         json.dump({"at": int(at), "back": None}, fh)
 
 
 def _watchdog_job(root, interval):
-    """The watchdog's launchd job as `ao watchdog install --interval` writes it."""
-    label = f"com.agentorchestrator.watchdog.{A.project_key(root).lower()}"
+    """The watchdog's launchd job as `polyctl watchdog install --interval` writes it."""
+    label = f"com.polyctl.watchdog.{A.project_key(root).lower()}"
     path = os.path.join(A.HOME, "Library", "LaunchAgents", f"{label}.plist")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write(cli.PLIST.format(label=label, python_arg="", script="ao-watchdog", root=root, idle=6,
+        fh.write(cli.PLIST.format(label=label, python_arg="", script="polyctl-watchdog", root=root, idle=6,
                                   interval=interval, log="watchdog.log", path="/usr/bin"))
 
 
@@ -75,11 +75,11 @@ def _doctor_findings(cfg):
     root, found = cfg["root"], []
     age = A.heartbeat_age(root)
     if age is not None and age > cli.WATCHDOG_SILENT_AFTER:
-        found.append(("watchdog-dead", f"watchdog silent for {age // 60}m — launchctl / ao watchdog status"))
+        found.append(("watchdog-dead", f"watchdog silent for {age // 60}m — launchctl / polyctl watchdog status"))
     own = cli._implementer_credits(cfg)
     credits = cli._credits_problem(own["rate"], own["samples"][-1] if own["samples"] else None)
     return found + ([credits] if credits else []) + [
-        ("no-channel", "no human channel beyond desktop notifications — ao email setup")]
+        ("no-channel", "no human channel beyond desktop notifications — polyctl email setup")]
 
 
 def _paged(monkeypatch):
@@ -215,7 +215,7 @@ def test_a_doctor_that_cannot_keep_its_record_pages_a_silent_watchdog_as_it_did(
     raised = _paged(monkeypatch)
     root = project["root"]
     _heartbeat(root, clock[0] - 14 * DAY)
-    os.makedirs(os.path.join(A.HOME, ".ao", f"doctor-{A.project_key(root)}.json"))     # nothing can be written there
+    os.makedirs(os.path.join(A.HOME, ".polyctl", f"doctor-{A.project_key(root)}.json"))     # nothing can be written there
 
     cli._doctor_check(project, page=True)
 

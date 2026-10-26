@@ -1,12 +1,12 @@
 """The README's adapter table, in both languages, is what the packaged adapters declare (README-ADAPTERS).
 
 The release checklist asks for it by hand, and 0.5.0 was prepared with a table that still named codex and qoder
-untested, which their adapters had moved to partial, and left out twelve adapters ao ships.
+untested, which their adapters had moved to partial, and left out twelve adapters polyctl ships.
 """
 import os
 import re
 
-from ao import lib as A
+from polyctl import lib as A
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROW = re.compile(r"^\| \*\*(full|partial|documented|untested)\*\* — [^|]*\| ([^|]*) \|$", re.M)
@@ -15,7 +15,7 @@ ROW = re.compile(r"^\| \*\*(full|partial|documented|untested)\*\* — [^|]*\| ([
 def test_the_readme_adapter_table_names_each_adapter_as_its_adapter_declares_it():
     declared = {}
     for name, adapter in A.package_adapters().items():
-        if adapter.get("kind") != "cloud":          # as `ao adapters` lists them: a cloud agent's is no harness here
+        if adapter.get("kind") != "cloud":          # as `polyctl adapters` lists them: a cloud agent's is no harness here
             declared.setdefault(adapter.get("verified"), set()).add(name)
 
     for readme in ("README.md", "README.tr.md"):
