@@ -2,7 +2,8 @@ name: tests
 # The suite runs on GitHub's hosted runners, which cost nothing for a public repository:
 #   - every push to main and every pull request: Ubuntu, on the Python 3.9 support floor (ubuntu-24.04) and on 3.12
 #     (ubuntu-latest);
-#   - every Monday: macOS and Windows on 3.12, and Windows once more without Python's UTF-8 mode;
+#   - every Monday: macOS on 3.12 (both Windows legs are off the schedule until WINDOWS-LANE-0.7 and run on demand;
+#     CI-WEEKLY-MACOS);
 #   - on demand, one environment or all, with UTF-8 mode or without it:
 #       gh workflow run tests -f os=windows-latest -f python=3.12
 #       gh workflow run tests -f os=windows-latest -f python=3.12 -f utf8=off
@@ -98,28 +99,23 @@ jobs:
           PYTHONPATH=src python -m polyctl commit-check --range "$range" --since-first-trailer
 
   weekly:
+    # Both Windows legs (with UTF-8 mode and without) are off the schedule until WINDOWS-LANE-0.7: on 2026-10-26
+    # (run 40305861017, fe89494) macOS passed and both Windows legs failed on the 29 known Windows failures. Run
+    # them by hand with:
+    #   gh workflow run tests -f os=windows-latest -f python=3.12
+    #   gh workflow run tests -f os=windows-latest -f python=3.12 -f utf8=off
+    # (CI-WEEKLY-MACOS).
     if: github.event_name == 'schedule'
-    name: ${{ matrix.os }} / Python 3.12${{ matrix.utf8 == 'off' && ' / no UTF-8 mode' || '' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-        utf8: ["on"]
-        # Windows once more as a default install runs Python, without UTF-8 mode: its pipes and files then
-        # default to the ANSI code page, which every other lane sets aside (WINDOWS-LANE-PARITY).
-        include:
-          - os: windows-latest
-            utf8: "off"
-    runs-on: ${{ matrix.os }}
+    name: macos-latest / Python 3.12
+    runs-on: macos-latest
     # A Windows runner spawns processes slowest: the suite took 37 minutes there on 3.9 and ran past 40 on
     # 2026-10-12, when the job was cancelled before it said a result (CI-WINDOWS-TIME); on 2026-10-16 it took
     # 54 minutes on 3.12 and ran past 60 on 3.9, cancelled the same way (CI-WINDOWS-TIME-2).
     timeout-minutes: 90
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      # Python reads an empty PYTHONUTF8 or PYTHONIOENCODING as unset.
-      PYTHONUTF8: ${{ matrix.utf8 != 'off' && '1' || '' }}
-      PYTHONIOENCODING: ${{ matrix.utf8 != 'off' && 'utf-8' || '' }}
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0

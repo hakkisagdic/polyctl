@@ -25,7 +25,7 @@ Every `polyctl` command and what it does. The [README](../README.md) starts with
 | `polyctl export otlp [--out <file>] [--attested]` | the project's ledger as OpenTelemetry traces in the OTLP/JSON encoding (one `ExportTraceServiceRequest`): one trace per slice (its candidate) and one span per gate step (`verification`, `review`, `grant`, `commit`) with hash-derived ids and the ledger's own times, written to `--out` or stdout; refuses a ledger this machine's checkpoint store does not cover unless `--attested` asks for only the attested rows (`polyctl.export.attested_only=true`); polyctl sends nothing anywhere ([telemetry.md](telemetry.md#otlpjson-trace-export-polyctl-export-otlp)) |
 | `polyctl features [on|off <key>]` | the switches and what each costs; all off = deterministic polyctl, zero model spend ([features.md](features.md)) |
 | `polyctl mode [show|lite|full]` | the project mode and what each mode does and does not protect: `lite` is the basic setup without enforcement (`enforcement: off - lite` on `polyctl status`, `polyctl doctor` and the MCP status, no reviewer probe, no commit hooks, `polyctl commit` refused), a person's act with `--by <name>` on the record; `full` checks an independent reviewer route and commit hooks and refuses naming what is missing ([configuration.md](configuration.md), [safety.md](safety.md)) |
-| platforms | macOS and Linux native; Windows first cut ([windows.md](windows.md)); the suite runs on Ubuntu for every push and pull request, on macOS and Windows weekly |
+| platforms | macOS and Linux native; Windows first cut ([windows.md](windows.md)); the suite runs on Ubuntu for every push and pull request, on macOS weekly, and on Windows on demand until WINDOWS-LANE-0.7 |
 | `polyctl waive review --slice B7 --by <name> --why …` / `polyctl catchup` | a person bypasses a gate on the record; catchup reviews each landed range with a model family other than the one that wrote it, against what its commit messages claim, closes a `move-only` split on the proof its grant recorded, run again, and replays deferred wakes and nudges. `polyctl catchup --plan` previews it, names what closes by proof, and writes nothing, `polyctl catchup --limit 10` and `polyctl catchup --slice B7` bound a run, `polyctl catchup --author-family <family> --by <name>` is a person naming a family polyctl did not record, and `polyctl catchup --move-only <slices> --by <name>` is a person stating which waived slices only moved code, each closing only where the proof holds, and `polyctl catchup --slice B7 --reviewer <actor>` reviews with another reviewer actor of the table, so runs over different slices go side by side; a run exits 3 when the reviews it started decided nothing, and 0 when it made progress or had nothing to do |
 | `polyctl pings setup [--url-env NAME] [--all]` | dead man's switch: external pings that alarm when the watchdog and its doctor job both die; polyctl asks for the check's address and does not show it, a script names the variable that holds it, and `polyctl pings` shows where they go, never the whole address ([alarms.md](alarms.md)) |
 | `polyctl hooks [status|install|uninstall] [--allow-shared-hooks]` / `polyctl push allow` | resolve Git's effective hook path; each role is independent, and shared/external/global mutations require explicit command-wide authorization |
@@ -100,10 +100,10 @@ unless `--allow-shared-hooks` is explicit.
 ## Tests
 
 The hosted `tests` workflow runs the suite on every push to main and every pull request
-on Ubuntu, with Python 3.9 (the support floor) and 3.12; macOS and Windows run every
-week and on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`), Windows
-a second time each week without Python's UTF-8 mode, as a default install runs it
-(`-f utf8=off` on demand, [windows.md](windows.md)). The
+on Ubuntu, with Python 3.9 (the support floor) and 3.12, and on macOS every week on
+Python 3.12; Windows runs on demand until WINDOWS-LANE-0.7 (`gh workflow run tests -f
+os=windows-latest -f python=3.12`, and `-f utf8=off` without Python's UTF-8 mode, as a
+default install runs it; [windows.md](windows.md)). The
 repository is public, so the hosted runners cost nothing, and the pre-push hook still
 runs the suite locally before a push: first the tests the pushed commits touch, then the
 whole suite, in four processes where pytest-xdist (the `dev` extra) is installed -

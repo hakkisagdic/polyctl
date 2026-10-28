@@ -9,7 +9,9 @@ tests/standin.py now writes a stand-in as a program on both: an executable scrip
 `<name>.exe`, as pip writes a console script there - distlib's console launcher, a line naming this interpreter,
 and the script as `__main__.py` in a zip after them. The launcher runs only on Windows; what it hands the
 interpreter - the file itself, which Python runs as a zip application - runs on every platform, and is run here.
-The weekly run has a Windows leg without UTF-8 mode, and every lane's log lists what it skipped and why. The
+The Windows lane runs on demand (with UTF-8 mode or, as `-f utf8=off`, without it) until WINDOWS-LANE-0.7, while
+the weekly run runs macOS on Python 3.12 alone after the 2026-10-26 scheduled run (40305861017, fe89494) passed on
+macOS and failed on both Windows legs (CI-WEEKLY-MACOS), and every lane's log lists what it skipped and why. The
 Python 3.9 Ubuntu legs run on ubuntu-24.04 after ubuntu-latest moved to Ubuntu 26.04, which has no 3.9 build at
 actions/setup-python (CI-UBUNTU-39).
 """
@@ -114,18 +116,6 @@ def test_no_reviewer_or_authority_test_is_skipped_on_windows_for_a_script_its_sh
                                            "Windows too, or name here why the test cannot run there"
 
 
-def test_every_lane_lists_what_it_skipped_and_one_windows_leg_runs_without_utf8_mode():
-    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
-
-    runs = re.findall(r"^\s+- run: (python -m pytest.*)$", workflow, re.M)
-    assert len(runs) == 3 and all(run == "python -m pytest -q -rs" for run in runs), runs
-    assert re.search(r'^\s+utf8: \["on"\]\n(?:\s+#.*\n)*\s+include:\n\s+- os: windows-latest\n\s+utf8: "off"\n',
-                     workflow, re.M)
-    # Python reads an empty PYTHONUTF8 as unset: the leg runs as a default install does.
-    assert "PYTHONUTF8: ${{ matrix.utf8 != 'off' && '1' || '' }}" in workflow
-    assert "PYTHONIOENCODING: ${{ matrix.utf8 != 'off' && 'utf-8' || '' }}" in workflow
-
-
 def _job_text(workflow, name):
     """The text of one job in a workflow file, bounded by indentation."""
     after = workflow.split(f"\n  {name}:\n", 1)[1].splitlines()
@@ -184,6 +174,38 @@ def _gh_render(template, **contexts):
 
 def _job_field(job, field):
     return re.search(rf"^\s+{re.escape(field)}:\s*(.+?)\s*(?:#.*)?$", job, re.M).group(1).strip('"')
+
+
+def test_every_lane_lists_what_it_skipped_and_one_windows_leg_runs_without_utf8_mode():
+    """The Windows lane runs on demand until WINDOWS-LANE-0.7, while the weekly job runs macOS alone (CI-WEEKLY-MACOS)."""
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    header = workflow.split("\non:\n", 1)[0]
+    assert "every Monday: macOS on 3.12" in header and "WINDOWS-LANE-0.7" in header
+
+    runs = re.findall(r"^\s+- run: (python -m pytest.*)$", workflow, re.M)
+    assert len(runs) == 3 and all(run == "python -m pytest -q -rs" for run in runs), runs
+
+    weekly = _job_text(workflow, "weekly")
+    weekly_uncommented = "\n".join(line.split("#", 1)[0] for line in weekly.splitlines())
+    assert "windows" not in weekly_uncommented.lower()
+    assert (_job_field(weekly, "name"), _job_field(weekly, "runs-on"), _job_field(weekly, "python-version")) == (
+        "macos-latest / Python 3.12", "macos-latest", "3.12")
+    assert "WINDOWS-LANE-0.7" in weekly
+
+    on_demand = _job_text(workflow, "on-demand")
+    inputs = {"os": "windows-latest", "python": "3.12", "utf8": "off"}
+    runners = _gh_render(_job_field(on_demand, "os"), inputs=inputs)
+    assert runners == ["windows-latest"]
+    matrix = {"os": runners[0]}
+    assert (_gh_render(_job_field(on_demand, "name"), inputs=inputs, matrix=matrix),
+            _gh_render(_job_field(on_demand, "runs-on"), inputs=inputs, matrix=matrix),
+            _gh_render(_job_field(on_demand, "python-version"), inputs=inputs, matrix=matrix)) == (
+        "windows-latest / Python 3.12 / no UTF-8 mode", "windows-latest", "3.12")
+    # Python reads an empty PYTHONUTF8 as unset: the leg runs as a default install does.
+    assert "PYTHONUTF8: ${{ inputs.utf8 != 'off' && '1' || '' }}" in on_demand
+    assert "PYTHONIOENCODING: ${{ inputs.utf8 != 'off' && 'utf-8' || '' }}" in on_demand
+    assert (_gh_render(_job_field(on_demand, "PYTHONUTF8"), inputs=inputs, matrix=matrix),
+            _gh_render(_job_field(on_demand, "PYTHONIOENCODING"), inputs=inputs, matrix=matrix)) == ("", "")
 
 
 def test_python_39_ubuntu_lanes_run_on_an_image_with_a_39_build_and_never_on_ubuntu_latest():

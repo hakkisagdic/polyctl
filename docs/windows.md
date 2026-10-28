@@ -40,11 +40,12 @@ written by `tests/standin.py`: an executable script on POSIX, and on Windows `<n
 a console script there - distlib's console launcher, a line naming the interpreter, and the script as
 `__main__.py` in a zip after them. Eighteen tests that were skipped on Windows run there now; the one
 reviewer test still skipped waits for a sign-in line while the reviewer runs, which Windows does not
-hand over until the reviewer's streams close. The weekly run also has a Windows leg without Python's
-UTF-8 mode, as a default install runs it, and a dispatch can drop UTF-8 mode on any runner
-(`-f utf8=off`). `tests/test_windows_lane_parity.py` runs a stand-in as a program on every platform,
-and fails when a test is skipped on Windows for its shebang again, or the workflow loses that leg or
-a lane's list of what it skipped.*
+hand over until the reviewer's streams close. A dispatch can also drop Python's UTF-8 mode on any
+runner (`-f utf8=off`), as a default Windows install runs it (both Windows legs are off the weekly
+schedule and run on demand until WINDOWS-LANE-0.7; CI-WEEKLY-MACOS). `tests/test_windows_lane_parity.py`
+runs a stand-in as a program on every platform, and fails when a test is skipped on Windows for its
+shebang again, or the workflow puts Windows on the weekly schedule before WINDOWS-LANE-0.7, loses the
+on-demand leg without UTF-8 mode, or loses a lane's list of what it skipped.*
 
 *In polyctl since slice WINDOWS-SAY-WHY: what polyctl cannot hold on Windows it holds another way, or says
 so, where it bears and in `polyctl doctor` (`on Windows`). Several guarantees were made with what Windows
@@ -222,9 +223,9 @@ Scheduler denied, its service not running - reads the same for both names, and i
 the listing itself fails, whatever for, polyctl cannot tell a task is gone, and `polyctl remove` keeps the
 project's state, naming what schtasks said, until it runs where Task Scheduler answers.*
 
-The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, Windows twice -
-once without Python's UTF-8 mode - and any environment on demand (`gh workflow run tests -f
-os=windows-latest -f python=3.12`, with `-f utf8=off` for a run without UTF-8 mode); Ubuntu runs
+The hosted `tests` workflow runs macOS every week on Python 3.12, and any environment on demand
+(`gh workflow run tests -f os=windows-latest -f python=3.12`, with `-f utf8=off` for a run without
+Python's UTF-8 mode); Windows runs on demand until WINDOWS-LANE-0.7 (CI-WEEKLY-MACOS). Ubuntu runs
 on every push and pull request with the Python 3.9 support floor and 3.12.
 Every lane runs the same suite, and each supported
 runner must pass the process backend's native self-check rather than silently use
@@ -257,9 +258,10 @@ hosted runner get a scenario in `tests/test_scenarios.py` like any other.
 
 ## Text on a default Windows install
 
-Every lane but one runs Python in UTF-8 mode (`PYTHONUTF8=1`); a Python a person installs on
-Windows does not, and there it reads and writes a pipe in the ANSI code page. The weekly run's
-second Windows leg runs without it, as such an install does (WINDOWS-LANE-PARITY). A character
+Every lane by default runs Python in UTF-8 mode (`PYTHONUTF8=1`); a Python a person installs on
+Windows does not, and there it reads and writes a pipe in the ANSI code page. An on-demand Windows
+run with `-f utf8=off` runs without it, as such an install does (WINDOWS-LANE-PARITY; Windows runs
+on demand until WINDOWS-LANE-0.7, CI-WEEKLY-MACOS). A character
 outside that page - an arrow is outside the Western and the Turkish one alike, and the
 Turkish letters are outside the Western one - ended the write, and with it the command
 or the MCP server (#71, from the 2026-09-08 audit); a body piped in as UTF-8 was read as
