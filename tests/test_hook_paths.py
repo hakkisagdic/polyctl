@@ -1897,3 +1897,139 @@ def test_replaced_polyctl_pre_push_in_git_hooks_is_warned_as_changed_guard_not_o
     enrolled_doc.pop("pre_push", None)
     enrolled_file.write_text(json.dumps(enrolled_doc), encoding="utf-8")
     assert cli._own_pre_push_target(cli._polyctl_hook_inventory(str(repo))) is None
+
+
+def test_overwritten_pre_push_reports_replaced_in_mcp_payload_and_status_json_alike(
+    tmp_path, monkeypatch, capsys
+):
+    """MCP status_payload and `polyctl status --json` share the CLI status push_guard line (PUSH-GUARD-MCP)."""
+    import json
+    from polyctl import mcp
+
+    _make_current_polyctl_available(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        cli,
+        "_reviewer_probe",
+        lambda probe_cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
+            "configured": True,
+            "ok": True,
+            "route": "fixture-reviewer",
+            "binary": sys.executable,
+            "version": "fixture",
+            "reason": "exact nonce echoed",
+            "kind": "success",
+        },
+    )
+
+    repo = _init_repo(tmp_path / "mcp-replaced-push")
+    assert cli.cmd_init(_cfg(repo), _init_args(profile="agy-codex")) == 0
+    _git(repo, "add", cli.PROJECT_MARKER)
+    assert cli.cmd_hooks(_cfg(repo), _args("install")) == 0
+    capsys.readouterr()
+
+    loaded = dict(A.load_config(str(repo)), root=str(repo))
+    assert "push_guard" not in mcp.status_payload(loaded)
+
+    push_hook = repo / ".git" / "hooks" / "pre-push"
+    push_hook.write_bytes(b"#!/bin/sh\nexit 0\n")
+    push_hook.chmod(0o755)
+
+    cli.cmd_status(loaded, SimpleNamespace(messages=8, window=24.0, json=True))
+    status_json = json.loads(capsys.readouterr().out)
+    mcp_payload = mcp.status_payload(loaded)
+
+    assert "polyctl's pre-push was replaced: the push guard is off" in status_json["push_guard"]
+    assert "foreign / untracked" in status_json["push_guard"]
+    assert "move that hook aside, then `polyctl hooks install`" in status_json["push_guard"]
+    assert mcp_payload["push_guard"] == status_json["push_guard"]
+
+    # A non-polyctl pre-push that polyctl never installed also gives the same line in MCP and status --json.
+    untracked_repo = _init_repo(tmp_path / "mcp-uninstalled-push")
+    untracked_hook = untracked_repo / ".git" / "hooks" / "pre-push"
+    untracked_hook.parent.mkdir(parents=True, exist_ok=True)
+    untracked_hook.write_bytes(b"#!/bin/sh\necho custom hook\n")
+    untracked_hook.chmod(0o755)
+    assert cli.cmd_init(_cfg(untracked_repo), _init_args(profile="agy-codex")) == 0
+    capsys.readouterr()
+
+    untracked_loaded = dict(A.load_config(str(untracked_repo)), root=str(untracked_repo))
+    cli.cmd_status(untracked_loaded, SimpleNamespace(messages=8, window=24.0, json=True))
+    untracked_json = json.loads(capsys.readouterr().out)
+    untracked_mcp = mcp.status_payload(untracked_loaded)
+    assert "a pre-push polyctl did not install: the push guard is off" in untracked_json["push_guard"]
+    assert untracked_mcp["push_guard"] == untracked_json["push_guard"]
+
+
+def test_tracked_ambiguous_polyctl_pre_push_under_core_hooks_path_is_not_own(
+    tmp_path, monkeypatch, capsys
+):
+    """A tracked pre-push in the ambiguous-polyctl state under core.hooksPath is not the repository's own (PUSH-GUARD-MCP)."""
+    from polyctl import mcp
+
+    _make_current_polyctl_available(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)
+    monkeypatch.setattr(A, "colour_enabled", lambda stream=None: True)
+    monkeypatch.setattr(
+        cli,
+        "_reviewer_probe",
+        lambda probe_cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
+            "configured": True,
+            "ok": True,
+            "route": "fixture-reviewer",
+            "binary": sys.executable,
+            "version": "fixture",
+            "reason": "exact nonce echoed",
+            "kind": "success",
+        },
+    )
+
+    repo = _init_repo(tmp_path / "ambiguous-tracked-push")
+    hooks = repo / ".githooks"
+    hooks.mkdir()
+    pre_commit = hooks / "pre-commit"
+    pre_commit.write_bytes(cli._render_local_hook("pre-commit", "."))
+    pre_commit.chmod(0o755)
+    ambiguous_push = b"#!/bin/sh\npolyctl push check\n"
+    pre_push = hooks / "pre-push"
+    pre_push.write_bytes(ambiguous_push)
+    pre_push.chmod(0o755)
+    (repo / cli.PROJECT_MARKER).write_bytes(cli.PROJECT_MARKER_BYTES)
+    _git(repo, "add", ".githooks/pre-commit", ".githooks/pre-push", cli.PROJECT_MARKER)
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "track ambiguous pre-push")
+    _git(repo, "config", "core.hooksPath", ".githooks")
+
+    inv = cli._polyctl_hook_inventory(str(repo))
+    target = cli._active_hook_targets(inv)["pre-push"]
+    assert target["static_state"] == "ambiguous-polyctl"
+    assert target["track_state"] == "tracked"
+    assert cli._own_pre_push_target(inv) is None
+
+    assert cli.cmd_init(_cfg(repo), _init_args(profile="agy-codex")) == 0
+    raw_init = capsys.readouterr().out
+    init_out = _strip_colour(raw_init)
+    assert "is the repository's own pre-push hook" not in init_out
+    assert "a pre-push polyctl did not install: the push guard is off" in init_out
+    assert "ambiguous-polyctl / tracked" in init_out
+    for line in raw_init.splitlines():
+        if "push guard" in line:
+            assert "\033[33m" in line and "\033[2m" not in line
+
+    loaded = dict(A.load_config(str(repo)), root=str(repo))
+    facts = cli.status_facts(loaded)
+    assert "is the repository's own pre-push hook" not in facts["push_guard"]
+    assert "ambiguous-polyctl / tracked" in facts["push_guard"]
+    assert mcp.status_payload(loaded)["push_guard"] == facts["push_guard"]
+
+    cli.cmd_doctor(loaded, SimpleNamespace(check=False))
+    raw_doctor = capsys.readouterr().out
+    doctor = _strip_colour(raw_doctor)
+    assert "is the repository's own pre-push hook" not in doctor
+    assert re.search(
+        r"^push hook\s+ambiguous-polyctl / tracked\s+polyctl push-window hook unavailable$",
+        doctor,
+        re.M,
+    )
+    for line in raw_doctor.splitlines():
+        if "push hook" in line or "push guard" in line:
+            assert "\033[33m" in line and "\033[2m" not in line

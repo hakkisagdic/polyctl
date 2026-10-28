@@ -96,17 +96,9 @@ def status_facts(cfg, msg_count=8, window_hours=24.0, shown=False):
         facts["mode"] = "lite"
         facts["enforcement"] = ENFORCEMENT_OFF_LITE_LINE
     else:
-        hook_inv = _polyctl_hook_inventory(root)
-        push_target = _own_pre_push_target(hook_inv)
-        if push_target is not None:
-            facts["push_guard"] = (
-                f"off ({push_target['path']} is the repository's own pre-push hook — "
-                f"{push_target['static_state']} / {push_target['track_state']})"
-            )
-        else:
-            other_push = _other_pre_push_line(hook_inv)
-            if other_push is not None:
-                facts["push_guard"] = other_push
+        push_guard = _push_guard_status_line(_polyctl_hook_inventory(root))
+        if push_guard is not None:
+            facts["push_guard"] = push_guard
     recs = []
     if impl:
         state, age, desc = A.busy(cfg, adapter)

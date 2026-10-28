@@ -480,9 +480,8 @@ def status_payload(cfg):
          "throughput": A.throughput(root, cfg),
          "held": A.hold_state(root),
          "agent_processes": processes, "agent_processes_unread": unread},
-        **({"push_guard": f"off ({push_target['path']} is the repository's own pre-push hook — "
-                          f"{push_target['static_state']} / {push_target['track_state']})"}
-           if mode != "lite" and (push_target := cli._own_pre_push_target(cli._polyctl_hook_inventory(root))) is not None
+        **({"push_guard": push_guard}
+           if mode != "lite" and (push_guard := cli._push_guard_status_line(cli._polyctl_hook_inventory(root))) is not None
            else {}),
     )
 

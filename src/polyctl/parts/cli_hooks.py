@@ -1174,17 +1174,15 @@ def _record_pre_push_provenance(root, inv, final_inv=None, fields=None):
 
 
 def _own_pre_push_target(inv):
-    """The active pre-push target when the repository keeps its own tracked pre-push hook, else None (INIT-OWN-PRE-PUSH-3).
+    """The active pre-push target when the repository keeps its own tracked pre-push hook, else None (INIT-OWN-PRE-PUSH-3, PUSH-GUARD-MCP).
 
-    A pre-push counts as the repository's own only when it is not polyctl's and is tracked
-    in the tree core.hooksPath names (as in this repository).
+    A pre-push counts as the repository's own only when it is foreign (not polyctl's or an
+    ambiguous polyctl body) and is tracked in the tree core.hooksPath names (as in this repository).
     """
     if inv.get("error"):
         return None
     target = _active_hook_targets(inv).get("pre-push")
-    if not target or _state_base(target["static_state"]) in (
-        "absent", "current-local", "current-scoped", "legacy"
-    ):
+    if not target or _state_base(target["static_state"]) != "foreign":
         return None
     if os.path.realpath(target["path"]) in _recorded_pre_push_paths(inv["root"]):
         return None
@@ -1225,6 +1223,17 @@ def _other_pre_push_line(inv):
         f"{what} ({target['path']} — {target['static_state']} / {target['track_state']}); "
         "to have polyctl's guard, move that hook aside, then `polyctl hooks install`"
     )
+
+
+def _push_guard_status_line(inv):
+    """The `push_guard` line for `polyctl status`, `polyctl doctor`, and MCP `polyctl_status` when the push guard is off, else None (PUSH-GUARD-MCP)."""
+    push_target = _own_pre_push_target(inv)
+    if push_target is not None:
+        return (
+            f"off ({push_target['path']} is the repository's own pre-push hook — "
+            f"{push_target['static_state']} / {push_target['track_state']})"
+        )
+    return _other_pre_push_line(inv)
 
 
 def _hook_execution_probe(inv):
