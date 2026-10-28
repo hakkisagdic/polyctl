@@ -1764,6 +1764,8 @@ def test_replaced_polyctl_pre_push_in_git_hooks_is_warned_as_changed_guard_not_o
     import json
 
     _make_current_polyctl_available(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)
+    monkeypatch.setattr(A, "colour_enabled", lambda stream=None: True)
     monkeypatch.setattr(
         cli,
         "_reviewer_probe",
@@ -1778,7 +1780,9 @@ def test_replaced_polyctl_pre_push_in_git_hooks_is_warned_as_changed_guard_not_o
         },
     )
 
-    # 1. Pre-existing untracked pre-push present before enrollment is kept as the repository's own.
+    # 1. An enrolled project with its own untracked pre-push (including one enrolled before 5ff7be4)
+    # re-inits and reports "a pre-push polyctl did not install: the push guard is off" in yellow, never dim,
+    # and never records or reads `own_pre_push`.
     pre_repo = _init_repo(tmp_path / "pre-existing-untracked-push")
     pre_hook = pre_repo / ".git" / "hooks" / "pre-push"
     pre_hook.parent.mkdir(parents=True, exist_ok=True)
@@ -1791,9 +1795,47 @@ def test_replaced_polyctl_pre_push_in_git_hooks_is_warned_as_changed_guard_not_o
     capsys.readouterr()
     assert pre_hook.read_bytes() == custom_push
     assert (pre_repo / ".git" / "hooks" / "pre-commit").is_file()
-    assert cli._own_pre_push_target(cli._polyctl_hook_inventory(str(pre_repo))) is not None
+    assert cli._own_pre_push_target(cli._polyctl_hook_inventory(str(pre_repo))) is None
 
-    # 2. A project where polyctl installed pre-push that an agent then overwrites with `exit 0` is a changed guard.
+    # Simulate a pre-5ff7be4 enrollment record (no own_pre_push / pre_push fields) and an agent-planted
+    # own_pre_push in .polyctl/init-manifest.json; re-init must still succeed and clean own_pre_push.
+    enrolled_path, identity = A.enrollment_record_path(str(pre_repo))
+    Path(enrolled_path).write_text(json.dumps({"repository": identity}) + "\n", encoding="utf-8")
+    manifest_file = pre_repo / ".polyctl" / "init-manifest.json"
+    manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+    manifest_data["own_pre_push"] = [os.path.realpath(str(pre_hook))]
+    manifest_file.write_text(json.dumps(manifest_data, indent=2) + "\n", encoding="utf-8")
+    assert cli._own_pre_push_target(cli._polyctl_hook_inventory(str(pre_repo))) is None
+
+    assert cli.cmd_init(_cfg(pre_repo), _init_args(profile="agy-codex")) == 0
+    raw_reinit = capsys.readouterr().out
+    reinit_out = _strip_colour(raw_reinit)
+    assert "a pre-push polyctl did not install: the push guard is off" in reinit_out
+    assert "move that hook aside, then `polyctl hooks install`" in reinit_out
+    for line in raw_reinit.splitlines():
+        if "push guard" in line:
+            assert "\033[33m" in line and "\033[2m" not in line
+    assert "own_pre_push" not in json.loads(manifest_file.read_text(encoding="utf-8"))
+    assert "own_pre_push" not in (A.enrollment_record(str(pre_repo)) or {})
+
+    pre_loaded = dict(A.load_config(str(pre_repo)), root=str(pre_repo))
+    pre_facts = cli.status_facts(pre_loaded)
+    assert "a pre-push polyctl did not install: the push guard is off" in pre_facts["push_guard"]
+    raw_pre_panel = cli.render(pre_loaded, facts=pre_facts)
+    for line in raw_pre_panel.splitlines():
+        if "push guard" in line:
+            assert "\033[33m" in line and "\033[2m" not in line
+
+    cli.cmd_doctor(pre_loaded, SimpleNamespace(check=False))
+    raw_pre_doctor = capsys.readouterr().out
+    pre_doctor = _strip_colour(raw_pre_doctor)
+    assert "a pre-push polyctl did not install: the push guard is off" in pre_doctor
+    for line in raw_pre_doctor.splitlines():
+        if "push guard" in line:
+            assert "\033[33m" in line and "\033[2m" not in line
+
+    # 2. A project where polyctl installed pre-push that an agent then overwrites with `exit 0`
+    # and runs `polyctl hooks install` again is still reported as a replaced guard everywhere.
     repo = _init_repo(tmp_path / "tampered-push")
     assert cli.cmd_init(_cfg(repo), _init_args(profile="agy-codex")) == 0
     _git(repo, "add", cli.PROJECT_MARKER)
@@ -1804,33 +1846,50 @@ def test_replaced_polyctl_pre_push_in_git_hooks_is_warned_as_changed_guard_not_o
     assert b"polyctl-hook-v7" in push_hook.read_bytes()
     push_hook.write_bytes(b"#!/bin/sh\nexit 0\n")
     push_hook.chmod(0o755)
+    # Even if an agent writes `own_pre_push` into `.polyctl/init-manifest.json` and runs `hooks install`,
+    # polyctl ignores and strips `own_pre_push` and still reports that polyctl's pre-push was replaced.
+    tampered_manifest = repo / ".polyctl" / "init-manifest.json"
+    t_data = json.loads(tampered_manifest.read_text(encoding="utf-8"))
+    t_data["own_pre_push"] = [os.path.realpath(str(push_hook))]
+    tampered_manifest.write_text(json.dumps(t_data, indent=2) + "\n", encoding="utf-8")
+
+    assert cli.cmd_hooks(_cfg(repo), _args("install")) == 1
+    capsys.readouterr()
+    assert "own_pre_push" not in json.loads(tampered_manifest.read_text(encoding="utf-8"))
+    assert "own_pre_push" not in (A.enrollment_record(str(repo)) or {})
 
     assert cli._own_pre_push_target(cli._polyctl_hook_inventory(str(repo))) is None
     loaded = dict(A.load_config(str(repo)), root=str(repo))
     facts = cli.status_facts(loaded)
-    assert "push_guard" not in facts
-    panel = _strip_colour(cli.render(loaded, facts=facts))
-    assert "push guard  off (" not in panel
+    assert "polyctl's pre-push was replaced: the push guard is off" in facts["push_guard"]
+    assert "move that hook aside, then `polyctl hooks install`" in facts["push_guard"]
+    raw_panel = cli.render(loaded, facts=facts)
+    panel = _strip_colour(raw_panel)
+    assert "polyctl's pre-push was replaced: the push guard is off" in panel
+    for line in raw_panel.splitlines():
+        if "push guard" in line:
+            assert "\033[33m" in line and "\033[2m" not in line
 
-    monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)
-    monkeypatch.setattr(A, "colour_enabled", lambda stream=None: True)
     cli.cmd_doctor(loaded, SimpleNamespace(check=False))
     raw_doctor = capsys.readouterr().out
     doctor = _strip_colour(raw_doctor)
-    assert "push guard" not in doctor
+    assert "polyctl's pre-push was replaced: the push guard is off" in doctor
     assert re.search(
         r"^push hook\s+foreign / untracked\s+polyctl push-window hook unavailable$",
         doctor,
         re.M,
     )
     for line in raw_doctor.splitlines():
-        if "push hook" in line:
-            assert "\033[33m" in line
+        if "push hook" in line or "push guard" in line:
+            assert "\033[33m" in line and "\033[2m" not in line
 
-    assert cli.cmd_init(loaded, _init_args(profile="agy-codex")) == 1
-    refused_init = _strip_colour(capsys.readouterr().out)
-    assert "init refused: commit hooks cannot be installed" in refused_init
-    assert "pre-push hook at" in refused_init and "foreign / untracked" in refused_init
+    assert cli.cmd_init(loaded, _init_args(profile="agy-codex")) == 0
+    raw_init = capsys.readouterr().out
+    init_out = _strip_colour(raw_init)
+    assert "polyctl's pre-push was replaced: the push guard is off" in init_out
+    for line in raw_init.splitlines():
+        if "push guard" in line:
+            assert "\033[33m" in line and "\033[2m" not in line
 
     # Even if .git/polyctl-enrolled.json loses its pre_push field, .polyctl/init-manifest.json still names it.
     enrolled_file = repo / ".git" / A.ENROLLMENT_RECORD

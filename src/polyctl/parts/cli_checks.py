@@ -166,19 +166,15 @@ def _init_hook_problem(root, allow_shared_hooks=False):
     if os.path.lexists(inv["active_dir"]) and not os.path.isdir(inv["active_dir"]):
         return f"effective hook path is not a directory: {inv['active_dir']}"
     targets = _active_hook_targets(inv)
-    own_push = _own_pre_push_target(inv)
-    for role in _HOOK_ROLES:
-        if role == "pre-push" and own_push is not None:
-            continue
-        target = targets[role]
-        base = _state_base(target["static_state"])
-        if base not in ("current-local", "current-scoped") and not (
-            target["eligible"] and base in ("absent", "legacy")
-        ):
-            return (
-                f"{role} hook at {target['path']} is {target['static_state']} / {target['track_state']} "
-                "and cannot be installed"
-            )
+    target = targets["pre-commit"]
+    base = _state_base(target["static_state"])
+    if base not in ("current-local", "current-scoped") and not (
+        target["eligible"] and base in ("absent", "legacy")
+    ):
+        return (
+            f"pre-commit hook at {target['path']} is {target['static_state']} / {target['track_state']} "
+            "and cannot be installed"
+        )
     if any(t["needs_authorization"] for t in targets.values()) and (os.name == "nt" or not allow_shared_hooks):
         return (
             SHARED_HOOKS_REFUSED
@@ -350,7 +346,7 @@ def cmd_mode(cfg, args):
                 print(f"  - {item}")
             return 1
         was_lite = project_mode(cfg) == "lite"
-        rc = cmd_hooks(dict(cfg, mode="full"), argparse.Namespace(action="install", allow_shared_hooks=allow))
+        rc, install_problems = _hooks_install(dict(cfg, mode="full"), allow_shared_hooks=allow)
         after_inv = _polyctl_hook_inventory(root)
         pre_commit_ok = (
             not after_inv["error"]
@@ -395,16 +391,20 @@ def cmd_mode(cfg, args):
         if push_target is not None:
             print(f"  {C['dim']}push guard{C['reset']}  {_own_pre_push_line(push_target)}")
         else:
-            push_after = _active_hook_targets(after_inv).get("pre-push") if not after_inv.get("error") else None
-            if not push_after or _state_base(push_after["static_state"]) not in ("current-local", "current-scoped"):
-                why = _last_hook_install_problem() or (
-                    f"{push_after['path']} is {push_after['static_state']} / {push_after['track_state']}"
-                    if push_after else "hook target could not be resolved"
-                )
-                print(
-                    f"  {C['yellow']}push guard{C['reset']}  not installed — pre-push was not installed ({why}); "
-                    "run `polyctl hooks install`"
-                )
+            other_push = _other_pre_push_line(after_inv)
+            if other_push is not None:
+                print(f"  {C['yellow']}push guard  {other_push}{C['reset']}")
+            else:
+                push_after = _active_hook_targets(after_inv).get("pre-push") if not after_inv.get("error") else None
+                if not push_after or _state_base(push_after["static_state"]) not in ("current-local", "current-scoped"):
+                    why = install_problems.get("pre-push") or install_problems.get("install") or (
+                        f"{push_after['path']} is {push_after['static_state']} / {push_after['track_state']}"
+                        if push_after else "hook target could not be resolved"
+                    )
+                    print(
+                        f"  {C['yellow']}push guard  not installed — pre-push was not installed ({why}); "
+                        f"run `polyctl hooks install`{C['reset']}"
+                    )
         print("mode = 'full' — enforcement: on (independent reviewer probe and commit hooks active)")
         return 0
     return 2

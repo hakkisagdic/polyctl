@@ -834,6 +834,7 @@ def cmd_init(cfg, args):
         and not manifest["wrote"]
         and not manifest["mcp"]
     ):
+        _record_pre_push_provenance(root, hook_inv)
         print(f"  {C['dim']}kept   .polyctl/init-manifest.json{C['reset']}")
     else:
         try:
@@ -871,6 +872,10 @@ def cmd_init(cfg, args):
         push_target = _own_pre_push_target(hook_inv)
         if push_target is not None:
             print(f"  {C['dim']}push guard{C['reset']}  {_own_pre_push_line(push_target)}")
+        else:
+            other_push = _other_pre_push_line(hook_inv)
+            if other_push is not None:
+                print(f"  {C['yellow']}push guard  {other_push}{C['reset']}")
 
         probe_tone = C["green"] if reviewer_probe["ok"] else C["red"]
         print(
@@ -1057,6 +1062,10 @@ def _adopt_project(cfg, args):
     push_target = _own_pre_push_target(inventory)
     if push_target is not None:
         print(f"  {C['dim']}push guard{C['reset']}  {_own_pre_push_line(push_target)}")
+    else:
+        other_push = _other_pre_push_line(inventory)
+        if other_push is not None:
+            print(f"  {C['yellow']}push guard  {other_push}{C['reset']}")
 
     print(f"\n{C['b']}Next, for a person:{C['reset']}")
     if not proof["installed"]:

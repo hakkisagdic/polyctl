@@ -1082,17 +1082,10 @@ def _active_hook_targets(inv):
     return {target["role"]: target for target in inv["targets"] if target["active"]}
 
 
-_HOOK_INSTALL_PROBLEMS = []
-
-
-def _last_hook_install_problem():
-    return _HOOK_INSTALL_PROBLEMS[-1] if _HOOK_INSTALL_PROBLEMS else None
-
-
 def _recorded_pre_push_paths(root):
-    """(polyctl_paths, own_paths, own_known) recorded by the enrollment record or the install manifest."""
+    """Paths where the enrollment record or the install manifest records that polyctl installed `pre-push` (INIT-OWN-PRE-PUSH-3)."""
     from . import storage
-    polyctl_paths, own_paths, own_known = set(), set(), False
+    polyctl_paths = set()
     docs = []
     enrolled = A.enrollment_record(root)
     if isinstance(enrolled, dict):
@@ -1110,17 +1103,12 @@ def _recorded_pre_push_paths(root):
             for entry in doc["pre_push"]:
                 if isinstance(entry, str) and entry:
                     polyctl_paths.add(os.path.realpath(entry))
-        if isinstance(doc.get("own_pre_push"), list):
-            own_known = True
-            for entry in doc["own_pre_push"]:
-                if isinstance(entry, str) and entry:
-                    own_paths.add(os.path.realpath(entry))
-    return polyctl_paths, own_paths - polyctl_paths, own_known
+    return polyctl_paths
 
 
 def _manifest_pre_push_fields(root, inv=None, final_inv=None):
-    """The `pre_push` and `own_pre_push` lists to persist in `.polyctl/init-manifest.json` and `polyctl-enrolled.json`."""
-    polyctl_paths, own_paths, own_known = _recorded_pre_push_paths(root)
+    """The `pre_push` list to persist in `.polyctl/init-manifest.json` and `polyctl-enrolled.json` (INIT-OWN-PRE-PUSH-3)."""
+    polyctl_paths = _recorded_pre_push_paths(root)
     if inv is None:
         inv = _polyctl_hook_inventory(root)
     for current in (inv, final_inv):
@@ -1133,21 +1121,16 @@ def _manifest_pre_push_fields(root, inv=None, final_inv=None):
             base = _state_base(target["static_state"])
             if base in ("current-local", "current-scoped", "legacy"):
                 polyctl_paths.add(real_path)
-                own_paths.discard(real_path)
-            elif target.get("active") and base == "foreign" and real_path not in polyctl_paths:
-                if not own_known or real_path in own_paths:
-                    own_paths.add(real_path)
-    return {"pre_push": sorted(polyctl_paths), "own_pre_push": sorted(own_paths - polyctl_paths)}
+    return {"pre_push": sorted(polyctl_paths)}
 
 
 def _record_pre_push_provenance(root, inv, final_inv=None, fields=None):
-    """Record where polyctl's pre-push or a pre-enrollment own pre-push stood in the enrollment and install manifest."""
+    """Record where polyctl's pre-push stood in the enrollment record and install manifest (INIT-OWN-PRE-PUSH-3)."""
     from . import storage
     if fields is None:
         fields = _manifest_pre_push_fields(root, inv, final_inv)
     elif final_inv is not None and not final_inv.get("error"):
         polyctl_paths = set(fields.get("pre_push") or [])
-        own_paths = set(fields.get("own_pre_push") or [])
         for target in final_inv.get("targets", []):
             if target.get("role") != "pre-push":
                 continue
@@ -1155,14 +1138,14 @@ def _record_pre_push_provenance(root, inv, final_inv=None, fields=None):
             base = _state_base(target["static_state"])
             if base in ("current-local", "current-scoped", "legacy"):
                 polyctl_paths.add(real_path)
-                own_paths.discard(real_path)
-        fields = {"pre_push": sorted(polyctl_paths), "own_pre_push": sorted(own_paths - polyctl_paths)}
+        fields = {"pre_push": sorted(polyctl_paths)}
     top = _project_repository_top(root) or root
     enrolled = A.enrollment_record(top)
     if isinstance(enrolled, dict) and not enrolled.get("unreadable"):
         path, identity = A.enrollment_record_path(top)
         if path and identity and enrolled.get("repository") == identity:
             updated = dict(enrolled, **fields)
+            updated.pop("own_pre_push", None)
             try:
                 storage.replace_file_durably(
                     path,
@@ -1177,9 +1160,10 @@ def _record_pre_push_provenance(root, inv, final_inv=None, fields=None):
             manifest = json.loads(raw.decode(UTF8)) if raw is not None else None
             if isinstance(manifest, dict) and (
                 manifest.get("pre_push") != fields["pre_push"]
-                or manifest.get("own_pre_push") != fields["own_pre_push"]
+                or "own_pre_push" in manifest
             ):
                 manifest.update(fields)
+                manifest.pop("own_pre_push", None)
                 storage.replace_in_tree(
                     root,
                     ".polyctl/init-manifest.json",
@@ -1190,21 +1174,19 @@ def _record_pre_push_provenance(root, inv, final_inv=None, fields=None):
 
 
 def _own_pre_push_target(inv):
-    """The active pre-push target when the repository keeps its own pre-push hook, else None (INIT-OWN-PRE-PUSH-2).
+    """The active pre-push target when the repository keeps its own tracked pre-push hook, else None (INIT-OWN-PRE-PUSH-3).
 
-    The repository's own pre-push is one polyctl did not install: tracked in the tree
-    core.hooksPath names, or present before polyctl's enrollment and never replaced by
-    polyctl. A pre-push where polyctl's own stood (the enrollment or the install manifest
-    names it) is a changed guard.
+    A pre-push counts as the repository's own only when it is not polyctl's and is tracked
+    in the tree core.hooksPath names (as in this repository).
     """
     if inv.get("error"):
         return None
     target = _active_hook_targets(inv).get("pre-push")
-    if not target or _state_base(target["static_state"]) != "foreign":
+    if not target or _state_base(target["static_state"]) in (
+        "absent", "current-local", "current-scoped", "legacy"
+    ):
         return None
-    real_path = os.path.realpath(target["path"])
-    polyctl_paths, own_paths, own_known = _recorded_pre_push_paths(inv["root"])
-    if real_path in polyctl_paths:
+    if os.path.realpath(target["path"]) in _recorded_pre_push_paths(inv["root"]):
         return None
     if (
         target["track_state"] == "tracked"
@@ -1212,29 +1194,36 @@ def _own_pre_push_target(inv):
         and _hook_contains(inv["top"], target["directory"])
     ):
         return target
-    if real_path in own_paths:
-        return target
-    if own_known:
-        return None
-    if A.enrollment_record(inv["root"]) is None and _project_enrollment(inv["root"])["state"] in (
-        "uninitialized",
-        "legacy",
-    ):
-        return target
     return None
 
 
 def _own_pre_push_line(target):
-    """One-line summary when a repository keeps its own pre-push hook (INIT-OWN-PRE-PUSH)."""
-    how = (
-        f"remove {target['path']} from the repository and run `polyctl hooks install`"
-        if target["track_state"] == "tracked"
-        else f"remove or move {target['path']} aside and run `polyctl hooks install`"
-    )
+    """One-line summary when a repository keeps its own tracked pre-push hook (INIT-OWN-PRE-PUSH)."""
     return (
         f"off — push guard not installed here: {target['path']} is the repository's own pre-push hook "
         f"({target['static_state']} / {target['track_state']}) and was left as it is; "
-        f"to install polyctl's push guard, {how}"
+        f"to install polyctl's push guard, remove {target['path']} from the repository and run `polyctl hooks install`"
+    )
+
+
+def _other_pre_push_line(inv):
+    """Yellow push-guard warning when an active pre-push is neither polyctl's nor the repository's tracked hook, else None (INIT-OWN-PRE-PUSH-3)."""
+    if inv.get("error") or _own_pre_push_target(inv) is not None:
+        return None
+    target = _active_hook_targets(inv).get("pre-push")
+    if not target or _state_base(target["static_state"]) in (
+        "absent", "current-local", "current-scoped", "legacy"
+    ):
+        return None
+    replaced = os.path.realpath(target["path"]) in _recorded_pre_push_paths(inv["root"])
+    what = (
+        "polyctl's pre-push was replaced: the push guard is off"
+        if replaced
+        else "a pre-push polyctl did not install: the push guard is off"
+    )
+    return (
+        f"{what} ({target['path']} — {target['static_state']} / {target['track_state']}); "
+        "to have polyctl's guard, move that hook aside, then `polyctl hooks install`"
     )
 
 
@@ -1643,36 +1632,31 @@ def _hook_install_problem(enrollment, said=None):
     return None
 
 
-def cmd_hooks(cfg, args):
-    """Manage polyctl hook intent at Git's effective path without replacing user hooks."""
+def _hooks_install(cfg, allow_shared_hooks=False):
+    """Install eligible hooks and return `(rc, problems)` keyed by role or `'install'` (INIT-OWN-PRE-PUSH-3)."""
+    problems = {}
     root = cfg["root"]
     enrollment = _project_enrollment(root)
-    # A .git can appear after enrollment was read, before inventory or the record's destination is selected.
-    # Refuse it before either repository is changed, including on an orphan branch outside a hook (NESTED-GIT).
     redirected = (enrollment["detail"] if enrollment["state"] == "redirected"
                   else _commit_repository_binding(root))
     if redirected:
-        print(f"{C['red']}hooks {args.action} refused{C['reset']}: {redirected}")
-        return 1
+        problems["install"] = redirected
+        print(f"{C['red']}hooks install refused{C['reset']}: {redirected}")
+        return 1, problems
     install_problem = _hook_install_problem(enrollment)
     if enrollment.get("unknown"):
-        print(f"{C['red']}hooks {args.action} refused{C['reset']}: {install_problem}")
-        return 1
+        problems["install"] = install_problem
+        print(f"{C['red']}hooks install refused{C['reset']}: {install_problem}")
+        return 1, problems
     inv = _polyctl_hook_inventory(root)
     if inv["error"]:
+        problems["install"] = inv["error"]
         print(f"{C['red']}hook resolver failed{C['reset']}: {inv['error']}")
-        return 1
-    action = args.action
-    allow = bool(getattr(args, "allow_shared_hooks", False))
-    if action == "status":
-        _print_hook_status(inv)
-        return 0
-    if action == "uninstall":
-        return _hooks_uninstall(inv, allow)
-    _HOOK_INSTALL_PROBLEMS.clear()
+        return 1, problems
+    allow = bool(allow_shared_hooks)
 
     if install_problem:
-        _HOOK_INSTALL_PROBLEMS.append(install_problem)
+        problems["install"] = install_problem
         # The current hooks exit in their shell guard when no marker is tracked, so
         # installing them over a legacy project's enforcing hook would turn commit
         # authority off at exactly the moment someone meant to repair it. Adoption
@@ -1683,7 +1667,7 @@ def cmd_hooks(cfg, args):
         print(f"{C['red']}hooks install refused{C['reset']}: {install_problem}")
         print(f"  {C['dim']}the current hooks stand aside while no {PROJECT_MARKER} is tracked, so installing "
               f"them before it would switch commit authority off{C['reset']}")
-        return 1
+        return 1, problems
 
     pre_fields = _manifest_pre_push_fields(root, inv)
     if enrollment.get("recordable"):
@@ -1691,10 +1675,10 @@ def cmd_hooks(cfg, args):
         # and unanswered queries must remain adoptable without an enrollment record.
         unkept = A.record_enrollment(_project_repository_top(root) or root)
         if unkept:
-            _HOOK_INSTALL_PROBLEMS.append(unkept)
+            problems["install"] = unkept
             print(f"{C['red']}hooks install refused{C['reset']}: this machine cannot record that the project is "
                   f"enrolled: {unkept}")
-            return 1
+            return 1, problems
 
     active = _active_hook_targets(inv)
     plan, unavailable = [], []
@@ -1707,45 +1691,42 @@ def cmd_hooks(cfg, args):
             plan.append(target)
         else:
             unavailable.append(target)
-            if role == "pre-push":
-                _HOOK_INSTALL_PROBLEMS.append(
-                    f"{target['path']} is {target['static_state']} / {target['track_state']}"
-                )
+            problems[role] = f"{target['path']} is {target['static_state']} / {target['track_state']}"
             print(f"preserved {target['static_state']} {role} / {target['track_state']} — "
                   f"polyctl {'commit authority' if role == 'pre-commit' else 'push-window'} hook unavailable")
     if _authorization_refusal(plan, allow):
-        _HOOK_INSTALL_PROBLEMS.append("hook directory requires --allow-shared-hooks")
-        return 1
+        problems["install"] = "hook directory requires --allow-shared-hooks"
+        return 1, problems
     if plan:
         if os.path.lexists(inv["active_dir"]) and not os.path.isdir(inv["active_dir"]):
-            _HOOK_INSTALL_PROBLEMS.append(f"effective hook path is not a directory: {inv['active_dir']}")
+            problems["install"] = f"effective hook path is not a directory: {inv['active_dir']}"
             print(f"{C['red']}effective hook path is not a directory{C['reset']}: {inv['active_dir']}")
-            return 1
+            return 1, problems
         try:
             os.makedirs(inv["active_dir"], exist_ok=True)
         except OSError as exc:
-            _HOOK_INSTALL_PROBLEMS.append(f"cannot create hook directory: {exc}")
+            problems["install"] = f"cannot create hook directory: {exc}"
             print(f"{C['red']}cannot create hook directory{C['reset']}: {exc}")
-            return 1
+            return 1, problems
         # Directory creation and another process can change classification. Re-read
         # once, then authorize the whole write set again before the first replace.
         fresh = _polyctl_hook_inventory(root)
         if fresh["error"] or fresh["active_dir"] != inv["active_dir"] \
                 or fresh["directory_class"] != inv["directory_class"] \
                 or fresh["globally_configured"] != inv["globally_configured"]:
-            _HOOK_INSTALL_PROBLEMS.append("hook topology changed during install")
+            problems["install"] = "hook topology changed during install"
             print(f"{C['red']}hook topology changed during install; no hook written{C['reset']}")
-            return 1
+            return 1, problems
         fresh_active = _active_hook_targets(fresh)
         fresh_plan = [fresh_active[target["role"]] for target in plan]
         if any(not target["eligible"] or _state_base(target["static_state"])
                not in ("absent", "legacy") for target in fresh_plan):
-            _HOOK_INSTALL_PROBLEMS.append("hook target changed during install")
+            problems["install"] = "hook target changed during install"
             print(f"{C['red']}hook target changed during install; no hook written{C['reset']}")
-            return 1
+            return 1, problems
         if _authorization_refusal(fresh_plan, allow):
-            _HOOK_INSTALL_PROBLEMS.append("hook directory requires --allow-shared-hooks")
-            return 1
+            problems["install"] = "hook directory requires --allow-shared-hooks"
+            return 1, problems
         for target in fresh_plan:
             try:
                 # polyctl's own hook is written over; a free path is taken only while it is still free (LEADS-GATE).
@@ -1753,13 +1734,13 @@ def cmd_hooks(cfg, args):
                                    target["role"] if _state_base(target["static_state"]) == "legacy" else None)
                 print(f"installed {target['role']} — {target['path']}")
             except OSError as exc:
-                _HOOK_INSTALL_PROBLEMS.append(str(exc))
+                problems[target["role"]] = str(exc)
                 print(f"{C['red']}failed to install{C['reset']} {target['role']}: {exc}")
-                return 1
+                return 1, problems
     final = _polyctl_hook_inventory(root)
     if final["error"]:
-        _HOOK_INSTALL_PROBLEMS.append(final["error"])
-        return 1
+        problems["install"] = final["error"]
+        return 1, problems
     _record_pre_push_provenance(root, inv, final, fields=pre_fields)
     final_active = _active_hook_targets(final)
     ok = all(_state_base(final_active[role]["static_state"])
@@ -1767,7 +1748,36 @@ def cmd_hooks(cfg, args):
     if ok:
         print(f"{C['green']}current (behavior unverified){C['reset']} — static hook intent installed; "
               "run `polyctl hooks status` for execution proof")
-    return 0 if ok else 1
+    return (0 if ok else 1), problems
+
+
+def cmd_hooks(cfg, args):
+    """Manage polyctl hook intent at Git's effective path without replacing user hooks."""
+    action = args.action
+    allow = bool(getattr(args, "allow_shared_hooks", False))
+    if action == "install":
+        return _hooks_install(cfg, allow_shared_hooks=allow)[0]
+    root = cfg["root"]
+    enrollment = _project_enrollment(root)
+    # A .git can appear after enrollment was read, before inventory or the record's destination is selected.
+    # Refuse it before either repository is changed, including on an orphan branch outside a hook (NESTED-GIT).
+    redirected = (enrollment["detail"] if enrollment["state"] == "redirected"
+                  else _commit_repository_binding(root))
+    if redirected:
+        print(f"{C['red']}hooks {action} refused{C['reset']}: {redirected}")
+        return 1
+    install_problem = _hook_install_problem(enrollment)
+    if enrollment.get("unknown"):
+        print(f"{C['red']}hooks {action} refused{C['reset']}: {install_problem}")
+        return 1
+    inv = _polyctl_hook_inventory(root)
+    if inv["error"]:
+        print(f"{C['red']}hook resolver failed{C['reset']}: {inv['error']}")
+        return 1
+    if action == "status":
+        _print_hook_status(inv)
+        return 0
+    return _hooks_uninstall(inv, allow)
 
 
 def cmd_push(cfg, args):

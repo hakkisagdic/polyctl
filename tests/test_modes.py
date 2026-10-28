@@ -630,13 +630,20 @@ def test_mode_full_and_init_accept_own_pre_push_and_still_require_pre_commit_and
     shared_refused = _plain(capsys)
     assert "--allow-shared-hooks" in shared_refused
     if os.name != "nt":
+        monkeypatch.setattr(A, "colour_enabled", lambda stream=None: True)
         assert cli.cmd_mode(dict(A.load_config(str(shared_repo)), root=str(shared_repo)), _mode_args("full", allow_shared_hooks=True)) == 0
-        _plain(capsys)
+        raw_shared = capsys.readouterr().out
+        shared_out = A.re.sub(r"\x1b\[[0-9;]*m", "", raw_shared)
+        assert "a pre-push polyctl did not install: the push guard is off" in shared_out
+        assert "move that hook aside, then `polyctl hooks install`" in shared_out
+        for line in raw_shared.splitlines():
+            if "push guard" in line:
+                assert "\033[33m" in line and "\033[2m" not in line
         assert (shared_dir / "pre-push").read_bytes() == custom_push
         assert cli.project_mode(dict(A.load_config(str(shared_repo)), root=str(shared_repo))) == "full"
 
 
-def test_mode_full_refuses_tampered_pre_push_and_reports_when_pre_push_install_fails(
+def test_mode_full_reports_replaced_or_uninstalled_pre_push_and_avoids_stale_install_problem(
     tmp_path, monkeypatch, capsys
 ):
     from tests.test_hook_paths import _make_current_polyctl_available
@@ -645,6 +652,7 @@ def test_mode_full_refuses_tampered_pre_push_and_reports_when_pre_push_install_f
     _make_fake_claude_reviewer(str(bin_dir))
     monkeypatch.setenv("PATH", str(bin_dir), prepend=os.pathsep)
     _make_current_polyctl_available(monkeypatch, tmp_path)
+    monkeypatch.setattr(A, "colour_enabled", lambda stream=None: True)
 
     repo = tmp_path / "mode-full-push-failure"
     repo.mkdir()
@@ -678,8 +686,32 @@ def test_mode_full_refuses_tampered_pre_push_and_reports_when_pre_push_install_f
     assert "simulated pre-push write error" in out
     assert not (hooks_dir / "pre-push").exists()
 
-    # Restore hook writer, install both hooks, then tamper with pre-push in .git/hooks and switch lite -> full:
-    # `mode full` must refuse the changed guard rather than treating it as the repository's own.
+    # Stale-problem check in one process: fail `cmd_hooks(..., install)` in another repo first, then switch
+    # `repo` from lite to full when pre-push stays absent without a new install error (no-op write).
+    # `mode full` must NOT report the earlier call's problem.
+    other_repo = tmp_path / "other-uninitialized"
+    other_repo.mkdir()
+    _git_repo(str(other_repo), with_marker=False)
+    (other_repo / ".polyctl").mkdir()
+    (other_repo / ".polyctl" / "config.json").write_text('{"project": "other"}\n', encoding="utf-8")
+    assert cli.cmd_hooks({"root": str(other_repo)}, SimpleNamespace(action="install", allow_shared_hooks=False)) == 1
+    other_err = _plain(capsys)
+    assert "hooks install refused" in other_err
+
+    assert cli.cmd_mode(dict(A.load_config(str(repo)), root=str(repo)), _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+    pre_commit.write_bytes(cli._render_local_hook("pre-commit", ".", cli._hook_fallback()))
+    pre_commit.chmod(stat.S_IRWXU)
+    monkeypatch.setattr(cli, "_atomic_hook_write", lambda path, payload, *a, **kw: None)
+    assert cli.cmd_mode(dict(A.load_config(str(repo)), root=str(repo)), _mode_args("full")) == 0
+    stale_check_out = _plain(capsys)
+    assert "pre-push was not installed" in stale_check_out
+    assert "absent / untracked" in stale_check_out
+    assert "polyctl init --adopt" not in stale_check_out
+    assert "simulated pre-push write error" not in stale_check_out
+
+    # Restore hook writer, install both hooks, then tamper with pre-push in .git/hooks, run `hooks install`,
+    # and switch lite -> full: `mode full` succeeds and reports the replaced guard in yellow, never dim.
     monkeypatch.setattr(cli, "_atomic_hook_write", real_write)
     assert cli.cmd_hooks(dict(A.load_config(str(repo)), root=str(repo)), SimpleNamespace(action="install", allow_shared_hooks=False)) == 0
     _plain(capsys)
@@ -688,7 +720,14 @@ def test_mode_full_refuses_tampered_pre_push_and_reports_when_pre_push_install_f
     _plain(capsys)
     (hooks_dir / "pre-push").write_bytes(b"#!/bin/sh\nexit 0\n")
     (hooks_dir / "pre-push").chmod(stat.S_IRWXU)
-    assert cli.cmd_mode(dict(A.load_config(str(repo)), root=str(repo)), _mode_args("full")) == 1
-    refused = _plain(capsys)
-    assert "mode full refused" in refused
-    assert "pre-push hook at" in refused and "foreign / untracked" in refused
+    assert cli.cmd_hooks(dict(A.load_config(str(repo)), root=str(repo)), SimpleNamespace(action="install", allow_shared_hooks=False)) == 1
+    _plain(capsys)
+    assert cli.cmd_mode(dict(A.load_config(str(repo)), root=str(repo)), _mode_args("full")) == 0
+    raw_replaced = capsys.readouterr().out
+    replaced_out = A.re.sub(r"\x1b\[[0-9;]*m", "", raw_replaced)
+    assert "mode = 'full'" in replaced_out
+    assert "polyctl's pre-push was replaced: the push guard is off" in replaced_out
+    assert "move that hook aside, then `polyctl hooks install`" in replaced_out
+    for line in raw_replaced.splitlines():
+        if "push guard" in line:
+            assert "\033[33m" in line and "\033[2m" not in line

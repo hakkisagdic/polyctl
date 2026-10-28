@@ -2369,10 +2369,15 @@ def cmd_doctor(cfg, args):
                     f"{label:<16}{tone}{target['static_state']} / "
                     f"{target['track_state']}{C['reset']}{suffix}"
                 )
+            other_push = _other_pre_push_line(hook_inventory)
             if own_push is not None:
                 print(
                     f"{'push guard':<16}{C['dim']}off ({own_push['path']} is the repository's own pre-push hook — "
                     f"{own_push['static_state']} / {own_push['track_state']}){C['reset']}"
+                )
+            elif other_push is not None:
+                print(
+                    f"{'push guard':<16}{C['yellow']}{other_push}{C['reset']}"
                 )
             for target in hook_inventory["targets"]:
                 if target["active"] or target["role"] != "pre-commit" \

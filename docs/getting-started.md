@@ -96,13 +96,18 @@ unknown enrollment, a hook path that is not a directory, a foreign or tracked no
 hook, or a shared hooks path on Windows), it refuses with nothing written and says how a person can start
 in `lite` mode instead: `polyctl mode lite --by <name>`, then `polyctl init` (for a shared hooks path
 elsewhere, `polyctl init` succeeds and names `polyctl hooks install --allow-shared-hooks` as the next
-step). The commit gate is the `pre-commit` hook: a `pre-push` hook the repository keeps - one polyctl did not
-install, tracked in the tree `core.hooksPath` names or present before polyctl's enrollment and never
-replaced by polyctl - is left byte for byte by `polyctl init` and `polyctl mode full`, `polyctl init` reports in
-one line that the push guard is off (why it is not installed here and what installing it would take), and
-`polyctl status` and `polyctl doctor` show the push guard as off rather than an error; a `pre-push` where
-polyctl's own stood is warned about as a changed guard, and if `polyctl mode full` cannot install an
-eligible `pre-push` it says that `pre-push` was not installed and why (INIT-OWN-PRE-PUSH, INIT-OWN-PRE-PUSH-2).
+step). The commit gate is the `pre-commit` hook: neither `polyctl init` nor `polyctl mode full` refuses for a
+`pre-push` hook. A `pre-push` hook counts as the repository's own only when it is tracked in the tree
+`core.hooksPath` names (and was not installed by polyctl): `polyctl init` and `polyctl mode full` leave it byte
+for byte and report in dim text that the push guard is off (`is the repository's own pre-push hook`), as
+`polyctl status` and `polyctl doctor` do. Any other `pre-push` that is not polyctl's also leaves `polyctl init`
+and `polyctl mode full` working and is reported in yellow on `polyctl doctor`, `polyctl status`, `polyctl init`,
+and `polyctl mode full` — as `"polyctl's pre-push was replaced: the push guard is off"` when polyctl's
+enrollment or install manifest records that polyctl installed a `pre-push` at that path, or as
+`"a pre-push polyctl did not install: the push guard is off"` otherwise, with how to have polyctl's guard
+(move that hook aside, then `polyctl hooks install`); and if `polyctl mode full` cannot install an eligible
+`pre-push` it says in yellow that `pre-push` was not installed and why (INIT-OWN-PRE-PUSH,
+INIT-OWN-PRE-PUSH-2, INIT-OWN-PRE-PUSH-3).
 `lite` is the basic setup without enforcement: no reviewer probe and no commit hooks, `polyctl commit`
 refuses because there is no gate to commit through, and every surface that reads the mode
 (`polyctl status`, `polyctl doctor`, the MCP status) says plainly `enforcement: off - lite` that nothing

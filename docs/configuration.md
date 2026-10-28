@@ -219,11 +219,14 @@ the config leaves `lite` while the newest attested `mode` row is `lite`, reading
 an attested `full` row by `polyctl` so writing `"mode": "lite"` back later stays `full` until a person
 records `polyctl mode lite --by <name>` again. `polyctl mode full` checks what `full` needs - a reviewer
 route that passes the independence check and probe (or the `person` review tier), and a `pre-commit`
-commit hook that can be installed or kept current and passes the execution probe (leaving a
-repository-owned `pre-push` hook - tracked in `core.hooksPath` or present before enrollment and never
-replaced by polyctl - untouched with the push guard reported as off, refusing a changed `pre-push` where
-polyctl's own stood, and reporting why when an eligible `pre-push` could not be installed; shared, external or global
-hook directories still require `--allow-shared-hooks`) - records `full` before writing the config, and
+commit hook that can be installed or kept current and passes the execution probe (never refusing for a
+`pre-push` hook: a `pre-push` tracked in the tree `core.hooksPath` names is left untouched as the
+repository's own with the push guard reported as off in dim text, any other non-polyctl `pre-push` is left
+in place and reported in yellow as `"polyctl's pre-push was replaced: the push guard is off"` when polyctl's
+enrollment or install manifest records that polyctl installed a `pre-push` at that path or as `"a pre-push
+polyctl did not install: the push guard is off"` with how to move it aside and run `polyctl hooks install`,
+and an eligible `pre-push` that could not be installed is reported in yellow with why; shared, external or
+global hook directories still require `--allow-shared-hooks`) - records `full` before writing the config, and
 refuses, naming what is missing, rather than half-switching; `polyctl mode show` prints the mode and what
 each mode does and does not protect ([safety.md](safety.md)).
 
