@@ -87,8 +87,9 @@ def consistency_findings(root, cfg):
         if verifications is not None and row.get("verification") and row["verification"] not in verifications:
             found("grant-verification", f"grant {token} names verification {row['verification']}, which the "
                                         "verification ledger does not hold")
-        if waivers is not None and row.get("waiver") and row["waiver"] not in waivers:
-            found("grant-waiver", f"grant {token} stood on waiver {row['waiver']}, which the waiver ledger does not hold")
+        for wkey in ("waiver", "gates_waiver"):
+            if waivers is not None and row.get(wkey) and row[wkey] not in waivers:
+                found("grant-waiver", f"grant {token} stood on waiver {row[wkey]}, which the waiver ledger does not hold")
     try:
         review_rows = read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
     except Exception as exc:
@@ -650,8 +651,10 @@ def grant_trailers(grant):
     candidate = grant.get("candidate") if isinstance(grant.get("candidate"), dict) else {}
     named = [("Polyctl-Grant", token), ("Polyctl-Tree", candidate.get("index_tree")),
              ("Polyctl-Verification", grant.get("verification"))]
-    rested = [(key, grant[field]) for key, field in (("Polyctl-Review", "review"), ("Polyctl-Waiver", "waiver"))
-              if grant.get(field)]
+    waivers = ", ".join(dict.fromkeys(w for w in (grant.get("waiver"), grant.get("gates_waiver"))
+                                      if isinstance(w, str) and w.strip()))
+    rested = ([("Polyctl-Review", grant["review"])] if grant.get("review") else []) \
+        + ([("Polyctl-Waiver", waivers)] if waivers else [])
     named += rested or [("Polyctl-Review", REVIEW_OFF)]
     for key, value in named:
         if not isinstance(value, str) or not value or value != value.strip() \
@@ -849,7 +852,8 @@ def _merge_problems(commit):
 def record_authority(root, granted, reasons, tree, verification, token=None,
                      review=None, reviewer=None, candidate=None, scope=None,
                      matrix=None, role_bindings=None, implementer_identity=None,
-                     reviewer_identity=None, waiver=None, author=None, move_only=None):
+                     reviewer_identity=None, waiver=None, gates_waiver=None,
+                     waived_gates=None, author=None, move_only=None):
     """Persist one hash-chained authority decision, raising on any broken prefix."""
     from .storage import append_chained_jsonl
     record = {"at": int(time.time()), "granted": bool(granted),
@@ -871,6 +875,11 @@ def record_authority(root, granted, reasons, tree, verification, token=None,
     if waiver is not None:
         # The waiver a grant stood on; it covers no other candidate after this (#67).
         record["waiver"] = waiver
+    if gates_waiver is not None:
+        # When both review and gates are waived on one candidate, the second waiver is recorded beside the first.
+        record["gates_waiver"] = gates_waiver
+    if waived_gates is not None:
+        record["waived_gates"] = list(waived_gates)
     if author is not None:
         # Who landed work a waiver stood in for; its later review is held to that family (#65).
         record["author"] = author

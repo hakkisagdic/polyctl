@@ -1291,14 +1291,33 @@ def _login_and_terminal():
     return user, bool(interactive)
 
 
-def waive(root, gate, slice_id, why, by, hours=WAIVER_HOURS_DEFAULT):
+def _normalize_waived_gates(gates):
+    """A deduplicated list of gate names a `gates` waiver covers, or None when it covers every gate of the profile."""
+    if gates is None:
+        return None
+    parts = gates.split(",") if isinstance(gates, str) else list(gates)
+    named = list(dict.fromkeys(str(part).strip() for part in parts if str(part).strip()))
+    if not named or not all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}", name) for name in named):
+        raise ValueError("--gates names one or more gates separated by commas (for example: focused,lint)")
+    return named
+
+
+def waive(root, gate, slice_id, why, by, hours=WAIVER_HOURS_DEFAULT, gates=None):
     """Record that a person waived a gate for one slice, for a bounded time (#67).
 
     A chained append like an authority row. It carries an expiry, the name the
     person gave, and beside it what polyctl can check: the login and whether a terminal
-    was attached.
+    was attached. Only gates `polyctl commit-ok` actually checks (`review` and `gates`)
+    may be waived; `inventory` is refused rather than recorded and ignored (WAIVE-GATES).
     """
     from .storage import append_chained_jsonl
+    if gate == "inventory":
+        raise ValueError("`inventory` is not a gate `polyctl commit-ok` checks; nothing reads an inventory waiver")
+    if gate not in ("review", "gates"):
+        raise ValueError(f"unknown gate {gate!r}: choose review or gates")
+    if gates is not None and gate != "gates":
+        raise ValueError(f"--gates applies only to `polyctl waive gates`, not `{gate}`")
+    named_gates = _normalize_waived_gates(gates) if gate == "gates" else None
     now = int(time.time())
     taken = {row.get("id") for row in waiver_rows(root) if isinstance(row, dict)}
     wid, n = f"W-{now}", 2
@@ -1309,6 +1328,8 @@ def waive(root, gate, slice_id, why, by, hours=WAIVER_HOURS_DEFAULT):
               "by": by, "at": now, "expires": now + int(float(hours) * 3600),
               "user": user, "interactive": interactive,
               "head": _git_text(root, "rev-parse", "HEAD"), "tree": tree_digest(root)}
+    if named_gates:
+        record["gates"] = named_gates
     return append_chained_jsonl(waivers_path(root), record, WAIVER_CHAIN, legacy_prefix=True)
 
 
@@ -1377,29 +1398,27 @@ def _waiver_candidates(root):
 
     Every grant, the sealed ones too: read from the live rows, a waiver whose grant a seal retired
     looked unused and stood in for the review of other bytes (the review of BOUNDED-STORES,
-    LEDGER-HISTORY).
+    LEDGER-HISTORY). Both `waiver` and `gates_waiver` bind the waiver they name to the grant's
+    candidate (WAIVE-GATES).
     """
     bound = {}
     for row in authority_history(root):
-        if isinstance(row, dict) and row.get("granted") is True and row.get("waiver"):
-            bound.setdefault(row["waiver"], set()).add((row.get("candidate") or {}).get("digest"))
+        if not isinstance(row, dict) or row.get("granted") is not True:
+            continue
+        digest = (row.get("candidate") or {}).get("digest")
+        for key in ("waiver", "gates_waiver"):
+            if row.get(key):
+                bound.setdefault(row[key], set()).add(digest)
     return bound
 
 
-def review_waiver_for(root, running, candidate_digest, now=None, wanted=None):
-    """The review waiver that may stand in for a review of this candidate, and why others may not (#67).
-
-    It names a running slice exactly, has not expired, and has authorised no other
-    candidate. A waiver for every slice, one from before waivers expired, and one
-    already spent on other bytes stand in for nothing. With `wanted`, only that waiver
-    is asked: a grant is checked against the waiver it stood on, and a second one opened
-    for the same slice since read as a different waiver and refused it (WAIVER-BOUND-2).
-    """
+def _matching_waiver_for(root, gate, running, candidate_digest, failed_gates=None, now=None, wanted=None):
+    """The open waiver for `gate` that may stand in for this candidate, and why others may not (#67, WAIVE-GATES)."""
     now = time.time() if now is None else now
     # The whole authority history is read only for a waiver that could stand in: `polyctl commit-ok` asks every time.
     bound = None
     notes = []
-    for waiver in reversed(open_waivers(root, gate="review")):
+    for waiver in reversed(open_waivers(root, gate=gate)):
         wid, slice_id = waiver.get("id"), waiver.get("slice")
         if wanted is not None and wid != wanted:
             continue
@@ -1415,6 +1434,13 @@ def review_waiver_for(root, running, candidate_digest, now=None, wanted=None):
             notes.append(f"waiver {wid} for {slice_id} expired "
                          f"{time.strftime('%d %b %H:%M', time.localtime(expires))}")
             continue
+        if gate == "gates" and failed_gates is not None:
+            named = waiver.get("gates")
+            if isinstance(named, list) and named:
+                unwaived = [name for name in failed_gates if name not in named]
+                if unwaived:
+                    notes.append(f"waiver {wid} covers {', '.join(named)}, not {', '.join(unwaived)}")
+                    continue
         bound = _waiver_candidates(root) if bound is None else bound
         used = bound.get(wid, set())
         if used and candidate_digest not in used:
@@ -1424,8 +1450,67 @@ def review_waiver_for(root, running, candidate_digest, now=None, wanted=None):
     return None, notes
 
 
+def review_waiver_for(root, running, candidate_digest, now=None, wanted=None):
+    """The review waiver that may stand in for a review of this candidate, and why others may not (#67).
+
+    It names a running slice exactly, has not expired, and has authorised no other
+    candidate. A waiver for every slice, one from before waivers expired, and one
+    already spent on other bytes stand in for nothing. With `wanted`, only that waiver
+    is asked: a grant is checked against the waiver it stood on, and a second one opened
+    for the same slice since read as a different waiver and refused it (WAIVER-BOUND-2).
+    """
+    return _matching_waiver_for(root, "review", running, candidate_digest, now=now, wanted=wanted)
+
+
+def verification_waivable_gates(root, ver):
+    """(failed gate names, None) when `ver` ran every gate of its profile and failed only declared gates,
+    or (None, why a gates waiver cannot stand in for `ver`) (WAIVE-GATES)."""
+    if not isinstance(ver, dict):
+        return None, "no verification record"
+    gates = [g for g in (ver.get("gates") or []) if isinstance(g, dict)]
+    if not gates:
+        return None, f"{ver.get('id') or 'verification'} recorded no gate results"
+    synthetic = [g.get("name") for g in gates
+                 if g.get("name") in ("candidate-isolation", "candidate-integrity", "plan-integrity")]
+    if synthetic:
+        return None, f"{ver.get('id') or 'verification'} did not run every gate of the profile ({', '.join(synthetic)})"
+    ran = [g.get("name") for g in gates]
+    if not all(isinstance(name, str) and name for name in ran):
+        return None, f"{ver.get('id') or 'verification'} has an unnamed gate entry"
+    gates_file = os.path.join(root, ".polyctl", "gates.json")
+    try:
+        with open(gates_file, encoding=UTF8) as fh:
+            spec = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, f"cannot read .polyctl/gates.json to verify the profile's gates: {exc}"
+    profiles = (spec.get("profiles") if isinstance(spec, dict) else None) or {}
+    profile = ver.get("profile")
+    profile_gates = profiles.get(profile) if isinstance(profiles, dict) else None
+    if not isinstance(profile_gates, list) or not profile_gates:
+        return None, f"{ver.get('id') or 'verification'} did not run a declared gate profile ({profile})"
+    missing = [name for name in profile_gates if name not in ran]
+    if missing:
+        return None, (f"{ver.get('id') or 'verification'} did not run every gate of profile {profile}: "
+                      f"missing {', '.join(missing)}")
+    outside = [g.get("name") for g in gates if not g.get("passed") and g.get("name") not in profile_gates]
+    if outside:
+        return None, (f"{ver.get('id') or 'verification'} failed outside profile {profile}: "
+                      f"{', '.join(outside)}")
+    failed = [g.get("name") for g in gates if not g.get("passed")]
+    if not failed:
+        return None, None
+    return failed, None
+
+
+def gates_waiver_for(root, running, candidate_digest, failed_gates=None, now=None, wanted=None):
+    """The gates waiver that may stand in for the failed gates of this candidate's verification, and why others
+    may not (WAIVE-GATES)."""
+    return _matching_waiver_for(root, "gates", running, candidate_digest, failed_gates=failed_gates,
+                                now=now, wanted=wanted)
+
+
 def open_waiver_report(root, now=None):
-    """One line per open waiver with its age and expiry, for `polyctl doctor` (#67)."""
+    """One line per open waiver with its age and expiry, for `polyctl doctor` and `polyctl status` (#67, WAIVE-GATES)."""
     now = time.time() if now is None else now
     lines = []
     for waiver in open_waivers(root):
@@ -1434,7 +1519,11 @@ def open_waiver_report(root, now=None):
         state = ("no expiry (legacy)" if not isinstance(expires, (int, float))
                  else "expired" if expires <= now
                  else f"expires in {int((expires - now) // 3600)}h")
-        lines.append(f"{waiver.get('id')} {waiver.get('gate')} for {waiver.get('slice')}, "
+        named = waiver.get("gates")
+        gate_label = (f"{waiver.get('gate')} ({', '.join(named)})"
+                      if waiver.get("gate") == "gates" and isinstance(named, list) and named
+                      else waiver.get("gate"))
+        lines.append(f"{waiver.get('id')} {gate_label} for {waiver.get('slice')}, "
                      f"open {age // 86400}d {age % 86400 // 3600}h, {state}, by {waiver.get('by')}")
     return lines
 
@@ -1515,34 +1604,38 @@ def _bound_waiver_target(root, waiver, grants):
         item["problem"] = "UNRESOLVED: its landed commit has no parent to review against"
         return item
     grant = next((row for row in reversed(grants) if (row.get("candidate") or {}).get("index_tree") == tree), {})
+    waived_gates = grant.get("waived_gates") if isinstance(grant.get("waived_gates"), list) else None
+    profile, gates_digest, vid = None, None, None
+    if waiver.get("gate") == "gates":
+        vid = grant.get("verification")
+        if vid:
+            try:
+                ver = next((row for row in reversed(verification_history(root))
+                            if isinstance(row, dict) and row.get("id") == vid), None)
+            except Exception:
+                ver = None
+            if isinstance(ver, dict):
+                profile = ver.get("profile")
+                gates_digest = ver.get("gates_digest")
+                if waived_gates is None:
+                    waived_gates = [g.get("name") for g in (ver.get("gates") or [])
+                                    if isinstance(g, dict) and not g.get("passed") and isinstance(g.get("name"), str)]
+        if not waived_gates and isinstance(waiver.get("gates"), list):
+            waived_gates = list(waiver["gates"])
     item.update(start=parent, end=sha, landed=1, grant=grant.get("token"),
                 author=grant.get("author") if isinstance(grant.get("author"), dict) else None,
-                move_only=grant.get("move_only") if isinstance(grant.get("move_only"), dict) else None)
+                move_only=grant.get("move_only") if isinstance(grant.get("move_only"), dict) else None,
+                waived_gates=waived_gates, profile=profile, gates_digest=gates_digest, verification=vid)
     return item
 
 
-def review_waiver_ranges(root):
-    """Each open review waiver with the commits that landed while it was the newest.
-
-    A waiver records the HEAD it was opened on and nothing else, so reviewing
-    head..HEAD for every open waiver reviews each later slice again under the
-    first slice's boundary: with one waiver per slice, N waivers become N
-    overlapping reviews and the earliest carries every slice after it. A slice's
-    commits run from its waiver's head to the head of the next review waiver
-    opened after it, open or closed, and the newest waiver runs to HEAD.
-
-    Heads come from a ledger file anyone on the machine can edit, so each is
-    required to be a full object id and git runs without a shell.
-
-    Returns dicts: waiver, start, end, landed (commit count), newest, problem, and
-    for a bounded waiver's landed commit the grant that landed it and the author and
-    move proof that grant recorded; a waiver from before waivers were bounded has none.
-    """
+def _waiver_ranges_for_gate(root, gate):
+    """Each open waiver for `gate` with the commits that landed under it (#17, WAIVE-GATES)."""
     waived, closed = [], set()
     for r in waiver_rows(root):
         if not isinstance(r, dict):
             continue
-        if r.get("event") == "waived" and r.get("gate") == "review":
+        if r.get("event") == "waived" and r.get("gate") == gate:
             waived.append(r)
         elif r.get("event") == "closed":
             closed.add(r.get("id"))
@@ -1552,8 +1645,11 @@ def review_waiver_ranges(root):
     # A grant a seal retired is still the one its waiver stood in for: read from the live rows, the waiver
     # read as unused and catch-up closed it with no review (the review of BOUNDED-STORES, LEDGER-HISTORY).
     for row in authority_history(root):
-        if isinstance(row, dict) and row.get("granted") is True and row.get("waiver"):
-            granted.setdefault(row["waiver"], []).append(row)
+        if not isinstance(row, dict) or row.get("granted") is not True:
+            continue
+        for key in ("waiver", "gates_waiver"):
+            if row.get(key):
+                granted.setdefault(row[key], []).append(row)
     try:
         current = _git_output(root, "rev-parse", "--verify", "HEAD").decode("ascii").strip()
     except (RuntimeError, UnicodeError):
@@ -1594,6 +1690,16 @@ def review_waiver_ranges(root):
                     item["problem"] = "git cannot count the commits in its range"
         out.append(item)
     return out
+
+
+def review_waiver_ranges(root):
+    """Each open review waiver with the commits that landed while it was the newest."""
+    return _waiver_ranges_for_gate(root, "review")
+
+
+def gates_waiver_ranges(root):
+    """Each open gates waiver with the landed commit granted under it (WAIVE-GATES)."""
+    return _waiver_ranges_for_gate(root, "gates")
 
 
 def range_changed_lines(root, start, end):

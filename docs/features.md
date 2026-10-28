@@ -82,11 +82,20 @@ changes, once each ([pr.md](pr.md)).
 ## Bypass, on the record
 
 Sometimes the switch is not the answer: the reviewer is out of quota for two
-hours and the slice is ready. `polyctl waive review --slice B7 --why "…"` records a
-waiver; `polyctl commit-ok` honours it only for a matching running slice, and the
-pre-commit `polyctl commit-check` requires that waiver to remain open when the grant
-names no review. `polyctl catchup` later reviews the landed range with `polyctl review
---commits` and closes the waiver, or writes the architect a decision request when
+hours and the slice is ready, or a gate times out under machine load on a commit
+that changes no code. `polyctl waive review --slice B7 --by <name> --why "…"` records a
+review waiver, and `polyctl waive gates [--gates <names>] --slice B7 --by <name> --why "…"`
+records a gates waiver (`inventory` is refused, since nothing in `polyctl commit-ok`
+reads an inventory waiver). `polyctl commit-ok` honours a waiver only for a matching
+running slice and one staged candidate: a review waiver in place of an APPROVED
+review, and a gates waiver for a verification that ran every gate of the profile,
+failed only the gates the waiver names (all of them when it names none), is bound
+to the staged candidate and is otherwise current. The grant, the commit's
+`Polyctl-Waiver` trailer and `polyctl status` name the waiver, and the pre-commit
+`polyctl commit-check` requires the waiver to remain open. `polyctl catchup` later
+re-runs the waived gates on the landed commit and closes a gates waiver when they
+pass, and reviews a review waiver's landed range with `polyctl review --commits` and
+closes the waiver, or writes the architect a decision request when
 the retrospective review finds problems. That review is held to the model
 family that wrote the range, not to whoever implements by then: the grant under
 a waiver records who landed it - the role of a turn polyctl started, the actor holding

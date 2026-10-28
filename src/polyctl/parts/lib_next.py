@@ -374,11 +374,6 @@ def pipeline_items(cfg):
     if not ver:
         return [next_item("implementer", "no-verification", "no gate has run on this candidate",
                           "polyctl verify", slice=slice_id)]
-    if not ver.get("passed"):
-        failed = [g["name"] for g in (ver.get("gates") or []) if not g.get("passed")]
-        return [next_item("implementer", "gates-failed",
-                          f"the last verification failed: {', '.join(failed) or ver.get('id')}",
-                          "polyctl verify", slice=slice_id)]
     measured = ver.get("candidate") or {}
     if measured.get("digest") != candidate["digest"]:
         return [next_item("implementer", "verification-stale",
@@ -403,6 +398,21 @@ def pipeline_items(cfg):
         return [next_item("implementer", "gates-changed",
                           f"the gate definitions changed since {ver.get('id')} ran with them",
                           "polyctl verify", slice=slice_id)]
+    if not ver.get("passed"):
+        waivable_failed, _ = verification_waivable_gates(root, ver)
+        gates_waiver = None
+        if waivable_failed:
+            try:
+                gates_waiver, _ = gates_waiver_for(root, running, candidate["digest"], failed_gates=waivable_failed)
+            except Exception as exc:
+                return [next_item("implementer", "waiver-unreadable",
+                                  f"the waiver ledger cannot be read: {reason_of(exc)}",
+                                  "polyctl verify", slice=slice_id)]
+        if not gates_waiver:
+            failed = [g["name"] for g in (ver.get("gates") or []) if not g.get("passed")]
+            return [next_item("implementer", "gates-failed",
+                              f"the last verification failed: {', '.join(failed) or ver.get('id')}",
+                              "polyctl verify", slice=slice_id)]
 
     if F.enabled(cfg, "review"):
         try:

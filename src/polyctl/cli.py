@@ -626,15 +626,18 @@ def build_parser(root=None, prog=None):
     wv.add_argument("--slice")
     wv.add_argument("--why")
     wv.add_argument("--by", help="the person who authorises it; required")
+    wv.add_argument("--gates", "--gate", dest="gates", default=None,
+                    help="for `gates`: comma-separated gate names this waiver covers (every gate of the profile "
+                         "when omitted)")
     wv.add_argument("--hours", type=float, default=None,
                     help="how long it may stand in for the gate (settings waivers.default_hours "
                          "and waivers.max_hours; 24 and 168 unless changed)")
     wv.set_defaults(fn=cmd_waive)
-    cu = sub.add_parser("catchup", help="replay what could not run: waived reviews, deferred wakes and nudges",
-                        description="Replay what could not run: waived reviews, deferred wakes and nudges. A run "
-                                    "exits 3 when the reviews it started decided nothing, 1 when something could "
-                                    "not be written or read, 2 when it is refused, and otherwise 0, whether it made "
-                                    "progress or had nothing to do.")
+    cu = sub.add_parser("catchup", help="replay what could not run: waived reviews and gates, deferred wakes and nudges",
+                        description="Replay what could not run: waived reviews and gates, deferred wakes and nudges. "
+                                    "A run exits 3 when the reviews it started decided nothing, 1 when a waived gate "
+                                    "failed or something could not be written or read, 2 when it is refused, and "
+                                    "otherwise 0, whether it made progress or had nothing to do.")
     cu.add_argument("--boundary", help="replace the range's commit claims with a person's boundary; needs --by")
     cu.add_argument("--plan", action="store_true",
                     help="list each open review waiver, its range, commits and changed lines, whether it closes "

@@ -460,6 +460,102 @@ def cmd_merge_check(cfg, args):
     return 0 if ok else 1
 
 
+def _rerun_waived_gates(cfg, root, item):
+    """(passed, ran_names, detail) from re-running a gates waiver's waived gates on its landed commit (WAIVE-GATES)."""
+    import shutil
+    import tempfile
+    end = item["end"]
+    profile = item.get("profile")
+    expected_digest = item.get("gates_digest")
+    ver_id = item.get("verification") or "the grant's verification"
+    if not isinstance(profile, str) or not profile or not isinstance(expected_digest, str) or not expected_digest:
+        return False, [], f"{ver_id} has no recorded gate definitions digest"
+    candidates, read_error = [], None
+    try:
+        candidates.append(json.loads(A._git_output(root, "show", f"{end}:.polyctl/gates.json")))
+    except (OSError, ValueError, RuntimeError):
+        pass
+    try:
+        with open(os.path.join(root, ".polyctl", "gates.json"), encoding=UTF8) as fh:
+            candidates.append(json.load(fh))
+    except (OSError, ValueError) as exc:
+        read_error = exc
+    dicts = [c for c in candidates if isinstance(c, dict)]
+    if not dicts:
+        return False, [], f"no usable .polyctl/gates.json: {read_error or 'not a JSON object'}"
+    # The definitions catch-up runs must match the verification the grant stood on, so rewriting an
+    # untracked .polyctl/gates.json after landing cannot close a gates waiver on weaker gates (WAIVE-GATES).
+    spec = next((c for c in dicts if A.gate_definitions_digest_of(c, profile) == expected_digest), None)
+    if spec is None:
+        return False, [], (f"gate definitions for profile {profile} changed since {ver_id} — "
+                           f"restore .polyctl/gates.json to match {ver_id}")
+    profile_gates, problem = _profile_gates(spec, profile, cfg)
+    if problem or not profile_gates:
+        return False, [], problem or f"unknown profile {profile}"
+    gates = spec["gates"]
+    names = list(item.get("waived_gates") or item["waiver"].get("gates") or [])
+    if not names:
+        names = list(profile_gates)
+    else:
+        outside = [name for name in names if name not in profile_gates]
+        if outside:
+            return False, [], f"gate {', '.join(outside)} is not in profile {profile}"
+    release = _take_gate_lock(cfg, 900)
+    if release is None:
+        return False, names, "machine gate lock stayed busy"
+    scratch = tempfile.mkdtemp(prefix="polyctl-catchup-gates-")
+    result_dir = os.path.join(scratch, "result")
+    links, failed_names = [], []
+    made = False
+    try:
+        added = subprocess.run([A.git_binary(), "worktree", "add", "--detach", "--quiet", result_dir, end],
+                               cwd=root, capture_output=True)
+        made = added.returncode == 0 or os.path.lexists(os.path.join(result_dir, ".git"))
+        if added.returncode != 0:
+            return False, names, (f"could not check out {end[:12]}: "
+                                  f"{added.stderr.decode(UTF8, 'replace').strip()}")
+        for name in S.get(cfg, "merge.link_paths"):
+            source, target = os.path.join(root, name), os.path.join(result_dir, name)
+            if os.path.exists(source) and not os.path.lexists(target):
+                try:
+                    os.symlink(source, target)
+                    links.append(target)
+                except OSError:
+                    pass
+        for name in names:
+            g = gates[name]
+            print(f"    {C['dim']}▶ {name}{C['reset']}  {g['run']}")
+            out, code = _run_gate(cfg, g, result_dir)
+            passed, detail, _ = _judge_gate(g, out, code)
+            print(f"      {C['green'] + 'pass' if passed else C['red'] + 'FAIL'}{C['reset']}  {detail}")
+            if not passed:
+                failed_names.append(f"{name} ({detail})")
+    finally:
+        for link in links:
+            try:
+                os.unlink(link)
+            except OSError:
+                pass
+        try:
+            cleanup_steps = (("remove", "--force", result_dir), ("prune",)) if made else ()
+            if not made:
+                shutil.rmtree(scratch, ignore_errors=True)
+            for cleanup_args in cleanup_steps:
+                try:
+                    A._git_worktree_cleanup(root, *cleanup_args)
+                except A.WorktreeCleanupRefused as exc:
+                    failed_names.append(f"worktree cleanup failed: {exc}")
+                except RuntimeError:
+                    pass
+                if cleanup_args[0] == "remove":
+                    shutil.rmtree(scratch, ignore_errors=True)
+        finally:
+            release()
+    if failed_names:
+        return False, names, ", ".join(failed_names)
+    return True, names, None
+
+
 def cmd_verify(cfg, args):
     """Run the project's declared gates ourselves and record what we measured.
 
@@ -763,12 +859,25 @@ def cmd_commit_ok(cfg, args):
             return 1
     now = A.tree_digest(root, cfg)       # legacy/audit surface, not commit identity
     ver, ver_problem = _latest_verification_or_problem(root)
+    running = [it["id"] for it in A.board(root)["running"]]
 
     def verification_matches(record):
         measured = (record or {}).get("candidate") or {}
-        return bool(record and record.get("passed") and record.get("candidate_ready")
-                    and measured.get("digest") == candidate["digest"]
-                    and not _verification_isolation_problem(root, record))
+        if not (record and record.get("candidate_ready")
+                and measured.get("digest") == candidate["digest"]
+                and A.gate_definitions_digest(root, record.get("profile")) == record.get("gates_digest")
+                and not _verification_isolation_problem(root, record)):
+            return False
+        if record.get("passed"):
+            return True
+        waivable, _ = A.verification_waivable_gates(root, record)
+        if not waivable:
+            return False
+        try:
+            gwaiver, _ = A.gates_waiver_for(root, running, candidate["digest"], failed_gates=waivable)
+        except Exception:
+            return False
+        return gwaiver is not None
 
     if getattr(args, "verify", False) and not verification_matches(ver):
         from types import SimpleNamespace
@@ -782,6 +891,8 @@ def cmd_commit_ok(cfg, args):
         ver, ver_problem = _latest_verification_or_problem(root)
 
     reasons = []
+    gates_waiver = None
+    waivable_failed = None
     if not candidate["changed_paths"]:
         reasons.append("no staged candidate — stage exactly what you intend to commit")
     reasons.extend(A.candidate_issue_messages(issues))
@@ -794,26 +905,55 @@ def cmd_commit_ok(cfg, args):
     elif not ver:
         reasons.append("no verification record — run `polyctl verify`")
     else:
-        if not ver.get("passed"):
-            failed = [g["name"] for g in ver.get("gates", []) if not g.get("passed")]
-            reasons.append(f"last verification failed: {', '.join(failed) or ver['id']}")
+        ver_reasons = []
         measured = ver.get("candidate")
         if not measured:
-            reasons.append(f"{ver['id']} predates index-candidate binding — re-run `polyctl verify`")
+            ver_reasons.append(f"{ver['id']} predates index-candidate binding — re-run `polyctl verify`")
         elif measured.get("digest") != candidate["digest"]:
-            reasons.append(
+            ver_reasons.append(
                 f"index changed since {ver['id']} — expected {measured.get('index_tree')}, "
                 f"got {candidate['index_tree']}"
             )
         elif not ver.get("candidate_ready"):
             detail = "; ".join(ver.get("candidate_issues") or [])
-            reasons.append(f"{ver['id']} did not verify an isolated staged candidate"
-                           + (f": {detail}" if detail else ""))
+            ver_reasons.append(f"{ver['id']} did not verify an isolated staged candidate"
+                               + (f": {detail}" if detail else ""))
         if A.gate_definitions_digest(root, ver.get("profile")) != ver.get("gates_digest"):
-            reasons.append(f"gate definitions changed since {ver['id']} — re-run `polyctl verify`")
+            ver_reasons.append(f"gate definitions changed since {ver['id']} — re-run `polyctl verify`")
         isolation_problem = _verification_isolation_problem(root, ver)
         if isolation_problem:
-            reasons.append(isolation_problem)
+            ver_reasons.append(isolation_problem)
+        if not ver.get("passed"):
+            failed = [g["name"] for g in ver.get("gates", []) if not g.get("passed")]
+            waivable_failed, unwaivable_why = A.verification_waivable_gates(root, ver)
+            gates_waiver_notes = []
+            if waivable_failed and not ver_reasons:
+                try:
+                    gates_waiver, gates_waiver_notes = A.gates_waiver_for(
+                        root, running, candidate["digest"], failed_gates=waivable_failed
+                    )
+                except Exception as exc:
+                    gates_waiver, gates_waiver_notes = None, [f"waiver ledger is unreadable: {exc}"]
+            elif not ver_reasons:
+                try:
+                    _, gates_waiver_notes = A.gates_waiver_for(root, running, candidate["digest"])
+                except Exception as exc:
+                    gates_waiver_notes = [f"waiver ledger is unreadable: {exc}"]
+            if gates_waiver:
+                print(f"{C['yellow']}gates waived{C['reset']} ({', '.join(waivable_failed)}) by "
+                      f"{gates_waiver['by']} ({gates_waiver['id']}): "
+                      f"{gates_waiver['why'][:80]} — reconcile with `polyctl catchup`")
+            else:
+                reasons.append(f"last verification failed: {', '.join(failed) or ver['id']}")
+                if unwaivable_why:
+                    try:
+                        has_open_gates_waiver = bool(A.open_waivers(root, gate="gates"))
+                    except Exception:
+                        has_open_gates_waiver = False
+                    if has_open_gates_waiver:
+                        reasons.append(unwaivable_why)
+                reasons.extend(gates_waiver_notes)
+        reasons.extend(ver_reasons)
 
     try:
         drift = A.plan_drift(root)
@@ -838,7 +978,6 @@ def cmd_commit_ok(cfg, args):
         reasons.append(f"plan edited after admission: {', '.join(drift)}")
 
     from . import features as F
-    running = [it["id"] for it in A.board(root)["running"]]
     try:
         waiver, waiver_notes = A.review_waiver_for(root, running, candidate["digest"])
     except Exception as exc:
@@ -965,6 +1104,8 @@ def cmd_commit_ok(cfg, args):
 
     token = f"C-{A.unique_ns()}"
     waived = review_required and waiver
+    primary_waiver = waiver["id"] if waived else (gates_waiver["id"] if gates_waiver else None)
+    extra_gates_waiver = gates_waiver["id"] if (waived and gates_waiver) else None
     try:
         # A waived candidate is reviewed after it lands, held to the family that wrote it (#65).
         author = A.grant_author(cfg, matrix_resolution["implementer_identity"] if strict else None) \
@@ -972,7 +1113,9 @@ def cmd_commit_ok(cfg, args):
         A.record_authority(
             root, True, [], now, ver["id"], token,
             review=review_name, reviewer=rwho, candidate=candidate, scope=scope,
-            waiver=waiver["id"] if waived else None, author=author, move_only=move_proof,
+            waiver=primary_waiver, gates_waiver=extra_gates_waiver,
+            waived_gates=waivable_failed if gates_waiver else None,
+            author=author, move_only=move_proof,
             **strict_authority,
         )
     except Exception as exc:
@@ -984,9 +1127,12 @@ def cmd_commit_ok(cfg, args):
             print("  legacy ledger — archive .polyctl/ledger/authority.jsonl and re-run polyctl commit-ok (docs/ledger.md)")
         return 1
 
+    ver_summary = (f"{ver['id']} (waived {', '.join(waivable_failed)}: {gates_waiver['id']})"
+                   if gates_waiver else ver["id"])
+    rev_summary = review_name or (f"waived ({waiver['id']})" if waived else "waived/off")
     print(f"{C['green']}{C['b']}GRANTED{C['reset']}  {token}")
-    print(f"  {C['dim']}verified{C['reset']} {ver['id']} · "
-          f"{C['dim']}review{C['reset']} {review_name or 'waived/off'}")
+    print(f"  {C['dim']}verified{C['reset']} {ver_summary} · "
+          f"{C['dim']}review{C['reset']} {rev_summary}")
     from . import tiers as T
     if review_name and T.weaker(review_tier):
         person = f" ({_person_line(evidence.get('person'))})" if review_tier == T.PERSON else ""
@@ -2016,7 +2162,26 @@ def _bound_commit_check(cfg, args):
                 f"the grant's referenced verification {referenced or '<missing>'}"
             )
         if verification.get("passed") is not True:
-            reasons.append("the grant's verification did not pass")
+            waivable_failed, unwaivable_why = A.verification_waivable_gates(root, verification)
+            wanted_gates_waiver = (grant.get("gates_waiver") or grant.get("waiver")) if grant else None
+            if not waivable_failed or not wanted_gates_waiver:
+                reasons.append("the grant's verification did not pass")
+            else:
+                try:
+                    running = [item["id"] for item in A.board(root)["running"]]
+                    gwaiver, gnotes = A.gates_waiver_for(
+                        root, running, (candidate or {}).get("digest"),
+                        failed_gates=waivable_failed, wanted=wanted_gates_waiver,
+                    )
+                except Exception as exc:
+                    reasons.append(f"cannot validate the live gates waiver: {exc}")
+                else:
+                    if not gwaiver:
+                        reasons.append(
+                            "the grant's verification did not pass and no matching running-slice gates waiver is open"
+                            + f" (the grant stood on {wanted_gates_waiver})"
+                            + (f": {'; '.join(gnotes)}" if gnotes else "")
+                        )
         if verification.get("candidate_ready") is not True:
             reasons.append("the grant's verification did not prove an isolated candidate")
         if candidate is not None and verification.get("candidate") != candidate:

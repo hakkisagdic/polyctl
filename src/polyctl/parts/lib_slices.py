@@ -510,7 +510,7 @@ def slice_outcomes(root, project=None):
         if grant.get("token") not in landed:
             continue
         linked = by_artefact.get(grant.get("review")) or {}
-        slice_id = linked.get("slice") or (waivers.get(grant.get("waiver")) or {}).get("slice")
+        slice_id = linked.get("slice") or (waivers.get(grant.get("waiver") or grant.get("gates_waiver")) or {}).get("slice")
         if not slice_id or slice_id in out:
             continue
         mine = [row for row in reviews if row.get("slice") == slice_id]
@@ -526,7 +526,8 @@ def slice_outcomes(root, project=None):
         out[slice_id] = {
             "project": project, "slice": slice_id, "verdicts": [row.get("verdict") for row in prospective],
             "rounds": len(prospective), "first_pass": bool(prospective) and prospective[0].get("verdict") == "APPROVED",
-            "waived": not prospective and bool(grant.get("waiver")),
+            "waived": not prospective and bool(grant.get("waiver"))
+            and (waivers.get(grant.get("waiver")) or {}).get("gate", "review") == "review",
             "started_at": started, "landed_at": landed_at,
             "hours": round((landed_at - started) / 3600, 2) if started and landed_at >= started else None,
             "size": size, "defect_found": bool(retro) or slice_id in fixed,
@@ -2673,7 +2674,8 @@ def _otlp_resolve_commit(commit, maps):
         "polyctl.review.id",
         os.path.basename(str(trailers.get("review") or (grant_row or {}).get("review") or "")),
     )
-    wid = _otlp_allow_string("polyctl.waiver.id", trailers.get("waiver") or (grant_row or {}).get("waiver"))
+    raw_waiver = (trailers.get("waiver") or "").split(",")[0].strip() or (grant_row or {}).get("waiver")
+    wid = _otlp_allow_string("polyctl.waiver.id", raw_waiver)
     cdigest = (
         _otlp_allow_string("polyctl.candidate", gcand.get("digest"))
         or maps["verification_to_candidate"].get(vid)

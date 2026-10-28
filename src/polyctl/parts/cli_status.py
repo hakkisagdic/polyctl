@@ -168,6 +168,12 @@ def status_facts(cfg, msg_count=8, window_hours=24.0, shown=False):
                       "blocked": [{"id": it["id"], "title": it["title"],
                                    "why": it["notes"].get("needs") or it["notes"].get("waiting") or None}
                                   for it in bd["blocked"]]}
+    try:
+        waivers = A.open_waiver_report(root)
+    except Exception as exc:
+        waivers = [f"waiver ledger is unreadable: {exc}"]
+    if waivers:
+        facts["waivers"] = waivers
     facts["messages"] = [{"time": hh, "role": kind, "text": text}
                          for hh, kind, text in (A.messages(recs, msg_count, adapter) if impl else [])]
     return facts
@@ -373,6 +379,8 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
             for i, ln in enumerate(textwrap.wrap(f"{it['id']}  {it['title']} — {why}", w - 14)[:2]):
                 a(f"     {C['red']}⊘{C['reset']} {A.shown_text(ln)}" if i == 0
                   else f"       {C['dim']}{A.shown_text(ln)}{C['reset']}")
+    for line in facts.get("waivers") or ():
+        a(f"   {C['b']}Waiver:{C['reset']}  {A.shown_text(line)}")
 
     # The message log is elastic and goes last, so a short window drops history
     # rather than the state you actually steer by.

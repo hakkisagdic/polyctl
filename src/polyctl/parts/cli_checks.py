@@ -1602,6 +1602,20 @@ def _agent_names(cfg):
 def cmd_waive(cfg, args):
     """A person bypasses a gate for a slice, on the record. Reconciled later by `polyctl catchup`."""
     root = cfg["root"]
+    if args.gate == "inventory":
+        print("inventory is not a gate `polyctl commit-ok` checks; nothing reads an inventory waiver, "
+              "so none is recorded (`polyctl features off inventory_review --by <name>` turns the playbook "
+              "switch off)")
+        return 2
+    if args.gate not in ("review", "gates"):
+        print(f"unknown gate {args.gate!r}: choose review or gates"); return 2
+    raw_gates = getattr(args, "gates", None)
+    if raw_gates is not None and args.gate != "gates":
+        print(f"--gates applies only to `polyctl waive gates`, not `{args.gate}`"); return 2
+    try:
+        named_gates = A._normalize_waived_gates(raw_gates) if args.gate == "gates" else None
+    except ValueError as exc:
+        print(str(exc)); return 2
     if not args.why:
         print("--why is required: a waiver without a reason cannot be reconciled"); return 2
     # A waiver covers one slice for a bounded time and names a person (#67).
@@ -1616,11 +1630,23 @@ def cmd_waive(cfg, args):
     if not 0 < hours <= longest:
         print(f"--hours must be above 0 and at most {longest}"); return 2
     try:
-        rec = A.waive(root, args.gate, args.slice, args.why, by=args.by.strip(), hours=hours)
+        rec = A.waive(root, args.gate, args.slice, args.why, by=args.by.strip(), hours=hours, gates=named_gates)
     except Exception as exc:
         print(f"{C['red']}waiver not recorded{C['reset']}: {exc}"); return 1
-    print(f"{C['yellow']}{C['b']}waived{C['reset']} {args.gate} for {rec['slice']} ({rec['id']}) by {rec['by']} at HEAD {rec['head'][:8]}")
-    print(f"{C['dim']}commit-ok honours it; `polyctl catchup` runs the missed {args.gate} against the landed range and closes it.{C['reset']}")
+    if args.gate == "review":
+        print(f"{C['yellow']}{C['b']}waived{C['reset']} review for {rec['slice']} ({rec['id']}) "
+              f"by {rec['by']} at HEAD {rec['head'][:8]}")
+        print(f"{C['dim']}commit-ok honours it in place of an APPROVED review for one staged candidate while "
+              f"{rec['slice']} is running; `polyctl catchup` runs the missed review against the landed range "
+              f"and closes it.{C['reset']}")
+    else:
+        which = f" ({', '.join(rec['gates'])})" if rec.get("gates") else ""
+        covered = f"failed gate(s) {', '.join(rec['gates'])}" if rec.get("gates") else "any failed gate(s) of the profile"
+        print(f"{C['yellow']}{C['b']}waived{C['reset']} gates{which} for {rec['slice']} ({rec['id']}) "
+              f"by {rec['by']} at HEAD {rec['head'][:8]}")
+        print(f"{C['dim']}commit-ok honours it for one staged candidate while {rec['slice']} is running when "
+              f"verification ran every gate of the profile, failed only {covered}, and is bound to the staged "
+              f"candidate; `polyctl catchup` re-runs the waived gates on the landed range and closes it.{C['reset']}")
     A.record_notice(root, f"waiver {args.gate}", f"{rec['slice']}: {args.why[:120]} ({rec['by']})", sent=False, key="waiver")
     return 0
 
@@ -1851,9 +1877,10 @@ def cmd_catchup(cfg, args):
         print(f"{C['b']}catchup plan{C['reset']}{C['dim']}: nothing is reviewed or written{C['reset']}")
     try:
         targets = A.review_waiver_ranges(root)
+        gate_targets = A.gates_waiver_ranges(root)
     except Exception as exc:
         print(f"  {C['red']}waivers cannot be read{C['reset']}: {exc}")
-        targets = []
+        targets, gate_targets = [], []
         failed.append("ledger")
     moves = (statement or {}).get("move_only") or []
     open_slices = {item["waiver"].get("slice") for item in targets}
@@ -1866,8 +1893,50 @@ def cmd_catchup(cfg, args):
             print(f"  --move-only {name}: --slice {only} bounds this run; it waits for another")
     if only:
         targets = [item for item in targets if item["waiver"].get("slice") == only]
+        gate_targets = [item for item in gate_targets if item["waiver"].get("slice") == only]
     undecided = _catchup_undecided(root, targets)
     targets = sorted(targets, key=lambda item: item["waiver"].get("id") in undecided)
+    for item in gate_targets:
+        w = item["waiver"]
+        label = f"{w['id']} ({w['slice']})"
+        totals["waivers"] += 1
+        if item["problem"]:
+            print(f"  {label}: {item['problem']}; keeping it open")
+            continue
+        if item.get("unused"):
+            if not item.get("expired"):
+                print(f"  {label}: nothing was granted under it yet; keeping it open until it expires")
+            elif plan:
+                print(f"  {label}: expired unused; a run closes it")
+            elif close(w["id"], "nothing was granted under it before it expired"):
+                print(f"  {label}: expired unused; closed")
+                did += 1
+            continue
+        if not item["landed"]:
+            if item["newest"]:
+                print(f"  {label}: nothing landed yet after the waiver; keeping it open")
+            elif plan:
+                print(f"  {label}: no commits landed before the next waiver; a run closes it")
+            elif close(w["id"], "no commits landed before the next waiver was opened"):
+                print(f"  {label}: no commits landed before the next waiver; closed")
+                did += 1
+            continue
+        rng = f"{item['start'][:12]}..{item['end'][:12]}"
+        waived_names = item.get("waived_gates") or w.get("gates") or []
+        gate_list = ", ".join(waived_names) if waived_names else "profile gates"
+        if plan:
+            print(f"  {label}: {rng}: re-run waived gates ({gate_list}) on {item['end'][:12]}")
+            continue
+        print(f"  {label}: re-running waived gates ({gate_list}) on {rng}")
+        ok, ran_names, detail = _rerun_waived_gates(cfg, root, item)
+        if ok:
+            evidence = {"commits": f"{item['start']}..{item['end']}", "grant": item.get("grant"), "gates": ran_names}
+            if close(w["id"], f"waived gates passed on {rng}: {', '.join(ran_names)}", evidence):
+                print(f"  {label}: {rng}: waived gates passed ({', '.join(ran_names)}); closed")
+                did += 1
+        else:
+            print(f"  {label}: {rng}: waived gates failed ({detail}); {w['id']} stays open")
+            failed.append(w["id"])
     for item in targets:
         w = item["waiver"]
         label = f"{w['id']} ({w['slice']})"
