@@ -220,11 +220,6 @@ function Show-Doctor([string]$Root) {
   }
 }
 
-if ($PSCommandPath) {
-  Set-Alias -Name polyctl -Value $PSCommandPath
-  Set-Alias -Name pctl -Value $PSCommandPath
-}
-
 $r = Find-Root $Root
 switch ($Command) {
   'status' { Show-Status $r }
