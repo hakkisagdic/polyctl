@@ -245,15 +245,20 @@ last file change — or against a verification produced by the same actor that w
 code. Both refusals are enforced, not advised; see separation of duties in
 [`safety.md`](safety.md).
 
-*In polyctl since slice COORDINATION-COMMIT: a staged candidate that holds only coordination paths
-(for example `.kiro/steering/*.md` or `semantic-review/*.md` tracked in git, or `git rm --cached`
-removing them) is a coordination commit. Harness configuration never rides a coordination grant unseen:
-when `unseen_harness_config` is non-empty, `polyctl commit-ok` and the pre-commit hook refuse and name
-`polyctl harness seen --ask`, and a coordination grant never hides an unseen harness change from
-`harness_config_base`. `polyctl commit-ok --by <name>` attests the person's act the way `harness seen`
-does — with `--ask` on an interactive terminal or `--digest <sha256>` for that exact candidate, refused
-to agents, in `allowlist.FORBIDDEN`, and when `--by` names an agent or role — without the product gates,
-records it in `.polyctl/ledger/authority.jsonl` with `coordination`, and `polyctl commit` writes
+*In polyctl since slice COORDINATION-COMMIT (and COORDINATION-COMMIT-2): a staged candidate that holds
+only coordination paths (for example `.kiro/steering/*.md` or `semantic-review/*.md` tracked in git, or
+`git rm --cached` removing them) is a coordination commit. The coordination paths include `.polyctl/`
+itself, so `.polyctl/gates.json` (the gate definitions) and `.polyctl/config.json` can land as a
+coordination commit on a person's act, with no product gates or review. Harness configuration never
+rides a coordination grant unseen: when `unseen_harness_config` is non-empty, `polyctl commit-ok` and
+the pre-commit hook refuse and name `polyctl harness seen --ask`, and a coordination grant never hides
+an unseen harness change from `harness_config_base` (which covers `.polyctl/config.json`'s role
+commands). `polyctl commit-ok --by <name>` attests the person's act the way `harness seen` does — with
+`--ask` on an interactive terminal or `--digest <sha256>` for that exact candidate, refused to agents,
+in `allowlist.FORBIDDEN`, and when `--by` names an agent or role — without the product gates or a
+review (`--review`, `--verify`, and `-p`/`--profile` are refused because a coordination commit is
+granted on a person's act alone, with no review or verification to bind), records it in
+`.polyctl/ledger/authority.jsonl` with `coordination`, and `polyctl commit` writes
 `Polyctl-Verification: coordination` and `Polyctl-Review: coordination (<name>)`. A candidate
 mixing coordination and product paths is refused as before.*
 

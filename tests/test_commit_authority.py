@@ -1013,3 +1013,142 @@ def test_mixed_candidate_and_product_candidate_with_by_are_refused(project, caps
     ) == 1
     out = capsys.readouterr().out
     assert "--by is only for a coordination commit: staged candidate holds product paths" in out
+
+
+def test_coordination_commit_refuses_product_flags_review_verify_and_profile(
+    project, monkeypatch, capsys
+):
+    root = project["root"]
+    reviews_dir = os.path.join(root, "semantic-review")
+    os.makedirs(reviews_dir, exist_ok=True)
+    review_file = os.path.join(reviews_dir, "20261027-MIGRATION-1.md")
+    open(review_file, "w", encoding="utf-8").write("v1\n")
+    _git(root, "add", "-f", "semantic-review/20261027-MIGRATION-1.md")
+    candidate = A.index_candidate(root)
+
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
+    monkeypatch.setattr(cli, "_confirm", lambda question: True)
+
+    for argv, expected_flag in (
+        (["commit-ok", "--review", "R-1", "--by", "alice (owner)", "--ask"], "--review"),
+        (["commit-ok", "--verify", "--by", "alice (owner)", "--ask"], "--verify"),
+        (["commit-ok", "-p", "full", "--by", "alice (owner)", "--ask"], "-p/--profile"),
+        (
+            ["commit-ok", "--review", "R-1", "--verify", "-p", "full", "--by", "alice (owner)", "--digest", candidate["digest"]],
+            "--review, --verify, -p/--profile",
+        ),
+    ):
+        assert cli.cmd_commit_ok(project, cli.build_parser().parse_args(argv)) == 1
+        out = capsys.readouterr().out
+        assert "REFUSED" in out
+        assert expected_flag in out
+        assert (
+            "a coordination commit is granted on a person's act alone, "
+            "with no review or verification to bind"
+        ) in out
+        decision = A.latest_authority_decision(root)
+        assert decision["granted"] is False
+        assert any(expected_flag in reason for reason in decision["reasons"])
+
+
+def test_coordination_commit_ask_guards_second_check_git_and_harness_failures(
+    project, monkeypatch, capsys
+):
+    root = project["root"]
+    reviews_dir = os.path.join(root, "semantic-review")
+    os.makedirs(reviews_dir, exist_ok=True)
+    open(os.path.join(reviews_dir, "20261027-MIGRATION-1.md"), "w", encoding="utf-8").write("v1\n")
+    _git(root, "add", "-f", "semantic-review/20261027-MIGRATION-1.md")
+
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
+
+    # 1. _unstaged_coordination_paths failing on the post-confirmation check (e.g. git index lock held)
+    # records a refusal in the authority ledger instead of raising a traceback.
+    def confirm_then_break_unstaged(question):
+        def broken_unstaged(r, cand):
+            raise RuntimeError("git ['diff'] failed: index.lock held")
+        monkeypatch.setattr(cli, "_unstaged_coordination_paths", broken_unstaged)
+        return True
+
+    monkeypatch.setattr(cli, "_confirm", confirm_then_break_unstaged)
+    assert cli.cmd_commit_ok(
+        project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
+    ) == 1
+    out = capsys.readouterr().out
+    assert "REFUSED" in out
+    assert "cannot measure unstaged coordination paths: git ['diff'] failed: index.lock held" in out
+    decision = A.latest_authority_decision(root)
+    assert decision["granted"] is False
+    assert any("cannot measure unstaged coordination paths" in reason for reason in decision["reasons"])
+
+    # 2. A.unseen_harness_config failing on the post-confirmation check also records a refusal.
+    monkeypatch.undo()
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
+
+    def confirm_then_break_harness(question):
+        def broken_unseen(r):
+            raise RuntimeError("git ['cat-file'] failed")
+        monkeypatch.setattr(A, "unseen_harness_config", broken_unseen)
+        return True
+
+    monkeypatch.setattr(cli, "_confirm", confirm_then_break_harness)
+    assert cli.cmd_commit_ok(
+        project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
+    ) == 1
+    out = capsys.readouterr().out
+    assert "REFUSED" in out
+    assert "cannot measure harness configuration changes: git ['cat-file'] failed" in out
+    decision = A.latest_authority_decision(root)
+    assert decision["granted"] is False
+    assert any("cannot measure harness configuration changes" in reason for reason in decision["reasons"])
+
+
+def test_coordination_commit_ask_rechecks_hold_and_urgent_mail_after_confirmation(
+    project, monkeypatch, capsys
+):
+    root = project["root"]
+    reviews_dir = os.path.join(root, "semantic-review")
+    os.makedirs(reviews_dir, exist_ok=True)
+    open(os.path.join(reviews_dir, "20261027-MIGRATION-1.md"), "w", encoding="utf-8").write("v1\n")
+    _git(root, "add", "-f", "semantic-review/20261027-MIGRATION-1.md")
+
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
+
+    # Hold placed while the confirmation prompt is open must refuse and record no grant.
+    held_during_prompt = {"state": None}
+    monkeypatch.setattr(A, "hold_state", lambda r: held_during_prompt["state"])
+
+    def confirm_with_hold(question):
+        held_during_prompt["state"] = {"by": "alice", "reason": "stop while prompt open"}
+        return True
+
+    monkeypatch.setattr(cli, "_confirm", confirm_with_hold)
+    assert cli.cmd_commit_ok(
+        project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
+    ) == 1
+    out = capsys.readouterr().out
+    assert "REFUSED" in out
+    assert "project is held by alice: stop while prompt open" in out
+    decision = A.latest_authority_decision(root)
+    assert decision["granted"] is False
+    assert "project is held by alice: stop while prompt open" in decision["reasons"]
+
+    # Urgent mail arriving while the confirmation prompt is open must refuse and record no grant.
+    held_during_prompt["state"] = None
+    urgent_during_prompt = {"messages": []}
+    monkeypatch.setattr(A, "urgent_messages", lambda r, cfg=None: list(urgent_during_prompt["messages"]))
+
+    def confirm_with_urgent_mail(question):
+        urgent_during_prompt["messages"] = [{"id": "M-99", "title": "pause landing"}]
+        return True
+
+    monkeypatch.setattr(cli, "_confirm", confirm_with_urgent_mail)
+    assert cli.cmd_commit_ok(
+        project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
+    ) == 1
+    out = capsys.readouterr().out
+    assert "REFUSED" in out
+    assert "urgent message unacknowledged: M-99 — pause landing" in out
+    decision = A.latest_authority_decision(root)
+    assert decision["granted"] is False
+    assert "urgent message unacknowledged: M-99 — pause landing" in decision["reasons"]

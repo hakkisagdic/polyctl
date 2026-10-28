@@ -855,6 +855,20 @@ def _commit_ok_coordination(cfg, args, candidate):
         reasons.append(f"--by names an agent or a role ({by}); a coordination commit is a person's act")
     if ask and wanted_digest:
         reasons.append("pass either --ask or --digest, not both")
+    product_flags = [
+        flag
+        for flag, given in (
+            ("--review", getattr(args, "review", None) is not None),
+            ("--verify", bool(getattr(args, "verify", False))),
+            ("-p/--profile", getattr(args, "profile", None) is not None),
+        )
+        if given
+    ]
+    if product_flags:
+        reasons.append(
+            f"{', '.join(product_flags)} cannot be used on a coordination commit: "
+            "a coordination commit is granted on a person's act alone, with no review or verification to bind"
+        )
     try:
         unstaged = _unstaged_coordination_paths(root, candidate)
     except Exception as exc:
@@ -918,14 +932,34 @@ def _commit_ok_coordination(cfg, args, candidate):
             ])
         if not answer:
             return _refuse(["not confirmed at the terminal"])
-        current = A.index_candidate(root)
-        if current["digest"] != digest or _unstaged_coordination_paths(root, current):
-            return _refuse(["staged coordination candidate changed while waiting for confirmation; read it again"])
-        if A.unseen_harness_config(root):
-            return _refuse([
-                "harness configuration changed while waiting for confirmation — "
-                "run `polyctl harness seen --ask` first"
-            ])
+        after_reasons = []
+        try:
+            current = A.index_candidate(root)
+            unstaged_after = _unstaged_coordination_paths(root, current)
+        except Exception as exc:
+            after_reasons.append(f"cannot measure unstaged coordination paths: {exc}")
+        else:
+            if current["digest"] != digest or unstaged_after:
+                after_reasons.append(
+                    "staged coordination candidate changed while waiting for confirmation; read it again"
+                )
+        try:
+            unseen_after = A.unseen_harness_config(root)
+        except Exception as exc:
+            after_reasons.append(f"cannot measure harness configuration changes: {exc}")
+        else:
+            if unseen_after:
+                after_reasons.append(
+                    "harness configuration changed while waiting for confirmation — "
+                    "run `polyctl harness seen --ask` first"
+                )
+        held = A.hold_state(root)
+        if held:
+            after_reasons.append(f"project is held by {held.get('by')}: {held.get('reason', '')}")
+        for message in A.urgent_messages(root, cfg):
+            after_reasons.append(f"urgent message unacknowledged: {message['id']} — {message['title']}")
+        if after_reasons:
+            return _refuse(after_reasons)
         confirmed_via = "ask"
     else:
         print(f"{C['b']}Coordination candidate{C['reset']} ({candidate['changed_count']} path(s), "
