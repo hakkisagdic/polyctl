@@ -9,7 +9,34 @@ from types import SimpleNamespace
 
 import pytest
 
-from polyctl import cli, lib as A, storage
+from polyctl import cli, lib as A, storage, watchdog as W
+from tests import conftest
+
+
+def _session_home_snapshot():
+    snap = {}
+    for base, dirs, files in os.walk(conftest.SESSION_HOME):
+        dirs.sort()
+        for name in sorted(files):
+            path = os.path.join(base, name)
+            rel = os.path.relpath(path, conftest.SESSION_HOME)
+            with open(path, "rb") as handle:
+                snap[rel] = hashlib.sha256(handle.read()).hexdigest()
+    return snap
+
+
+@pytest.fixture(autouse=True)
+def _isolated_test_home(request):
+    before = _session_home_snapshot()
+    expected_home = None
+    if "project" in request.fixturenames:
+        request.getfixturevalue("project")
+        expected_home = str(request.getfixturevalue("tmp_path") / "home")
+    yield
+    if expected_home is not None:
+        assert A.HOME == expected_home
+        assert W.STATE_DIR == os.path.join(expected_home, ".polyctl")
+    assert _session_home_snapshot() == before
 
 
 def _git(root, *args):
@@ -1064,16 +1091,17 @@ def test_coordination_commit_ask_guards_second_check_git_and_harness_failures(
 
     # 1. _unstaged_coordination_paths failing on the post-confirmation check (e.g. git index lock held)
     # records a refusal in the authority ledger instead of raising a traceback.
-    def confirm_then_break_unstaged(question):
-        def broken_unstaged(r, cand):
-            raise RuntimeError("git ['diff'] failed: index.lock held")
-        monkeypatch.setattr(cli, "_unstaged_coordination_paths", broken_unstaged)
-        return True
+    with monkeypatch.context() as mp:
+        def confirm_then_break_unstaged(question):
+            def broken_unstaged(r, cand):
+                raise RuntimeError("git ['diff'] failed: index.lock held")
+            mp.setattr(cli, "_unstaged_coordination_paths", broken_unstaged)
+            return True
 
-    monkeypatch.setattr(cli, "_confirm", confirm_then_break_unstaged)
-    assert cli.cmd_commit_ok(
-        project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
-    ) == 1
+        mp.setattr(cli, "_confirm", confirm_then_break_unstaged)
+        assert cli.cmd_commit_ok(
+            project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
+        ) == 1
     out = capsys.readouterr().out
     assert "REFUSED" in out
     assert "cannot measure unstaged coordination paths: git ['diff'] failed: index.lock held" in out
@@ -1082,25 +1110,25 @@ def test_coordination_commit_ask_guards_second_check_git_and_harness_failures(
     assert any("cannot measure unstaged coordination paths" in reason for reason in decision["reasons"])
 
     # 2. A.unseen_harness_config failing on the post-confirmation check also records a refusal.
-    monkeypatch.undo()
-    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
+    with monkeypatch.context() as mp:
+        def confirm_then_break_harness(question):
+            def broken_unseen(r):
+                raise RuntimeError("git ['cat-file'] failed")
+            mp.setattr(A, "unseen_harness_config", broken_unseen)
+            return True
 
-    def confirm_then_break_harness(question):
-        def broken_unseen(r):
-            raise RuntimeError("git ['cat-file'] failed")
-        monkeypatch.setattr(A, "unseen_harness_config", broken_unseen)
-        return True
-
-    monkeypatch.setattr(cli, "_confirm", confirm_then_break_harness)
-    assert cli.cmd_commit_ok(
-        project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
-    ) == 1
+        mp.setattr(cli, "_confirm", confirm_then_break_harness)
+        assert cli.cmd_commit_ok(
+            project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
+        ) == 1
     out = capsys.readouterr().out
     assert "REFUSED" in out
     assert "cannot measure harness configuration changes: git ['cat-file'] failed" in out
     decision = A.latest_authority_decision(root)
     assert decision["granted"] is False
     assert any("cannot measure harness configuration changes" in reason for reason in decision["reasons"])
+    assert os.path.isfile(A.project_file(root, "harness-base"))
+    assert os.path.isfile(A.project_file(root, "harness-turns"))
 
 
 def test_coordination_commit_ask_rechecks_hold_and_urgent_mail_after_confirmation(
