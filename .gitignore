@@ -9,11 +9,13 @@ __pycache__/
 # ledger lock sidecars (polyctl storage)
 .polyctl/ledger/*.lock
 
-# polyctl: mail is transient; the ledger and reviews are not
+# polyctl: mail is transient; the ledger and reviews are not (polyctl: 6 lines below, 6269e247fedc1f14)
 agent-mail/*.md
 !agent-mail/README.md
 .polyctl/inbox/
 .polyctl/hold
+.polyctl/sessions.json
+.polyctl/lanes/
 
 # This repository is public, and its own .polyctl/ state is per-checkout development
 # state: .polyctl/config.json carries absolute home paths, a session id and reviewer
@@ -23,4 +25,5 @@ agent-mail/*.md
 .claude/
 .kiro/
 .codex/
+.mcp.json
 semantic-review/

@@ -560,3 +560,69 @@ def test_lite_opt_in_cannot_be_reused_after_config_leaves_lite(project, monkeypa
     assert cli.cmd_commit_check(dict(A.load_config(root), root=root), SimpleNamespace(range=None)) == 1
     _plain(capsys)
     assert subprocess.run(["git", "commit", "-q", "-m", "after failed mode full"], cwd=root, capture_output=True).returncode != 0
+
+
+def test_mode_full_and_init_accept_own_pre_push_and_still_require_pre_commit_and_shared_hook_auth(
+    tmp_path, monkeypatch, capsys
+):
+    from tests.test_hook_paths import _make_current_polyctl_available
+
+    bin_dir = tmp_path / "bin"
+    _make_fake_claude_reviewer(str(bin_dir))
+    monkeypatch.setenv("PATH", str(bin_dir), prepend=os.pathsep)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
+
+    # 1. Repository with a tracked custom pre-push and polyctl's pre-commit in .githooks:
+    # starts in lite, then switches to full mode keeping the custom pre-push byte-for-byte.
+    repo = tmp_path / "repo-own-push"
+    repo.mkdir()
+    _git_repo(str(repo), with_marker=False)
+    hooks = repo / ".githooks"
+    hooks.mkdir()
+    (hooks / "pre-commit").write_bytes(cli._render_local_hook("pre-commit", "."))
+    (hooks / "pre-commit").chmod(stat.S_IRWXU)
+    custom_push = b"#!/bin/sh\necho custom pre-push\n"
+    (hooks / "pre-push").write_bytes(custom_push)
+    (hooks / "pre-push").chmod(stat.S_IRWXU)
+    subprocess.run(["git", "add", ".githooks/pre-commit", ".githooks/pre-push"], cwd=repo, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "hooks"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "core.hooksPath", ".githooks"], cwd=repo, check=True)
+
+    assert cli.cmd_mode({"root": str(repo)}, _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+    assert cli.cmd_init({"root": str(repo)}, _init_args(profile="agy-codex")) == 0
+    _plain(capsys)
+    subprocess.run(["git", "add", ".polyctl-project"], cwd=repo, check=True)
+    cfg = dict(A.load_config(str(repo)), root=str(repo))
+    assert cli.project_mode(cfg) == "lite"
+
+    assert cli.cmd_mode(cfg, _mode_args("full")) == 0
+    full_out = _plain(capsys)
+    assert "mode = 'full'" in full_out
+    assert "push guard  off — push guard not installed here:" in full_out
+    assert (hooks / "pre-push").read_bytes() == custom_push
+    assert cli.project_mode(dict(A.load_config(str(repo)), root=str(repo))) == "full"
+
+    # 2. When pre-commit is foreign (even if pre-push is absent), mode full still refuses.
+    assert cli.cmd_mode(dict(A.load_config(str(repo)), root=str(repo)), _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+    (hooks / "pre-commit").write_bytes(b"#!/bin/sh\necho foreign pre-commit\n")
+    assert cli.cmd_mode(dict(A.load_config(str(repo)), root=str(repo)), _mode_args("full")) == 1
+    refused = _plain(capsys)
+    assert "mode full refused" in refused and "pre-commit hook at" in refused
+    assert cli.project_mode(dict(A.load_config(str(repo)), root=str(repo))) == "lite"
+
+    # 3. Shared hooks directory with a custom pre-push still requires --allow-shared-hooks for mode full.
+    shared_dir = tmp_path / "shared-hooks"
+    shared_dir.mkdir()
+    (shared_dir / "pre-push").write_bytes(custom_push)
+    (shared_dir / "pre-push").chmod(stat.S_IRWXU)
+    subprocess.run(["git", "config", "core.hooksPath", str(shared_dir)], cwd=repo, check=True)
+    assert cli.cmd_mode(dict(A.load_config(str(repo)), root=str(repo)), _mode_args("full", allow_shared_hooks=False)) == 1
+    shared_refused = _plain(capsys)
+    assert "--allow-shared-hooks" in shared_refused
+    if os.name != "nt":
+        assert cli.cmd_mode(dict(A.load_config(str(repo)), root=str(repo)), _mode_args("full", allow_shared_hooks=True)) == 0
+        _plain(capsys)
+        assert (shared_dir / "pre-push").read_bytes() == custom_push
+        assert cli.project_mode(dict(A.load_config(str(repo)), root=str(repo))) == "full"

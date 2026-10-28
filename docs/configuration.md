@@ -216,10 +216,12 @@ opt-in record stays in `full` mode and is named by `polyctl doctor`, `polyctl st
 the config leaves `lite` while the newest attested `mode` row is `lite`, reading the mode appends
 an attested `full` row by `polyctl` so writing `"mode": "lite"` back later stays `full` until a person
 records `polyctl mode lite --by <name>` again. `polyctl mode full` checks what `full` needs - a reviewer
-route that passes the independence check and probe (or the `person` review tier), and commit hooks
-that install and pass the execution probe - records `full` before writing the config, and refuses,
-naming what is missing, rather than half-switching; `polyctl mode show` prints the mode and what each
-mode does and does not protect ([safety.md](safety.md)).
+route that passes the independence check and probe (or the `person` review tier), and a `pre-commit`
+commit hook that can be installed or kept current and passes the execution probe (leaving any
+repository-owned `pre-push` hook untouched with the push guard reported as off; shared, external or global
+hook directories still require `--allow-shared-hooks`) - records `full` before writing the config, and
+refuses, naming what is missing, rather than half-switching; `polyctl mode show` prints the mode and what
+each mode does and does not protect ([safety.md](safety.md)).
 
 An implementer whose tool grant admits `polyctl config set` or `polyctl config unset` could lengthen or shorten what
 governs its own review, and `polyctl doctor` names such a grant even when it fixes a value or includes

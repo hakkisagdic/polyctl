@@ -363,6 +363,16 @@ def _profile_config(root, args, base):
         opted.append("review.same_family labeled")
     if not impl_adapter and not prof:
         return cfg, opted
+    if isinstance(cfg.get("roles"), dict) or isinstance(cfg.get("actors"), dict):
+        return cfg, opted
+    if "implementer" in cfg and (
+        ("reviewer" in cfg and "capability_matrix" not in cfg)
+        or all(
+            os.path.lexists(os.path.join(root, ".polyctl", name))
+            for name in ("board.md", "authority.md", "backlog.md")
+        )
+    ):
+        return cfg, opted
     roles = prof or presets.get(A.default_profile(root)) or {}
     added = []
     if "implementer" not in cfg:
@@ -431,6 +441,7 @@ def _planned_runtime_config(root, cfg):
     runtime.setdefault("root", root)
     runtime.setdefault("mailbox", "agent-mail")
     runtime.setdefault("reviews", "semantic-review")
+    A.resolve_roles(root, runtime)
     if "implementer" not in runtime:
         found = A.discover_session(root)
         if found:
@@ -680,6 +691,13 @@ def cmd_init(cfg, args):
     if config_problem:
         print(f"{C['red']}init refused{C['reset']}: {_project_refusal(config_problem)}")
         return 1
+    try:
+        existing_ledgers = sorted(
+            lname for lname in os.listdir(os.path.join(root, ".polyctl", "ledger"))
+            if lname.endswith(".jsonl")
+        )
+    except OSError:
+        existing_ledgers = []
     if opt_in:
         try:
             newest = A.recorded_opt_in(root, "review.same_family")
@@ -704,7 +722,10 @@ def cmd_init(cfg, args):
         put(".polyctl/gates.json", json.dumps(detected_gates, indent=2) + "\n")
     else:
         kept.append(".polyctl/gates.json")
-    put(".polyctl/ledger/.gitkeep", "")
+    for lname in existing_ledgers:
+        kept.append(f".polyctl/ledger/{lname}")
+    if not existing_ledgers or os.path.lexists(os.path.join(root, ".polyctl", "ledger", ".gitkeep")):
+        put(".polyctl/ledger/.gitkeep", "")
     put(".polyctl/decisions/.gitkeep", "")
     put("semantic-review/.gitkeep", "")
     put("agent-mail/README.md", language.text(runtime_cfg, "init.mail-readme"))
@@ -802,11 +823,21 @@ def cmd_init(cfg, args):
                 "gitignore": any(rel.startswith(".gitignore") for rel in wrote)}
     # Replaced whole under a name no file had, so a link an agent left at its name is replaced, never written through
     # (LEADS-ADAPTERS).
-    try:
-        storage.replace_in_tree(root, ".polyctl/init-manifest.json", json.dumps(manifest, indent=2).encode(UTF8))
-    except storage.InTheWay as exc:
-        unwritten.append((".polyctl/init-manifest.json", str(exc)))
-        print(f"  {C['yellow']}not written{C['reset']}  .polyctl/init-manifest.json: {exc}")
+    manifest_path = os.path.join(root, ".polyctl", "init-manifest.json")
+    if (
+        os.path.isfile(manifest_path)
+        and not os.path.islink(manifest_path)
+        and not manifest["wrote"]
+        and not manifest["mcp"]
+    ):
+        print(f"  {C['dim']}kept   .polyctl/init-manifest.json{C['reset']}")
+    else:
+        try:
+            storage.replace_in_tree(root, ".polyctl/init-manifest.json", json.dumps(manifest, indent=2).encode(UTF8))
+            print(f"  {C['green']}wrote{C['reset']}  .polyctl/init-manifest.json")
+        except storage.InTheWay as exc:
+            unwritten.append((".polyctl/init-manifest.json", str(exc)))
+            print(f"  {C['yellow']}not written{C['reset']}  .polyctl/init-manifest.json: {exc}")
     # A person adopted the tree as it stands: its harness configuration is measured from this HEAD, once (HARNESS-CONFIG).
     A.record_harness_baseline(root, "polyctl init")
     # The role blocks init composed are its own commands, and the rest are accepted as they stand, once (TURN-ARGV).
@@ -834,6 +865,9 @@ def cmd_init(cfg, args):
         hook_proof = _hook_execution_probe(hook_inv)
         tone = C["green"] if hook_proof["installed"] else C["yellow"]
         print(f"  {tone}commit hook{C['reset']} {_hook_probe_text(hook_proof)}")
+        push_target = _own_pre_push_target(hook_inv)
+        if push_target is not None:
+            print(f"  {C['dim']}push guard{C['reset']}  {_own_pre_push_line(push_target)}")
 
         probe_tone = C["green"] if reviewer_probe["ok"] else C["red"]
         print(
@@ -1017,6 +1051,9 @@ def _adopt_project(cfg, args):
     inventory = _polyctl_hook_inventory(root)
     proof = _hook_execution_probe(inventory)
     print(f"  {C['green'] if proof['installed'] else C['yellow']}commit hook{C['reset']} {_hook_probe_text(proof)}")
+    push_target = _own_pre_push_target(inventory)
+    if push_target is not None:
+        print(f"  {C['dim']}push guard{C['reset']}  {_own_pre_push_line(push_target)}")
 
     print(f"\n{C['b']}Next, for a person:{C['reset']}")
     if not proof["installed"]:

@@ -95,6 +95,13 @@ def status_facts(cfg, msg_count=8, window_hours=24.0, shown=False):
     if project_mode(cfg) == "lite":
         facts["mode"] = "lite"
         facts["enforcement"] = ENFORCEMENT_OFF_LITE_LINE
+    else:
+        push_target = _own_pre_push_target(_polyctl_hook_inventory(root))
+        if push_target is not None:
+            facts["push_guard"] = (
+                f"off ({push_target['path']} is the repository's own pre-push hook — "
+                f"{push_target['static_state']} / {push_target['track_state']})"
+            )
     recs = []
     if impl:
         state, age, desc = A.busy(cfg, adapter)
@@ -197,6 +204,8 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
     elif unrecorded_lite(cfg):
         a(f"  {C['yellow']}mode is lite in {unrecorded_lite(cfg)} with no person's record, so full mode stays in force: "
           f"polyctl mode lite --by <name>{C['reset']}")
+    if facts.get("push_guard"):
+        a(f"  {C['dim']}push guard  {A.shown_text(facts['push_guard'])}{C['reset']}")
 
     # implementer state
     implementer = facts["implementer"]

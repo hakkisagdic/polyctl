@@ -464,21 +464,27 @@ def status_payload(cfg):
         processes = len(A.agent_pids(root, adapter)) if impl else 0
     except TableUnreadable as exc:
         processes, unread = None, str(exc)
-    return {"project": cfg.get("project") or os.path.basename(root), "root": root,
-            "mode": mode, "enforcement": enforcement,
-            "adapter": impl.get("adapter"), "state": state, "seconds_since_write": age,
-            "doing": desc, "spinning_minutes": A.spinning(root),
-            "nothing_to_do_since": (W.load_state(root).get("idle_answer") or {}).get("since"),
-            "context_percent": tel.get("ctx"), "turns": tel.get("turns"),
-            "cost_total": tel.get("total"), "cost_delegated": tel.get("delegated"), "cost_unit": tel.get("unit"),
-            "head": g["log"][0] if g["log"] else None,
-            "dirty_files": len(g["dirty"]), "unpushed": g["ahead"],
-            "behind": g.get("behind"), "base": g.get("base"), "merged": g.get("merged"),
-            "mailbox": A.mailbox(root, cfg["mailbox"]),
-            "reviews": [{"file": f, "verdict": v} for f, v in revs],
-            "throughput": A.throughput(root, cfg),
-            "held": A.hold_state(root),
-            "agent_processes": processes, "agent_processes_unread": unread}
+    return dict(
+        {"project": cfg.get("project") or os.path.basename(root), "root": root,
+         "mode": mode, "enforcement": enforcement,
+         "adapter": impl.get("adapter"), "state": state, "seconds_since_write": age,
+         "doing": desc, "spinning_minutes": A.spinning(root),
+         "nothing_to_do_since": (W.load_state(root).get("idle_answer") or {}).get("since"),
+         "context_percent": tel.get("ctx"), "turns": tel.get("turns"),
+         "cost_total": tel.get("total"), "cost_delegated": tel.get("delegated"), "cost_unit": tel.get("unit"),
+         "head": g["log"][0] if g["log"] else None,
+         "dirty_files": len(g["dirty"]), "unpushed": g["ahead"],
+         "behind": g.get("behind"), "base": g.get("base"), "merged": g.get("merged"),
+         "mailbox": A.mailbox(root, cfg["mailbox"]),
+         "reviews": [{"file": f, "verdict": v} for f, v in revs],
+         "throughput": A.throughput(root, cfg),
+         "held": A.hold_state(root),
+         "agent_processes": processes, "agent_processes_unread": unread},
+        **({"push_guard": f"off ({push_target['path']} is the repository's own pre-push hook — "
+                          f"{push_target['static_state']} / {push_target['track_state']})"}
+           if mode != "lite" and (push_target := cli._own_pre_push_target(cli._polyctl_hook_inventory(root))) is not None
+           else {}),
+    )
 
 
 def board_payload(root):

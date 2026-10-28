@@ -166,22 +166,21 @@ def _init_hook_problem(root, allow_shared_hooks=False):
     if os.path.lexists(inv["active_dir"]) and not os.path.isdir(inv["active_dir"]):
         return f"effective hook path is not a directory: {inv['active_dir']}"
     targets = _active_hook_targets(inv)
-    for role in _HOOK_ROLES:
-        target = targets[role]
-        base = _state_base(target["static_state"])
-        if base not in ("current-local", "current-scoped") and not (
-            target["eligible"] and base in ("absent", "legacy")
-        ):
-            return (
-                f"{role} hook at {target['path']} is {target['static_state']} / {target['track_state']} "
-                "and cannot be installed"
-            )
-        if target["needs_authorization"] and (os.name == "nt" or not allow_shared_hooks):
-            return (
-                SHARED_HOOKS_REFUSED
-                if os.name == "nt"
-                else f"hooks at {inv['active_dir']} are {inv['directory_class']} (pass --allow-shared-hooks)"
-            )
+    target = targets["pre-commit"]
+    base = _state_base(target["static_state"])
+    if base not in ("current-local", "current-scoped") and not (
+        target["eligible"] and base in ("absent", "legacy")
+    ):
+        return (
+            f"pre-commit hook at {target['path']} is {target['static_state']} / {target['track_state']} "
+            "and cannot be installed"
+        )
+    if any(t["needs_authorization"] for t in targets.values()) and (os.name == "nt" or not allow_shared_hooks):
+        return (
+            SHARED_HOOKS_REFUSED
+            if os.name == "nt"
+            else f"hooks at {inv['active_dir']} are {inv['directory_class']} (pass --allow-shared-hooks)"
+        )
     return None
 
 
@@ -348,7 +347,14 @@ def cmd_mode(cfg, args):
             return 1
         was_lite = project_mode(cfg) == "lite"
         rc = cmd_hooks(dict(cfg, mode="full"), argparse.Namespace(action="install", allow_shared_hooks=allow))
-        if rc != 0:
+        after_inv = _polyctl_hook_inventory(root)
+        pre_commit_ok = (
+            not after_inv["error"]
+            and not _hook_install_problem(_project_enrollment(root))
+            and _state_base(_active_hook_targets(after_inv)["pre-commit"]["static_state"])
+            in ("current-local", "current-scoped")
+        )
+        if rc != 0 and not pre_commit_ok:
             if was_lite:
                 _uninstall_lite_hooks(root, allow_shared_hooks=allow)
             print(
@@ -356,7 +362,7 @@ def cmd_mode(cfg, args):
                 f"still in {project_mode(cfg)} mode"
             )
             return 1
-        hook_proof = _hook_execution_probe(_polyctl_hook_inventory(root))
+        hook_proof = _hook_execution_probe(after_inv)
         if not hook_proof["installed"]:
             if was_lite:
                 _uninstall_lite_hooks(root, allow_shared_hooks=allow)
@@ -381,6 +387,9 @@ def cmd_mode(cfg, args):
         except (OSError, ValueError) as exc:
             print(f"{C['red']}not changed{C['reset']}: {exc}")
             return 1
+        push_target = _own_pre_push_target(after_inv)
+        if push_target is not None:
+            print(f"  {C['dim']}push guard{C['reset']}  {_own_pre_push_line(push_target)}")
         print("mode = 'full' — enforcement: on (independent reviewer probe and commit hooks active)")
         return 0
     return 2

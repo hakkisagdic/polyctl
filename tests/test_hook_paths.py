@@ -1498,3 +1498,202 @@ def test_doctor_advises_adopting_the_project_in_one_command(tmp_path, monkeypatc
     assert cli.PROJECT_ADOPT_COMMAND in problems["commit-hook"]
     assert "restore tracked hooks with Git" not in problems["commit-hook"]
     assert "polyctl hooks install" not in problems["commit-hook"]
+
+
+def test_init_in_repo_with_own_pre_commit_and_tracked_custom_pre_push_succeeds_and_reports_push_guard_off(
+    tmp_path, monkeypatch, capsys
+):
+    root = _init_repo(tmp_path / "own-pre-push")
+    _make_current_polyctl_available(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "_reviewer_probe",
+        lambda probe_cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
+            "configured": True,
+            "ok": True,
+            "route": "fixture-reviewer",
+            "binary": sys.executable,
+            "version": "fixture",
+            "reason": "exact nonce echoed",
+            "kind": "success",
+        },
+    )
+    hooks = root / ".githooks"
+    hooks.mkdir()
+    pre_commit = hooks / "pre-commit"
+    pre_commit.write_bytes(cli._render_local_hook("pre-commit", "."))
+    pre_commit.chmod(0o755)
+    custom_push = b"#!/bin/sh\necho custom suite runner\n"
+    pre_push = hooks / "pre-push"
+    pre_push.write_bytes(custom_push)
+    pre_push.chmod(0o755)
+    (root / cli.PROJECT_MARKER).write_bytes(cli.PROJECT_MARKER_BYTES)
+    _git(root, "add", ".githooks/pre-commit", ".githooks/pre-push", cli.PROJECT_MARKER)
+    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "track hooks")
+    _git(root, "config", "core.hooksPath", ".githooks")
+
+    capsys.readouterr()
+    assert cli.cmd_init(_cfg(root), _init_args(profile="agy-codex")) == 0
+    out = _strip_colour(capsys.readouterr().out)
+
+    assert pre_push.read_bytes() == custom_push
+    assert "commit hook installed (execution proved)" in out
+    push_lines = [line.strip() for line in out.splitlines() if line.strip().startswith("push guard")]
+    assert len(push_lines) == 1
+    assert "off — push guard not installed here:" in push_lines[0]
+    assert "foreign / tracked" in push_lines[0]
+    assert "polyctl hooks install" in push_lines[0]
+
+    loaded = dict(A.load_config(str(root)), root=str(root))
+    facts = cli.status_facts(loaded)
+    assert facts["push_guard"].startswith("off (") and "foreign / tracked" in facts["push_guard"]
+    panel = _strip_colour(cli.render(loaded, facts=facts))
+    assert "push guard  off (" in panel
+
+    monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)
+    monkeypatch.setattr(A, "colour_enabled", lambda stream=None: True)
+    assert "commit-hook" not in dict(cli.doctor_problems(loaded))
+    cli.cmd_doctor(loaded, SimpleNamespace(check=False))
+    raw_doctor = capsys.readouterr().out
+    doctor = _strip_colour(raw_doctor)
+    assert re.search(r"^push guard\s+off \(.*foreign / tracked\)$", doctor, re.M)
+    for line in raw_doctor.splitlines():
+        if "push guard" in line or "push hook" in line:
+            assert "\033[33m" not in line and "\033[31m" not in line and "\033[2m" in line
+
+    # Init still refuses when pre-commit cannot be installed (tracked foreign pre-commit).
+    bad_repo = _init_repo(tmp_path / "bad-pre-commit")
+    bad_hooks = bad_repo / ".githooks"
+    bad_hooks.mkdir()
+    bad_commit = bad_hooks / "pre-commit"
+    bad_commit.write_bytes(b"#!/bin/sh\necho custom pre-commit\n")
+    bad_commit.chmod(0o755)
+    _git(bad_repo, "config", "core.hooksPath", ".githooks")
+    _git(bad_repo, "add", ".githooks/pre-commit")
+    _git(bad_repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "track foreign pre-commit")
+
+    capsys.readouterr()
+    assert cli.cmd_init(_cfg(bad_repo), _init_args(profile="agy-codex")) == 1
+    refused = _strip_colour(capsys.readouterr().out)
+    assert "init refused: commit hooks cannot be installed" in refused
+    assert "pre-commit hook at" in refused and "foreign / tracked" in refused
+
+
+def test_init_in_project_with_existing_state_keeps_every_file_and_writes_only_what_is_missing(
+    tmp_path, monkeypatch, capsys
+):
+    root = _init_repo(tmp_path / "hand-setup")
+    _make_current_polyctl_available(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "_reviewer_probe",
+        lambda probe_cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
+            "configured": True,
+            "ok": True,
+            "route": "gpt",
+            "binary": sys.executable,
+            "version": "fixture",
+            "reason": "exact nonce echoed",
+            "kind": "success",
+        },
+    )
+    hooks = root / ".githooks"
+    hooks.mkdir()
+    (hooks / "pre-commit").write_bytes(cli._render_local_hook("pre-commit", "."))
+    (hooks / "pre-commit").chmod(0o755)
+    (hooks / "pre-push").write_bytes(b"#!/bin/sh\necho custom pre-push\n")
+    (hooks / "pre-push").chmod(0o755)
+    (root / cli.PROJECT_MARKER).write_bytes(cli.PROJECT_MARKER_BYTES)
+    _git(root, "add", ".githooks/pre-commit", ".githooks/pre-push", cli.PROJECT_MARKER)
+    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "hooks and marker")
+    _git(root, "config", "core.hooksPath", ".githooks")
+
+    (root / ".polyctl" / "ledger").mkdir(parents=True)
+    hand_config = (
+        '{\n'
+        '  "project": "hand-setup",\n'
+        '  "round_budget": 4,\n'
+        '  "actors": {\n'
+        '    "opus": {"adapter": "claude-code", "model": "claude-opus-4-7", "session": "auto"},\n'
+        '    "gpt": {"adapter": "codex", "model": "gpt-6-luna"}\n'
+        '  },\n'
+        '  "roles": {\n'
+        '    "architect": "opus",\n'
+        '    "implementer": "opus",\n'
+        '    "reviewer": "gpt"\n'
+        '  }\n'
+        '}\n'
+    ).encode("utf-8")
+    existing_files = {
+        ".polyctl-project": cli.PROJECT_MARKER_BYTES,
+        ".polyctl/config.json": hand_config,
+        ".polyctl/gates.json": b'{\n  "gates": {"pytest": {"run": "pytest -q", "expect": "exit_zero", "timeout": 60}},\n'
+                               b'  "profiles": {"quick": ["pytest"], "full": ["pytest"]},\n'
+                               b'  "default_profile": "quick"\n}\n',
+        ".polyctl/board.md": b"# Board\n\n## running\n\n- [S1] custom slice\n\n## queued\n\n## done\n",
+        ".polyctl/backlog.md": b"# Backlog\n\n- custom item\n",
+        ".polyctl/authority.md": b"# Authority\n\n- custom rule\n",
+        ".polyctl/ledger/authority.jsonl": b'{"granted": true, "token": "T-1"}\n',
+        ".polyctl/ledger/decisions.jsonl": b'{"id": "D-1", "decision": "keep custom state"}\n',
+    }
+    for rel, payload in existing_files.items():
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+
+    capsys.readouterr()
+    assert cli.cmd_init(_cfg(root), _init_args(profile="agy-codex", agent="kiro")) == 0
+    out = _strip_colour(capsys.readouterr().out)
+
+    for rel, payload in existing_files.items():
+        assert (root / rel).read_bytes() == payload, f"{rel} was modified"
+        assert f"kept   {rel}" in out
+
+    for rel in (
+        ".polyctl/PLAYBOOK.md",
+        ".kiro/steering/polyctl-playbook.md",
+        ".kiro/steering/polyctl-coordination.md",
+        ".polyctl/init-manifest.json",
+    ):
+        assert (root / rel).is_file(), f"{rel} was not written"
+        assert re.search(rf"wrote\s+{re.escape(rel)}\b", out), f"{rel} not reported as wrote"
+
+    # Second run keeps the newly written files and the manifest too.
+    manifest_bytes = (root / ".polyctl" / "init-manifest.json").read_bytes()
+    capsys.readouterr()
+    assert cli.cmd_init(_cfg(root), _init_args(profile="agy-codex", agent="kiro")) == 0
+    second_out = _strip_colour(capsys.readouterr().out)
+    assert (root / ".polyctl" / "config.json").read_bytes() == hand_config
+    assert (root / ".polyctl" / "init-manifest.json").read_bytes() == manifest_bytes
+    assert "kept   .polyctl/init-manifest.json" in second_out
+
+
+def test_init_in_a_clone_of_this_repository_leaves_gitignore_unchanged(
+    tmp_path, monkeypatch, capsys
+):
+    repo = Path(__file__).resolve().parent.parent
+    repo_gitignore = (repo / ".gitignore").read_bytes()
+    assert cli._gitignore_block(cli.POLYCTL_GITIGNORE).encode("utf-8") in repo_gitignore
+
+    clone = _init_repo(tmp_path / "clone")
+    (clone / ".gitignore").write_bytes(repo_gitignore)
+    monkeypatch.setattr(
+        cli,
+        "_reviewer_probe",
+        lambda probe_cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
+            "configured": True,
+            "ok": True,
+            "route": "fixture-reviewer",
+            "binary": sys.executable,
+            "version": "fixture",
+            "reason": "exact nonce echoed",
+            "kind": "success",
+        },
+    )
+
+    assert cli.cmd_init(_cfg(clone), _init_args(profile="agy-codex", no_mcp=False)) == 0
+    assert (clone / ".gitignore").read_bytes() == repo_gitignore
+    assert cli.cmd_init(_cfg(clone), _init_args(profile="agy-codex", no_mcp=True)) == 0
+    assert (clone / ".gitignore").read_bytes() == repo_gitignore
+    _, _, removed_count, unclaimed = cli._gitignore_without_polyctl(str(clone))
+    assert removed_count == 1 + len(cli.POLYCTL_GITIGNORE) and unclaimed == []

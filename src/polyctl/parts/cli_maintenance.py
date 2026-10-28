@@ -2346,13 +2346,18 @@ def cmd_doctor(cfg, args):
             active = _active_hook_targets(hook_inventory)
             enrollment = _project_enrollment(root)
             install_problem = _hook_install_problem(enrollment)
+            own_push = _own_pre_push_target(hook_inventory)
             for role, label in (("pre-commit", "commit hook"), ("pre-push", "push hook")):
                 target = active[role]
                 base = _state_base(target["static_state"])
                 current = base in ("current-local", "current-scoped")
-                tone = C["green"] if current else C["yellow"]
+                tone = (
+                    C["green"]
+                    if current
+                    else (C["dim"] if role == "pre-push" and own_push is not None else C["yellow"])
+                )
                 notes = []
-                if install_problem:
+                if install_problem and not (role == "pre-push" and own_push is not None):
                     tone = C["yellow"]
                     notes.append(install_problem)
                 elif role == "pre-commit" and not current:
@@ -2363,6 +2368,11 @@ def cmd_doctor(cfg, args):
                 print(
                     f"{label:<16}{tone}{target['static_state']} / "
                     f"{target['track_state']}{C['reset']}{suffix}"
+                )
+            if own_push is not None:
+                print(
+                    f"{'push guard':<16}{C['dim']}off ({own_push['path']} is the repository's own pre-push hook — "
+                    f"{own_push['static_state']} / {own_push['track_state']}){C['reset']}"
                 )
             for target in hook_inventory["targets"]:
                 if target["active"] or target["role"] != "pre-commit" \

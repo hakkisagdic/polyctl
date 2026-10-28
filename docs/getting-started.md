@@ -49,11 +49,16 @@ the phone; `polyctl init --language tr` has them in Turkish ([configuration](con
 *In polyctl since slice LEADS-ADAPTERS: `polyctl init` writes in the project alone, and keeps files already there.*
 Each file it makes - the marker, the first configuration, the board, backlog, authority and gates of
 `.polyctl`, the mailbox's README, a harness's coordination - is made exclusively: a file, folder or link
-that appears before the open is kept. A configuration that appears after init planned without one is
-named, and init exits 1 before writing the rest; run init again to plan from it.
-Existing configuration changes and the manifest are replaced whole. On POSIX a link at the manifest's
-name is replaced without following it; Windows refuses it. The same tree primitives write
-`.polyctl/project-key`; if that write is refused, the machine's registry keeps the name.
+that appears before the open is kept. In a project whose state already exists, `polyctl init` keeps every
+file it finds - `.polyctl/config.json`, `.polyctl/gates.json`, `.polyctl/board.md`, `.polyctl/backlog.md`,
+`.polyctl/authority.md` and `.polyctl/ledger/*.jsonl` - never overwriting the project's configuration, and
+writes only what is missing (the playbook, the skill, the steering and `.polyctl/init-manifest.json`),
+saying which it kept and which it wrote (INIT-OWN-PRE-PUSH). A configuration that appears after init
+planned without one is named, and init exits 1 before writing the rest; run init again to plan from it.
+Existing configuration changes (`--language`, `--review-tier same-family`) and a missing manifest are
+written whole. On POSIX a link at the manifest's name is replaced without following it; Windows refuses
+it. The same tree primitives write `.polyctl/project-key`; if that write is refused, the machine's
+registry keeps the name.
 
 What init adds to - the playbook, a rule file with `--rules`, an MCP registration - is read and replaced
 whole through no link. A rule link such as `CLAUDE.md -> AGENTS.md` is named and accepted when it resolves
@@ -85,15 +90,20 @@ polyctl init --implementer claude-code --review-tier person
 
 Where `polyctl init` would refuse a `full` setup because no independent reviewer is available
 (for example, the reviewer binary is missing or a same-family reviewer was given no `--review-tier`) or
-because Git hooks cannot be installed at all (a redirected repository, an unknown enrollment, a hook path
-that is not a directory, a foreign hook, or a shared hooks path on Windows), it refuses with nothing
-written and says how a person can start in `lite` mode instead: `polyctl mode lite --by <name>`, then
-`polyctl init` (for a shared hooks path elsewhere, `polyctl init` succeeds and names
-`polyctl hooks install --allow-shared-hooks` as the next step). `lite` is the basic setup without
-enforcement: no reviewer probe and no commit hooks, `polyctl commit` refuses because there is no gate to
-commit through, and every surface that reads the mode (`polyctl status`, `polyctl doctor`, the MCP status)
-says plainly `enforcement: off - lite` that nothing is enforced ([safety](safety.md)). Once an
-independent reviewer route and hooks are ready, switch the project to `full` mode:
+because the `pre-commit` commit hook cannot be installed or kept current (a redirected repository, an
+unknown enrollment, a hook path that is not a directory, a foreign or tracked non-polyctl `pre-commit`
+hook, or a shared hooks path on Windows), it refuses with nothing written and says how a person can start
+in `lite` mode instead: `polyctl mode lite --by <name>`, then `polyctl init` (for a shared hooks path
+elsewhere, `polyctl init` succeeds and names `polyctl hooks install --allow-shared-hooks` as the next
+step). The commit gate is the `pre-commit` hook: a `pre-push` hook the repository keeps - tracked or not,
+not polyctl's - is left byte for byte by `polyctl init` and `polyctl mode full`, `polyctl init` reports in
+one line that the push guard is off (why it is not installed here and what installing it would take), and
+`polyctl status` and `polyctl doctor` show the push guard as off rather than an error (INIT-OWN-PRE-PUSH).
+`lite` is the basic setup without enforcement: no reviewer probe and no commit hooks, `polyctl commit`
+refuses because there is no gate to commit through, and every surface that reads the mode
+(`polyctl status`, `polyctl doctor`, the MCP status) says plainly `enforcement: off - lite` that nothing
+is enforced ([safety](safety.md)). Once an independent reviewer route and hooks are ready, switch the
+project to `full` mode:
 
 ```bash
 polyctl mode show                         # the current mode and what each mode does and does not protect

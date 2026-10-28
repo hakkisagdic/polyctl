@@ -1082,6 +1082,32 @@ def _active_hook_targets(inv):
     return {target["role"]: target for target in inv["targets"] if target["active"]}
 
 
+def _own_pre_push_target(inv):
+    """The active pre-push target when the repository keeps a non-polyctl pre-push hook (tracked or not), else None."""
+    if inv.get("error"):
+        return None
+    target = _active_hook_targets(inv).get("pre-push")
+    if not target:
+        return None
+    if _state_base(target["static_state"]) in ("absent", "current-local", "current-scoped", "legacy"):
+        return None
+    return target
+
+
+def _own_pre_push_line(target):
+    """One-line summary when a repository keeps its own pre-push hook (INIT-OWN-PRE-PUSH)."""
+    how = (
+        f"remove {target['path']} from the repository and run `polyctl hooks install`"
+        if target["track_state"] == "tracked"
+        else f"remove or move {target['path']} aside and run `polyctl hooks install`"
+    )
+    return (
+        f"off — push guard not installed here: {target['path']} is the repository's own pre-push hook "
+        f"({target['static_state']} / {target['track_state']}) and was left as it is; "
+        f"to install polyctl's push guard, {how}"
+    )
+
+
 def _hook_execution_probe(inv):
     """Prove that Git resolves and executes polyctl's active pre-commit hook.
 
