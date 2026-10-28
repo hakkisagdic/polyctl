@@ -17,11 +17,14 @@ class Polyctl < Formula
 
   def install
     virtualenv_install_with_resources
+    bin.install_symlink "polyctl" => "pctl" unless (bin/"pctl").exist?
   end
 
   test do
     # `adapters` reads packaged data, so it fails loudly if the JSON files did not
     # ship — the one packaging mistake that a plain `--help` would not catch.
+    assert_equal shell_output("#{bin}/polyctl --version"), shell_output("#{bin}/pctl --version")
+    assert_match "usage: pctl", shell_output("#{bin}/pctl --help")
     assert_match "kiro", shell_output("#{bin}/polyctl adapters")
     assert_match "usage", shell_output("#{bin}/polyctl lock")
   end

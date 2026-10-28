@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  polyctl - read-only observation on Windows, with nothing installed.
+  polyctl (or pctl, the short command) - read-only observation on Windows, with nothing installed.
 
 .DESCRIPTION
   Windows ships PowerShell and does not ship Python. That is the whole reason this
@@ -212,12 +212,17 @@ function Show-Doctor([string]$Root) {
   $py = Get-Command python, python3 -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($py) {
     Write-Host "python    $($py.Source)" -ForegroundColor Green
-    Write-Host "          full polyctl available: pip install polyctl" -ForegroundColor DarkGray
+    Write-Host "          full polyctl (and pctl) available: pip install polyctl" -ForegroundColor DarkGray
   } else {
     Write-Host "python    not found - this script is the read-only subset" -ForegroundColor Yellow
     Write-Host "          verify, commit-ok, hold, watchdog, mcp and a2a need Python" -ForegroundColor DarkGray
     Write-Host "          winget install Python.Python.3.12; pip install polyctl" -ForegroundColor DarkGray
   }
+}
+
+if ($PSCommandPath) {
+  Set-Alias -Name polyctl -Value $PSCommandPath
+  Set-Alias -Name pctl -Value $PSCommandPath
 }
 
 $r = Find-Root $Root

@@ -1,6 +1,6 @@
 # Komutlar
 
-Her `polyctl` komutu ve ne yaptığı. [README](../README.tr.md) her değişiklikte kullandığın beş komutla başlar; [başlarken](getting-started.md) ilk koşuyu adım adım anlatır.
+Her `polyctl` komutu ve ne yaptığı (`pctl` kısa komuttur: aynı ayrıştırıcı, aynı çıkış kodları, aynı `--version` satırı ve yazdığın komutu adlandıran yardım ile hata iletileri). [README](../README.tr.md) her değişiklikte kullandığın beş komutla başlar; [başlarken](getting-started.md) ilk koşuyu adım adım anlatır.
 
 | | |
 |---|---|

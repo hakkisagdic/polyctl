@@ -1,5 +1,7 @@
 # Windows
 
+polyctl 0.7.0 is built and supported on macOS; Linux runs the test suite in CI but is not a supported platform yet; on Windows 29 tests fail (WINDOWS-LANE-0.7, docs/backlog.md) and Windows waits for a later release.
+
 What works, what does not, and how hosted runners exercise it.
 
 *In polyctl since slice WINDOWS-TESTS-7: a link at a new mail's name stays untouched, including a link

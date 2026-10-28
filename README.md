@@ -15,6 +15,8 @@ has a model of another family review that change, and lets only that change comm
 refuses everything else at `git commit`, and every decision goes into a ledger that shows
 tampering.
 
+polyctl 0.7.0 is built and supported on macOS; Linux runs the test suite in CI but is not a supported platform yet; on Windows 29 tests fail (WINDOWS-LANE-0.7, docs/backlog.md) and Windows waits for a later release.
+
 ## Why
 
 - **Agents commit faster than anyone reads.** A test that passed on one tree says nothing about
@@ -110,6 +112,8 @@ watchdog starts without your shell can see an alias. On **Windows**, `bin/polyct
 Install polyctl outside the projects it governs, never into a `.venv` inside one: an agent can write there,
 and Python runs a `.pth` file it leaves before polyctl starts. polyctl names such a file and `polyctl doctor` names
 an installation inside the tree ([safety](docs/safety.md#what-python-runs-as-it-starts-from-inside-the-tree)).
+
+Until 0.7.0 polyctl was called ao, on PyPI ao-orchestrator, at github.com/hakkisagdic/agent-orchestrator (which GitHub now redirects); nothing of the old name is read any more - no command, variable, folder or format - and a project an older ao set up starts over with `polyctl init`.
 
 > **Where this came from.** Extracted from a 30-epic durable-workflow product built
 > over weeks by exactly this loop. Every guard in here exists because something went

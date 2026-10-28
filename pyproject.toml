@@ -38,6 +38,8 @@ Documentation = "https://github.com/hakkisagdic/polyctl/blob/main/docs/protocol.
 
 [project.scripts]
 polyctl = "polyctl.cli:main"
+# The short command; `poly` is not offered because a BlackArch tool already uses that name (POLYCTL-AFTER-RENAME).
+pctl = "polyctl.cli:main"
 polyctl-watchdog = "polyctl.watchdog:main"
 polyctl-api-review = "polyctl.api_review:main"
 

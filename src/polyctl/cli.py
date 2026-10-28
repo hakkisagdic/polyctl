@@ -64,15 +64,27 @@ A._part("cli_install", globals())
 A._part("cli_completion", globals())
 
 
-def build_parser(root=None):
+def _prog_name(prog=None):
+    """The command the person typed (`pctl` or `polyctl`), or `polyctl` when run from Python or pytest."""
+    raw = os.path.basename(str(prog if prog is not None else (sys.argv[0] if sys.argv else "polyctl"))).lower()
+    for suffix in ("-script.py", ".exe", ".ps1", ".cmd", ".bat", ".py"):
+        if raw.endswith(suffix):
+            raw = raw[:-len(suffix)]
+            break
+    return "pctl" if raw == "pctl" else "polyctl"
+
+
+def build_parser(root=None, prog=None):
     """The whole `polyctl` command line, built without running a command.
 
     main parses with it, and tests/test_docs_commands.py walks it, so a document that shows
     an invocation this parser refuses fails there rather than in a reader's terminal. Building
     it reads the adapter catalog once, for the --agent names init and skill share, the project's
-    own adapters among them where `root` names the project (HARNESS-SETUP-3).
+    own adapters among them where `root` names the project (HARNESS-SETUP-3). `prog` names the
+    command the person typed (`pctl` or `polyctl`) in help and error messages, while `--version`
+    prints `polyctl <version>` for both (POLYCTL-AFTER-RENAME).
     """
-    p = argparse.ArgumentParser(prog="polyctl", description="polyctl (observation layer)")
+    p = argparse.ArgumentParser(prog=_prog_name(prog), description="polyctl (observation layer)")
     p.add_argument("-C", "--root", help="project directory (default: nearest .polyctl/ or git root)")
     p.add_argument("--version", action="version", version=f"polyctl {__version__}")
     sub = p.add_subparsers(dest="cmd")
@@ -747,7 +759,7 @@ def build_parser(root=None):
     return p
 
 
-def main(argv=None):
+def main(argv=None, prog=None):
     """Run one `polyctl` command and return its exit status.
 
     Ordinary trouble ends in a line, not a traceback (CLI-ROBUST): an argument polyctl cannot read
@@ -759,10 +771,12 @@ def main(argv=None):
     process table the platform could not read stops the command where it was asked, and says
     so: what the command decides from it is not decided (WINDOWS-TABLE-CLOSED). A board that
     changed while a command read it is named with what to do, and nothing was moved
-    (SLICE-LIFECYCLE-2).
+    (SLICE-LIFECYCLE-2). Help and error messages name the command the person typed (`pctl` or
+    `polyctl`), while `--version` prints `polyctl <version>` for both (POLYCTL-AFTER-RENAME).
     """
     A.utf8_streams()
-    command, root = "polyctl", None
+    prog = _prog_name(prog)
+    command, root = prog, None
     try:
         # The project the command is for, read before the rest, so --agent knows its own adapters (HARNESS-SETUP-3).
         early = argparse.ArgumentParser(add_help=False, exit_on_error=False)
@@ -770,17 +784,17 @@ def main(argv=None):
         try:
             given = early.parse_known_args(argv)[0].root
         except argparse.ArgumentError:
-            given = None                        # the parser proper names what is wrong, as `polyctl`
-        p = build_parser(A.find_root(given if given and os.path.isdir(os.path.expanduser(given)) else None))
+            given = None                        # the parser proper names what is wrong, as `prog`
+        p = build_parser(A.find_root(given if given and os.path.isdir(os.path.expanduser(given)) else None), prog=prog)
         args = p.parse_args(argv)
         if args.root and not os.path.isdir(os.path.expanduser(args.root)):
             # Taken at face value, a missing directory showed an empty panel and exited 0.
             what = "not a directory" if os.path.exists(os.path.expanduser(args.root)) else "no such directory"
-            p.exit(2, f"polyctl: error: -C {args.root}: {what}\n")
+            p.exit(2, f"{prog}: error: -C {args.root}: {what}\n")
         if not getattr(args, "fn", None):
             p.print_help()
             return 0
-        command = f"polyctl {args.cmd}"
+        command = f"{prog} {args.cmd}"
         root = A.find_root(args.root)
         record = args.cmd != "export" and not (args.cmd == "watch" and getattr(args, "web", False))
         return args.fn(A.load_config(root, record=record), args) or 0

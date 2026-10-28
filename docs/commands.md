@@ -1,6 +1,6 @@
 # Commands
 
-Every `polyctl` command and what it does. The [README](../README.md) starts with the five you use for every change; [getting started](getting-started.md) is the first run, step by step.
+Every `polyctl` command and what it does (`pctl` is the short command: the same parser, the same exit codes, the same `--version` line, and help and error messages that name the command you typed). The [README](../README.md) starts with the five you use for every change; [getting started](getting-started.md) is the first run, step by step.
 
 | | |
 |---|---|

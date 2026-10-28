@@ -16,6 +16,8 @@ tam kendisinde gate'lerini koşturur, o değişikliği başka aileden bir modele
 yalnızca o değişikliğin commit edilmesine izin verir. Gerisini hook `git commit` anında reddeder;
 her karar, kurcalandığını belli eden bir deftere yazılır.
 
+polyctl 0.7.0 macOS üzerinde geliştirilir ve desteklenir; Linux CI'da test paketini çalıştırır ancak henüz desteklenen bir platform değildir; Windows'ta 29 test başarısız olur (WINDOWS-LANE-0.7, docs/backlog.md) ve Windows sonraki bir sürümü bekler.
+
 ## Neden
 
 - **Ajanlar kimsenin okuyabileceğinden hızlı commit eder.** Bir ağaçta geçen test, commit edilen
@@ -113,6 +115,8 @@ polyctl'i yönettiği projelerin dışına kur, asla birinin içindeki bir `.ven
 yazabilir ve Python, orada bıraktığı bir `.pth` dosyasını polyctl başlamadan çalıştırır. polyctl böyle bir
 dosyanın adını verir, `polyctl doctor` da ağacın içindeki bir kurulumu söyler
 ([safety](docs/safety.md#what-python-runs-as-it-starts-from-inside-the-tree)).
+
+0.7.0'a kadar polyctl'in adı ao'ydu (PyPI'da ao-orchestrator, GitHub'ın artık yönlendirdiği github.com/hakkisagdic/agent-orchestrator adresinde); eski addan hiçbir şey - ne komut, ne değişken, ne klasör ne de biçim - artık okunmaz ve eski bir ao'nun kurduğu proje `polyctl init` ile baştan başlar.
 
 > **Nereden çıktı.** Haftalarca tam olarak bu döngüyle geliştirilen 30 epic'lik
 > dayanıklı-iş-akışı ürününden çıkarıldı. Buradaki her koruma önce bir şey ters
