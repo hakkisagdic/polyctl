@@ -898,3 +898,38 @@ def test_otlp_snapshot_excludes_uncommitted_row_that_rolls_back(project, monkeyp
     assert slice_res_attrs["polyctl.export.partial"] is True
     assert slice_res_attrs["polyctl.export.unattested_ledgers"] == "slices.jsonl"
     assert A.export_otlp(root) == baseline_export
+
+
+def test_otlp_exports_all_waiver_ids_from_combined_grant_and_commit_trailer(project):
+    seeded = _seed_two_slices(project)
+    root = project["root"]
+    with _at_epoch(1700001100):
+        rwaiver = A.waive(root, "review", "SLICE-A", "reviewer unavailable", by="alice (owner)")
+        gwaiver = A.waive(root, "gates", "SLICE-A", "focused timed out", by="alice (owner)", gates="focused")
+    with _at_epoch(1700001150):
+        grant = A.record_authority(
+            root,
+            True,
+            [],
+            A.tree_digest(root, project),
+            seeded["ver_a_id"],
+            "C-combined-waivers",
+            candidate=seeded["cand_a_obj"],
+            scope=A.candidate_scope(seeded["cand_a_obj"]),
+            waiver=rwaiver["id"],
+            gates_waiver=gwaiver["id"],
+            waived_gates=["focused"],
+        )
+    trailers = dict(A.grant_trailers(grant))
+    assert trailers["Polyctl-Waiver"] == f"{rwaiver['id']}, {gwaiver['id']}"
+
+    doc = A.export_otlp(root)
+    spans = doc["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    grant_spans = [
+        _attr_map(s["attributes"])
+        for s in spans
+        if s["name"] == "grant"
+        and _attr_map(s["attributes"]).get("polyctl.waiver.id") == f"{rwaiver['id']}, {gwaiver['id']}"
+    ]
+    assert len(grant_spans) == 1
+    assert grant_spans[0]["polyctl.slice"] == "SLICE-A"

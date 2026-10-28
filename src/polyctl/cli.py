@@ -640,10 +640,10 @@ def build_parser(root=None, prog=None):
                                     "otherwise 0, whether it made progress or had nothing to do.")
     cu.add_argument("--boundary", help="replace the range's commit claims with a person's boundary; needs --by")
     cu.add_argument("--plan", action="store_true",
-                    help="list each open review waiver, its range, commits and changed lines, whether it closes "
-                         "by proof, and the totals; review nothing and write nothing")
-    cu.add_argument("--limit", type=int, help="start at most this many reviews in this run; what needs no review is "
-                                              "still done")
+                    help="list each open review or gates waiver, its range, commits and changed lines or waived gates, "
+                         "whether it closes by proof, and the totals; run nothing and write nothing")
+    cu.add_argument("--limit", type=int, help="start at most this many gate re-runs and reviews in this run; what needs "
+                                              "neither is still done")
     cu.add_argument("--slice", help="only the waivers for this slice")
     cu.add_argument("--author-family", dest="author_family",
                     help="a person names the model family that wrote the waived ranges, for those whose grant "

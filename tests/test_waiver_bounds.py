@@ -517,3 +517,92 @@ def test_gates_waiver_with_review_enabled_checks_review_and_combines_waiver_trai
     capsys.readouterr()
     assert [item["waiver"]["id"] for item in A.review_waiver_ranges(root) if item["landed"]] == [rwaiver["id"]]
     assert [item["waiver"]["id"] for item in A.gates_waiver_ranges(root) if item["landed"]] == [gwaiver["id"]]
+
+    otlp_doc = A.export_otlp(root, cfg=on_cfg, attested=True)
+    otlp_spans = otlp_doc["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    waiver_attrs = {
+        span["name"]: {
+            item["key"]: item["value"].get("stringValue")
+            for item in span.get("attributes", [])
+        }.get("polyctl.waiver.id")
+        for span in otlp_spans
+        if span["name"] in ("grant", "commit")
+    }
+    assert waiver_attrs == {
+        "grant": f"{rwaiver['id']}, {gwaiver['id']}",
+        "commit": f"{rwaiver['id']}, {gwaiver['id']}",
+    }
+
+
+def test_catchup_limit_bounds_gate_reruns_and_reports_expired_failing_gates_waivers_and_configured_wait(
+    project, monkeypatch, capsys
+):
+    from polyctl import watchdog as W
+    from tests.conftest import review_off
+    cfg = review_off(project)
+    root = cfg["root"]
+    monkeypatch.setattr(W, "run", lambda ns: 0)
+    monkeypatch.setattr(A, "plan_drift", lambda r: [])
+    monkeypatch.setattr(A, "hold_state", lambda r: None)
+    monkeypatch.setattr(A, "urgent_messages", lambda *a, **kw: [])
+
+    parser = cli.build_parser()
+    catchup_help = next(
+        sub for action in parser._actions if isinstance(action, cli.argparse._SubParsersAction)
+        for name, sub in action.choices.items() if name == "catchup"
+    ).format_help()
+    assert "gates waiver" in catchup_help and "waived gates" in catchup_help
+    assert "gate re-runs and reviews" in catchup_help
+    assert "waived gates" in cli.cmd_catchup.__doc__
+    assert cli.cmd_catchup(cfg, SimpleNamespace(boundary=None, limit=0)) == 2
+    assert "gate re-runs and reviews" in capsys.readouterr().out
+
+    _stage(root, "base.py", "x = 1\n")
+    _commit(root, "base")
+    _running(root, "MIGRATION-1", "MIGRATION-2")
+
+    cand1 = _stage(root, "one.md", "one\n")
+    _record_failed_verification(root, cand1, failed_gates=("focused",), vid="V-10")
+    w1 = A.waive(root, "gates", "MIGRATION-1", "focused timed out", by="alice (owner)", gates="focused")
+    assert _commit_ok(cfg, capsys)[0] == 0
+    assert cli.cmd_commit(cfg, SimpleNamespace(message="docs: one", file=None)) == 0
+    capsys.readouterr()
+
+    cand2 = _stage(root, "two.md", "two\n")
+    _record_failed_verification(root, cand2, failed_gates=("focused",), vid="V-11")
+    w2 = A.waive(root, "gates", "MIGRATION-2", "focused timed out again", by="alice (owner)", gates="focused")
+    assert _commit_ok(cfg, capsys)[0] == 0
+    assert cli.cmd_commit(cfg, SimpleNamespace(message="docs: two", file=None)) == 0
+    capsys.readouterr()
+
+    # --plan with --limit 1 plans only the first gate re-run and holds the second for a later run.
+    assert cli.cmd_catchup(cfg, SimpleNamespace(boundary=None, plan=True, limit=1)) == 0
+    plan_out = capsys.readouterr().out
+    assert f"{w1['id']} (MIGRATION-1)" in plan_out and "re-run waived gates (focused)" in plan_out
+    assert f"{w2['id']} (MIGRATION-2)" not in plan_out
+    assert "--limit 1: 1 waiver(s) wait for a later run" in plan_out
+    assert "1 gate re-run(s)" in plan_out
+
+    # Configured `gates.default_timeout` is passed to `_take_gate_lock` instead of a fixed 900s wait.
+    lock_waits = []
+    real_take_lock = cli._take_gate_lock
+    monkeypatch.setattr(
+        cli, "_take_gate_lock",
+        lambda c, wait: lock_waits.append(wait) or real_take_lock(c, 0),
+    )
+    cfg_with_timeout = {**cfg, "gates": {"default_timeout": 120}}
+
+    # With --limit 1, catchup runs only the first gate re-run; when it fails on an expired waiver,
+    # open_waiver_report (used by doctor and status) says catchup fails on it rather than only "expired".
+    monkeypatch.setattr(cli, "_run_gate", lambda c, g, work_dir: ("still failing\n", 1))
+    assert cli.cmd_catchup(cfg_with_timeout, SimpleNamespace(boundary=None, limit=1)) == 1
+    run_out = capsys.readouterr().out
+    assert f"{w1['id']} stays open" in run_out
+    assert "--limit 1: 1 waiver(s) wait for a later run" in run_out
+    assert lock_waits == [120]
+
+    report_lines = A.open_waiver_report(root, now=w1["expires"] + 3600)
+    w1_line = next(line for line in report_lines if line.startswith(w1["id"]))
+    w2_line = next(line for line in report_lines if line.startswith(w2["id"]))
+    assert "expired, catchup fails on it (focused (exit 1))" in w1_line
+    assert "expired, by alice (owner)" in w2_line and "catchup fails on it" not in w2_line

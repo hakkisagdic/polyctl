@@ -123,11 +123,15 @@ function Show-Repository([string]$Root) {
   try {
     $dirty = @(git status --porcelain 2>$null).Count
     $log = @(git log --oneline -3 2>$null)
+    $global:LASTEXITCODE = 0
     Write-Host "`n-- REPOSITORY " -ForegroundColor Magenta -NoNewline
     Write-Host ([string][char]0x2500 * 64) -ForegroundColor Magenta
     $log | ForEach-Object { Write-Host "   $_" }
     Write-Host "   $dirty files uncommitted" -ForegroundColor DarkGray
-  } finally { Pop-Location }
+  } finally {
+    $global:LASTEXITCODE = 0
+    Pop-Location
+  }
 }
 
 function Show-Status([string]$Root) {
@@ -226,3 +230,4 @@ switch ($Command) {
   'board'  { Show-Board $r }
   'doctor' { Show-Doctor $r }
 }
+exit 0

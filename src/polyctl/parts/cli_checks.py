@@ -1817,8 +1817,10 @@ def _catchup_exit(failed, started, decided):
 
 
 def cmd_catchup(cfg, args):
-    """Replay what could not run: waived reviews, deferred wakes and nudges.
+    """Replay what could not run: waived reviews and waived gates, deferred wakes and nudges.
 
+    A gates waiver re-runs the waived gates on the landed commit under the gate definitions
+    that the grant's verification bound, and closes when they pass (WAIVE-GATES).
     A waived range is reviewed by a model family other than the one that wrote it (#65):
     the family the grant under the waiver recorded, and any a person names with
     --author-family and --by. With neither, its review is refused and the waiver stays
@@ -1831,7 +1833,7 @@ def cmd_catchup(cfg, args):
     review stays synchronous: a waiver closes in the same run, on the review recorded for
     exactly its range, or stays open. A range whose last review decided nothing waits behind
     the rest, and once a review finds the reviewer unavailable the run starts no other. --limit
-    bounds the reviews a run starts in the same way: what needs no review is still done.
+    bounds the gate re-runs and reviews a run starts in the same way: what needs neither is still done.
 
     A person's review of exactly a waived range (`polyctl person-review --commits <range>`) closes
     its waiver with no reviewer started (REVIEW-TIERS): a person is of no model family, so the
@@ -1839,9 +1841,9 @@ def cmd_catchup(cfg, args):
     range: its grant recorded the family that wrote it, never the model.
 
     The exit code says what a run did (CATCHUP-POLISH): 3 when it started reviews and none of
-    them decided anything, whatever else it closed; 1 when a close, a ledger or a decision
-    request could not be written or read; 2 when it is refused; otherwise 0, for progress and
-    for nothing to do alike. --plan exits 0, or 1 when the waivers cannot be read.
+    them decided anything, whatever else it closed; 1 when a waived gate failed or a close, a ledger
+    or a decision request could not be written or read; 2 when it is refused; otherwise 0, for progress
+    and for nothing to do alike. --plan exits 0, or 1 when the waivers cannot be read.
     """
     from types import SimpleNamespace
     from .storage import LedgerCorruption
@@ -1858,9 +1860,9 @@ def cmd_catchup(cfg, args):
         print(refusal)
         return 2
     if limit is not None and limit < 1:
-        print("--limit is at least 1: the number of reviews this run may start")
+        print("--limit is at least 1: the number of gate re-runs and reviews this run may start")
         return 2
-    did = started = decided = held = waiting = 0
+    did = started = reruns = decided = held = waiting = 0
     unavailable = None                          # the waiver whose review found the reviewer unavailable
     failed = []
     totals = {"waivers": 0, "commits": 0, "lines": 0, "unnamed": 0, "proven": 0}      # what --plan sums up
@@ -1939,17 +1941,25 @@ def cmd_catchup(cfg, args):
         rng = f"{item['start'][:12]}..{item['end'][:12]}"
         waived_names = item.get("waived_gates") or w.get("gates") or []
         gate_list = ", ".join(waived_names) if waived_names else "profile gates"
+        if limit is not None and (started + reruns) >= limit:
+            waiting += 1
+            continue
+        reruns += 1
         if plan:
             print(f"  {label}: {rng}: re-run waived gates ({gate_list}) on {item['end'][:12]}")
             continue
         print(f"  {label}: re-running waived gates ({gate_list}) on {rng}")
-        ok, ran_names, detail = _rerun_waived_gates(cfg, root, item)
+        ok, ran_names, detail = _rerun_waived_gates(cfg, root, item, getattr(args, "wait", None))
         if ok:
             evidence = {"commits": f"{item['start']}..{item['end']}", "grant": item.get("grant"), "gates": ran_names}
             if close(w["id"], f"waived gates passed on {rng}: {', '.join(ran_names)}", evidence):
                 print(f"  {label}: {rng}: waived gates passed ({', '.join(ran_names)}); closed")
                 did += 1
         else:
+            try:
+                A.fail_waiver(root, w["id"], detail)
+            except Exception:
+                pass
             print(f"  {label}: {rng}: waived gates failed ({detail}); {w['id']} stays open")
             failed.append(w["id"])
     for item in targets:
@@ -2046,10 +2056,10 @@ def cmd_catchup(cfg, args):
             # could spend the review's whole time budget finding that out again (OCT1-FIXES).
             held += 1
             continue
-        if limit is not None and started >= limit:
-            # --limit bounds the reviews a run starts, as an unavailable reviewer does, and nothing else. The
-            # run stopped at the limit instead, and said a waiver nothing was granted under waited for the
-            # next run, which would close it unreviewed (CATCHUP-POLISH).
+        if limit is not None and (started + reruns) >= limit:
+            # --limit bounds the gate re-runs and reviews a run starts, as an unavailable reviewer does, and
+            # nothing else. The run stopped at the limit instead, and said a waiver nothing was granted under
+            # waited for the next run, which would close it unreviewed (CATCHUP-POLISH, LOWS-0.7).
             waiting += 1
             continue
         started += 1
@@ -2133,7 +2143,8 @@ def cmd_catchup(cfg, args):
     if waiting:
         print(f"  --limit {limit}: {waiting} waiver(s) wait for a later run to review them")
     if plan:
-        print(f"totals: {totals['waivers']} waiver(s); {started} review(s) of {totals['commits']} commit(s) and "
+        rerun_part = f"{reruns} gate re-run(s); " if reruns else ""
+        print(f"totals: {totals['waivers']} waiver(s); {rerun_part}{started} review(s) of {totals['commits']} commit(s) and "
               f"{totals['lines']} changed line(s); {totals['unnamed']} refused until a person names the author's "
               f"family; {totals['proven']} closed by proof, with no reviewer; "
               f"{len(A.deferred_open(root))} deferred wake(s) and nudge(s) a run replays")

@@ -186,6 +186,7 @@ def test_update_asks_first_and_runs_nothing_without_a_yes(tmp_path, monkeypatch,
     env, package = _environment(tmp_path, "pipx", "polyctl")
     (env / "pipx_metadata.json").write_text("{}", encoding="utf-8")
     _running_from(monkeypatch, package=str(package), prefix=str(env))
+    real_confirm = cli._confirm
     answers = []
     monkeypatch.setattr(cli, "_confirm", lambda question: answers.pop(0))
 
@@ -194,9 +195,20 @@ def test_update_asks_first_and_runs_nothing_without_a_yes(tmp_path, monkeypatch,
     assert _plain(capsys).rstrip().endswith("not run")
 
     answers.append(None)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     assert cli.cmd_update({}, ASK) == 1 and _started(log) is None
-    assert "standard input is not a terminal; run it again with --yes" in _plain(capsys)
+    assert "not run: nobody can answer here, standard input is not a terminal; run it again with --yes" in _plain(capsys)
 
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(cli, "_confirm", real_confirm)
+    monkeypatch.setattr(sys, "stdin", Terminal(""))
+    assert cli.cmd_update({}, ASK) == 1 and _started(log) is None
+    assert "not run: nobody can answer here, standard input ended before an answer came; run it again with --yes" in _plain(capsys)
+
+    monkeypatch.setattr(cli, "_confirm", lambda question: answers.pop(0))
     answers.append(True)
     assert cli.cmd_update({}, ASK) == 0 and _started(log)[1:] == ["upgrade", "polyctl"]
 

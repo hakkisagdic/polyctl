@@ -460,7 +460,7 @@ def cmd_merge_check(cfg, args):
     return 0 if ok else 1
 
 
-def _rerun_waived_gates(cfg, root, item):
+def _rerun_waived_gates(cfg, root, item, wait=None):
     """(passed, ran_names, detail) from re-running a gates waiver's waived gates on its landed commit (WAIVE-GATES)."""
     import shutil
     import tempfile
@@ -500,7 +500,8 @@ def _rerun_waived_gates(cfg, root, item):
         outside = [name for name in names if name not in profile_gates]
         if outside:
             return False, [], f"gate {', '.join(outside)} is not in profile {profile}"
-    release = _take_gate_lock(cfg, 900)
+    lock_wait = S.get(cfg, "gates.default_timeout") if wait is None else wait
+    release = _take_gate_lock(cfg, lock_wait)
     if release is None:
         return False, names, "machine gate lock stayed busy"
     scratch = tempfile.mkdtemp(prefix="polyctl-catchup-gates-")

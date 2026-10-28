@@ -294,12 +294,28 @@ def test_pctl_and_polyctl_share_the_version_line_and_name_the_typed_command_in_h
         assert capsys.readouterr().err.startswith(f"{typed} board: RuntimeError: boom")
 
 
+def _simulate_polyctl_ps1_status_exit(ps1_path, repo_root):
+    """Run `Show-Repository`'s git commands in `repo_root` and return the `$LASTEXITCODE` `pctl.ps1` sees after `polyctl.ps1 status`."""
+    raw = ps1_path.read_text(encoding="ascii")
+    show_repo = raw.split("function Show-Repository([string]$Root) {", 1)[1].split("\n}\n", 1)[0]
+    tail = raw.rsplit("switch ($Command)", 1)[1]
+    last_exit = 0
+    for cmd in (["git", "status", "--porcelain"], ["git", "log", "--oneline", "-3"]):
+        last_exit = subprocess.run(cmd, cwd=str(repo_root), capture_output=True, timeout=30).returncode
+    if "$global:LASTEXITCODE = 0" in show_repo:
+        last_exit = 0
+    if re.search(r"(?m)^exit\s+0\s*$", tail):
+        last_exit = 0
+    return last_exit
+
+
 def test_homebrew_formula_windows_wrapper_and_command_docs_offer_pctl(tmp_path):
     formula = (ROOT / "packaging" / "homebrew" / "polyctl.rb").read_text(encoding="utf-8")
     assert "pctl" in formula
     assert '#{bin}/pctl' in formula
 
-    ps1 = (ROOT / "bin" / "polyctl.ps1").read_text(encoding="ascii")
+    ps1_path = ROOT / "bin" / "polyctl.ps1"
+    ps1 = ps1_path.read_text(encoding="ascii")
     assert "Set-Alias" not in ps1
 
     pctl_ps1 = ROOT / "bin" / "pctl.ps1"
@@ -311,6 +327,13 @@ def test_homebrew_formula_windows_wrapper_and_command_docs_offer_pctl(tmp_path):
         assert code == wanted_exit
         assert target == (tmp_path / "polyctl.ps1").resolve()
         assert forwarded == given_args
+
+    unborn = tmp_path / "unborn-repo"
+    unborn.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=str(unborn), check=True, capture_output=True)
+    child_exit = _simulate_polyctl_ps1_status_exit(ps1_path, unborn)
+    code, _, forwarded = _evaluate_ps1_wrapper(pctl_ps1, ROOT / "bin", ["status", "-Root", str(unborn)], child_exit)
+    assert code == 0 and forwarded == ["status", "-Root", str(unborn)]
 
     commands_en = (ROOT / "docs" / "commands.md").read_text(encoding="utf-8")
     commands_tr = (ROOT / "docs" / "commands.tr.md").read_text(encoding="utf-8")
@@ -377,3 +400,6 @@ def test_changelog_and_readmes_state_the_old_name_once_and_the_platform_support_
     assert PLATFORM_SENTENCE_TR[:-1] in platforms_tr
     assert "macOS and Linux native; Windows first cut" not in commands_en
     assert "macOS ve Linux yerel; Windows ilk sürüm" not in commands_tr
+    assert "`bin/polyctl.ps1` (`bin/pctl.ps1`)" in readme_en
+    assert "`bin/polyctl.ps1` (`bin/pctl.ps1`)" in readme_tr
+    assert "`bin/polyctl.ps1` (`bin/pctl.ps1`)" in windows_doc

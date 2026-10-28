@@ -303,7 +303,7 @@ def _harness_seen(cfg, args):
     if ask:
         answer = _confirm(f"Record exactly these as seen by {A.shown_text(by)}? [y/N] ")
         if not answer:
-            print("Nothing was recorded" + (": nobody can answer here, standard input is not a terminal; read the "
+            print("Nothing was recorded" + (f": nobody can answer here, {_no_answer_why()}; read the "
                                             f"changes above, then `polyctl harness seen --by {named} --digest {digest}` "
                                             f"records them{unquotable}" if answer is None else "."))
             return 1

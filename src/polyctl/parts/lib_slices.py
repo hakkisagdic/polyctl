@@ -2361,13 +2361,14 @@ _OTLP_VOCAB_ALLOWLIST = {
         "GRANTED", "REFUSED", "LANDED",
     }),
 }
+_OTLP_WAIVER_ID = re.compile(r"^W-\d+(?:-\d+)?$")
 _OTLP_PATTERN_ALLOWLIST = {
     "service.version": re.compile(r"^\d+\.\d+\.\d+(?:[-+._][0-9A-Za-z._-]+)?$"),
     "polyctl.candidate": re.compile(r"^sha256:[0-9a-f]{64}$"),
     "polyctl.commit.sha": re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$"),
     "polyctl.commit.tree": re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$"),
     "polyctl.verification.id": re.compile(r"^V-(?:\d+|\d{8}-\d{6}-[0-9a-f]{8})$"),
-    "polyctl.waiver.id": re.compile(r"^W-\d+(?:-\d+)?$"),
+    "polyctl.waiver.id": re.compile(r"^W-\d+(?:-\d+)?(?:,\s*W-\d+(?:-\d+)?)*$"),
     "polyctl.review.id": re.compile(r"^\d{4}-?\d{2}-?\d{2}-\d{6}-(?:[0-9a-f]{7,40}|R-\d+)(?:-\d+)?\.md$"),
     "polyctl.implementer.actor": re.compile(r"^sha256:[0-9a-f]{16}$"),
     "polyctl.reviewer.actor": re.compile(r"^sha256:[0-9a-f]{16}$"),
@@ -2472,6 +2473,19 @@ def _otlp_adapter_catalog(cfg=None):
     return frozenset(declared), by_name
 
 
+def _otlp_waiver_ids(*values):
+    """Deduplicated allowlisted waiver ids from one or more raw strings or comma-joined trailers (LOWS-0.7)."""
+    out = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        for part in value.split(","):
+            token = part.strip()
+            if token and _OTLP_WAIVER_ID.fullmatch(token) and token not in out:
+                out.append(token)
+    return out
+
+
 def _otlp_allow_string(key, value, declared_families=None, declared_profiles=None):
     """Return `value` if and only if `(key, value)` belongs to the OTLP attribute allowlist."""
     if value is None or isinstance(value, bool):
@@ -2479,6 +2493,9 @@ def _otlp_allow_string(key, value, declared_families=None, declared_profiles=Non
     text = str(value).strip()
     if not text:
         return None
+    if key == "polyctl.waiver.id":
+        ids = _otlp_waiver_ids(text)
+        return ", ".join(ids) if ids and _OTLP_PATTERN_ALLOWLIST[key].fullmatch(text) else None
     if key == "polyctl.verification.profile":
         profiles = declared_profiles if declared_profiles is not None else _OTLP_VOCAB_ALLOWLIST[key]
         return text if text in profiles else None
@@ -2619,12 +2636,13 @@ def _otlp_resolve_grant(row, maps):
     itree = _otlp_allow_string("polyctl.commit.tree", cand.get("index_tree") or row.get("tree"))
     vid = _otlp_allow_string("polyctl.verification.id", row.get("verification"))
     artefact = _otlp_allow_string("polyctl.review.id", os.path.basename(str(row.get("review") or "")))
-    wid = _otlp_allow_string("polyctl.waiver.id", row.get("waiver"))
+    wids = _otlp_waiver_ids(row.get("waiver"), row.get("gates_waiver"))
+    wid = ", ".join(wids) if wids else None
     cdigest = (
         _otlp_allow_string("polyctl.candidate", cand.get("digest"))
         or maps["verification_to_candidate"].get(vid)
         or maps["review_to_candidate"].get(artefact)
-        or maps["waiver_to_candidate"].get(wid)
+        or next((maps["waiver_to_candidate"][w] for w in wids if w in maps["waiver_to_candidate"]), None)
         or maps["tree_to_candidate"].get(itree)
     )
     review_row = maps["review_by_artefact"].get(artefact) or (
@@ -2637,7 +2655,7 @@ def _otlp_resolve_grant(row, maps):
     slice_id = (
         gslice
         or maps["review_to_slice"].get(artefact)
-        or maps["waiver_to_slice"].get(wid)
+        or next((maps["waiver_to_slice"][w] for w in wids if w in maps["waiver_to_slice"]), None)
         or maps["verification_to_slice"].get(vid)
         or maps["candidate_to_slice"].get(cdigest)
         or maps["tree_to_slice"].get(itree)
@@ -2648,6 +2666,7 @@ def _otlp_resolve_grant(row, maps):
         "vid": vid,
         "artefact": artefact,
         "wid": wid,
+        "wids": wids,
         "cdigest": cdigest,
         "slice_id": slice_id,
         "review_row": review_row,
@@ -2674,13 +2693,17 @@ def _otlp_resolve_commit(commit, maps):
         "polyctl.review.id",
         os.path.basename(str(trailers.get("review") or (grant_row or {}).get("review") or "")),
     )
-    raw_waiver = (trailers.get("waiver") or "").split(",")[0].strip() or (grant_row or {}).get("waiver")
-    wid = _otlp_allow_string("polyctl.waiver.id", raw_waiver)
+    wids = _otlp_waiver_ids(
+        trailers.get("waiver"),
+        (grant_row or {}).get("waiver"),
+        (grant_row or {}).get("gates_waiver"),
+    )
+    wid = ", ".join(wids) if wids else None
     cdigest = (
         _otlp_allow_string("polyctl.candidate", gcand.get("digest"))
         or maps["verification_to_candidate"].get(vid)
         or maps["review_to_candidate"].get(artefact)
-        or maps["waiver_to_candidate"].get(wid)
+        or next((maps["waiver_to_candidate"][w] for w in wids if w in maps["waiver_to_candidate"]), None)
         or maps["tree_to_candidate"].get(ctree)
     )
     review_row = (
@@ -2695,7 +2718,7 @@ def _otlp_resolve_commit(commit, maps):
         maps["commit_to_slice"].get(csha)
         or _otlp_allow_string("polyctl.slice", (grant_row or {}).get("slice") or gmove.get("slice"))
         or maps["review_to_slice"].get(artefact)
-        or maps["waiver_to_slice"].get(wid)
+        or next((maps["waiver_to_slice"][w] for w in wids if w in maps["waiver_to_slice"]), None)
         or maps["verification_to_slice"].get(vid)
         or maps["candidate_to_slice"].get(cdigest)
         or maps["tree_to_slice"].get(ctree)
@@ -2716,6 +2739,7 @@ def _otlp_resolve_commit(commit, maps):
         "vid": vid,
         "artefact": artefact,
         "wid": wid,
+        "wids": wids,
         "cdigest": cdigest,
         "slice_id": slice_id,
         "review_row": review_row,
@@ -2894,10 +2918,11 @@ def export_otlp(root, cfg=None, *, attested=False):
                 maps["review_to_slice"][artefact] = resolved_slice
             if artefact and resolved_cand:
                 maps["review_to_candidate"][artefact] = resolved_cand
-            if wid and resolved_slice:
-                maps["waiver_to_slice"][wid] = resolved_slice
-            if wid and resolved_cand:
-                maps["waiver_to_candidate"][wid] = resolved_cand
+            for w in info["wids"]:
+                if resolved_slice:
+                    maps["waiver_to_slice"][w] = resolved_slice
+                if resolved_cand:
+                    maps["waiver_to_candidate"][w] = resolved_cand
 
     _propagate_grants()
 
@@ -2906,7 +2931,6 @@ def export_otlp(root, cfg=None, *, attested=False):
         ctree = info["ctree"]
         vid = info["vid"]
         artefact = info["artefact"]
-        wid = info["wid"]
         cdigest = info["cdigest"]
         cslice = info["slice_id"]
         if cdigest and cslice:
@@ -2919,8 +2943,9 @@ def export_otlp(root, cfg=None, *, attested=False):
             maps["verification_to_slice"][vid] = cslice
         if artefact and cslice:
             maps["review_to_slice"][artefact] = cslice
-        if wid and cslice:
-            maps["waiver_to_slice"][wid] = cslice
+        for w in info["wids"]:
+            if cslice:
+                maps["waiver_to_slice"][w] = cslice
 
     _propagate_grants()
 

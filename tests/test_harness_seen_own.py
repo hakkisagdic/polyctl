@@ -198,7 +198,7 @@ def test_a_persons_own_approvals_are_seen_in_one_step_at_a_terminal(project, mon
     _write(root, ".claude/settings.local.json", APPROVALS)
 
     assert _ask(project, monkeypatch, None) == 1                     # no terminal: silence is never a yes
-    assert "nobody can answer here" in capsys.readouterr().out and _unseen(root)
+    assert "nobody can answer here, standard input is not a terminal; read the " in capsys.readouterr().out and _unseen(root)
     assert _ask(project, monkeypatch, False) == 1 and _unseen(root)
     capsys.readouterr()
 
@@ -222,11 +222,18 @@ def test_ask_at_a_terminal_at_eof_records_nothing_and_prints_the_digest_command(
     digest = A.harness_config_digest(A.unseen_harness_config(root))
     args = SimpleNamespace(action="seen", ids=[], by="Ayşe", digest=None, ask=True)
 
+    monkeypatch.setattr(sys, "stdin", io.StringIO("y\n"))
+    assert cli.cmd_harness(project, args) == 1
+    out = capsys.readouterr().out
+    assert _unseen(root) == [(".claude/settings.local.json", "untracked")]
+    assert "Nothing was recorded: nobody can answer here, standard input is not a terminal; read the " in out
+    assert f"polyctl harness seen --by {A.copyable_word('Ayşe')} --digest {digest}" in out
+
     monkeypatch.setattr(sys, "stdin", Terminal(""))
     assert cli.cmd_harness(project, args) == 1
     out = capsys.readouterr().out
     assert _unseen(root) == [(".claude/settings.local.json", "untracked")]
-    assert "Nothing was recorded: nobody can answer here" in out
+    assert "Nothing was recorded: nobody can answer here, standard input ended before an answer came; read the " in out
     assert f"polyctl harness seen --by {A.copyable_word('Ayşe')} --digest {digest}" in out
 
     monkeypatch.setattr(sys, "stdin", Terminal("n\n"))

@@ -144,10 +144,10 @@ was attached - beside the proof. The statement closes nothing by itself: where t
 proof fails the waiver stays open with the reason, a named slice with no open
 waiver is reported, and no actor's grant admits the flag.
 
-`polyctl catchup --plan` lists each open waiver with its range, commits and changed
-lines, and which close by proof, `--move-only` included, and the totals, and
+`polyctl catchup --plan` lists each open review or gates waiver with its range, commits and changed
+lines or waived gates, and which close by proof, `--move-only` included, and the totals, and
 changes nothing;
-`polyctl catchup --limit 10` starts at most ten reviews, still closes what needs no review and
+`polyctl catchup --limit 10` starts at most ten gate re-runs and reviews, still closes what needs neither and
 says how many waivers wait for a later run to review them, and
 `polyctl catchup --slice B7` takes one slice's waivers, and
 `polyctl catchup --slice B7 --reviewer <actor>` reviews them with another reviewer actor of the project's

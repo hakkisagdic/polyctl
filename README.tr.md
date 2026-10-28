@@ -107,7 +107,7 @@ mkdir -p ~/.local/bin && ln -s ~/polyctl/bin/polyctl ~/.local/bin/polyctl    # ~
 ```
 
 Kabuk alias'ı değil, symlink: polyctl'in commit hook'unu çalıştıran `/bin/sh` de, watchdog'un senin
-kabuğun olmadan başlattığı ajan da alias'ı göremez. **Windows**'ta `bin/polyctl.ps1`, hiçbir şey
+kabuğun olmadan başlattığı ajan da alias'ı göremez. **Windows**'ta `bin/polyctl.ps1` (`bin/pctl.ps1`), hiçbir şey
 kurmadan `status`, `board` ve `doctor`'ı karşılar; gerisi için
 `winget install Python.Python.3.12 && pip install polyctl` ([windows](docs/windows.md)).
 

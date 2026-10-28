@@ -1345,6 +1345,19 @@ def close_waiver(root, wid, outcome, evidence=None):
     return append_chained_jsonl(waivers_path(root), row, WAIVER_CHAIN, legacy_prefix=True)
 
 
+def fail_waiver(root, wid, detail):
+    """Record that catch-up failed to close a waiver, so doctor and status say catchup fails on it (LOWS-0.7)."""
+    from .storage import append_chained_jsonl
+    latest = None
+    for r in waiver_rows(root):
+        if isinstance(r, dict) and r.get("id") == wid and r.get("event") in ("waived", "failed", "closed"):
+            latest = r
+    if latest and latest.get("event") == "failed" and latest.get("detail") == detail:
+        return latest
+    row = {"event": "failed", "id": wid, "at": int(time.time()), "detail": detail}
+    return append_chained_jsonl(waivers_path(root), row, WAIVER_CHAIN, legacy_prefix=True)
+
+
 # ---- opt-ins: a person weakens a guarantee, on the record (REVIEW-TIERS) -----------------
 
 OPT_IN_CHAIN = "polyctl-opt-in-row-v1"
@@ -1512,18 +1525,30 @@ def gates_waiver_for(root, running, candidate_digest, failed_gates=None, now=Non
 def open_waiver_report(root, now=None):
     """One line per open waiver with its age and expiry, for `polyctl doctor` and `polyctl status` (#67, WAIVE-GATES)."""
     now = time.time() if now is None else now
+    failed = {}
+    for r in waiver_rows(root):
+        if not isinstance(r, dict) or not r.get("id"):
+            continue
+        if r.get("event") == "failed":
+            failed[r["id"]] = r.get("detail")
+        elif r.get("event") in ("waived", "closed"):
+            failed.pop(r["id"], None)
     lines = []
     for waiver in open_waivers(root):
+        wid = waiver.get("id")
         age = max(0, int(now - (waiver.get("at") or now)))
         expires = waiver.get("expires")
         state = ("no expiry (legacy)" if not isinstance(expires, (int, float))
                  else "expired" if expires <= now
                  else f"expires in {int((expires - now) // 3600)}h")
+        if wid in failed:
+            why = failed[wid]
+            state += f", catchup fails on it ({why})" if why else ", catchup fails on it"
         named = waiver.get("gates")
         gate_label = (f"{waiver.get('gate')} ({', '.join(named)})"
                       if waiver.get("gate") == "gates" and isinstance(named, list) and named
                       else waiver.get("gate"))
-        lines.append(f"{waiver.get('id')} {gate_label} for {waiver.get('slice')}, "
+        lines.append(f"{wid} {gate_label} for {waiver.get('slice')}, "
                      f"open {age // 86400}d {age % 86400 // 3600}h, {state}, by {waiver.get('by')}")
     return lines
 

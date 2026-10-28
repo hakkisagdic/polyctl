@@ -131,6 +131,15 @@ def _confirm(question):
         return None
 
 
+def _no_answer_why():
+    """Why `_confirm` returned `None`: standard input is not a terminal, or ended before an answer came (LOWS-0.7)."""
+    try:
+        tty = bool(sys.stdin is not None and sys.stdin.isatty())
+    except (OSError, ValueError):
+        tty = False
+    return "standard input ended before an answer came" if tty else "standard input is not a terminal"
+
+
 def _run_update(argv, env=None):
     """Run one update in the foreground, its output going to the person as the tool writes it.
 
@@ -177,7 +186,7 @@ def cmd_update(cfg, args):
     if not args.yes:
         answer = _confirm("run it? [y/N] ")
         if not answer:
-            print("not run" + (": nobody can answer here, standard input is not a terminal; run it again with --yes"
+            print("not run" + (f": nobody can answer here, {_no_answer_why()}; run it again with --yes"
                                if answer is None else ""))
             return 1
     code = _run_update(found["update"], found["env"])

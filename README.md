@@ -105,7 +105,7 @@ mkdir -p ~/.local/bin && ln -s ~/polyctl/bin/polyctl ~/.local/bin/polyctl    # ~
 ```
 
 A symlink, not a shell alias: neither `/bin/sh`, which runs polyctl's commit hook, nor an agent the
-watchdog starts without your shell can see an alias. On **Windows**, `bin/polyctl.ps1` covers `status`,
+watchdog starts without your shell can see an alias. On **Windows**, `bin/polyctl.ps1` (`bin/pctl.ps1`) covers `status`,
 `board` and `doctor` with nothing installed; for the rest,
 `winget install Python.Python.3.12 && pip install polyctl` ([windows](docs/windows.md)).
 
