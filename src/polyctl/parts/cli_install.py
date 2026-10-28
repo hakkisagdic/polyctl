@@ -118,15 +118,17 @@ def _clone_state(clone):
 def _confirm(question):
     """A person's answer at the terminal: True for yes, False for anything else, None when nobody can be asked.
 
-    Nobody can when standard input is no terminal - a pipe, a scheduled job, an agent's tool call - and there
-    silence must not read as consent.
+    Nobody can when standard input is no terminal - a pipe, a scheduled job, an agent's tool call - or is a
+    terminal nobody can type into, as a chat's `!` command input is (`isatty()` is True and `input()` raises
+    `EOFError`, HARNESS-SEEN-EOF): EOF is nobody answering, not a person saying no, and silence must not read as
+    consent.
     """
     try:
         if sys.stdin is None or not sys.stdin.isatty():
             return None
         return input(question).strip().lower() in ("y", "yes")
     except (EOFError, OSError, ValueError):
-        return False
+        return None
 
 
 def _run_update(argv, env=None):

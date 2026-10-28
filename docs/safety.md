@@ -728,8 +728,9 @@ Claude Code writes `.claude/settings.local.json` each time you allow a tool for 
 your write from an agent's: an allow rule there widens every turn polyctl starts on that harness, so it is a
 change like any other. At a terminal, `polyctl harness seen --by <name> --ask` shows each change and asks; a
 yes records exactly what it showed, and is refused when anything changed while you read. A pipe, a
-scheduled job or an agent's tool call is no terminal and is asked nothing, and a grant that admits
-`--ask` is named as one that admits `--digest` is.
+scheduled job, an agent's tool call or a terminal at EOF that nobody can type into (such as a chat's `!`
+command input) is asked nothing and prints the `--digest` command that records what was shown, and a grant
+that admits `--ask` is named as one that admits `--digest` is (HARNESS-SEEN-EOF).
 
 Keep the architect's own sessions in a checkout of their own. The watchdog's wakes and refills start in
 the project's root, where the implementer works, and wait there for a person to see what it wrote; a

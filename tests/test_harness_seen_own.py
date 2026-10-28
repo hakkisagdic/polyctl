@@ -8,9 +8,11 @@ by the digest of its own rendering and only while the file holds exactly that: a
 a file a project's own adapter declares, an MCP file holding another server, and a file changed before or after the
 write are not. A person sees their own approvals in one step with `polyctl harness seen --by <name> --ask`.
 """
+import io
 import json
 import os
 import subprocess
+import sys
 from types import SimpleNamespace
 
 from polyctl import allowlist as AL, cli, lib as A, skillkit
@@ -204,6 +206,39 @@ def test_a_persons_own_approvals_are_seen_in_one_step_at_a_terminal(project, mon
 
     out = capsys.readouterr().out
     assert '+{"permissions": {"allow": ["Bash(npm test)"]}}' in out and "recorded" in out
+    assert _unseen(root) == [] and A.harness_seen_record(root)["by"] == "Ayşe"
+
+
+def test_ask_at_a_terminal_at_eof_records_nothing_and_prints_the_digest_command(project, monkeypatch, capsys):
+    """HARNESS-SEEN-EOF: a chat's `!` command input gives a terminal at EOF; that is nobody answering, not a person
+    saying no, so `--ask` prints the `--digest` command while a typed `n` still prints `Nothing was recorded.` and a
+    typed `y` records."""
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    root = project["root"]
+    _write(root, ".claude/settings.local.json", APPROVALS)
+    digest = A.harness_config_digest(A.unseen_harness_config(root))
+    args = SimpleNamespace(action="seen", ids=[], by="Ayşe", digest=None, ask=True)
+
+    monkeypatch.setattr(sys, "stdin", Terminal(""))
+    assert cli.cmd_harness(project, args) == 1
+    out = capsys.readouterr().out
+    assert _unseen(root) == [(".claude/settings.local.json", "untracked")]
+    assert "Nothing was recorded: nobody can answer here" in out
+    assert f"polyctl harness seen --by {A.copyable_word('Ayşe')} --digest {digest}" in out
+
+    monkeypatch.setattr(sys, "stdin", Terminal("n\n"))
+    assert cli.cmd_harness(project, args) == 1
+    out = capsys.readouterr().out
+    assert _unseen(root) == [(".claude/settings.local.json", "untracked")]
+    assert out.rstrip().endswith("Nothing was recorded.") and "--digest" not in out
+
+    monkeypatch.setattr(sys, "stdin", Terminal("y\n"))
+    assert cli.cmd_harness(project, args) == 0
+    out = capsys.readouterr().out
+    assert "recorded" in out
     assert _unseen(root) == [] and A.harness_seen_record(root)["by"] == "Ayşe"
 
 

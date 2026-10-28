@@ -245,7 +245,9 @@ def _harness_seen(cfg, args):
     With --ask, at a terminal, the changes are shown and the person is asked, and a yes records exactly what was shown,
     as the digest does: one step for a person's own tool approvals, which Claude Code writes into
     .claude/settings.local.json each time a tool is allowed for good, and which polyctl cannot tell from an agent's write
-    (HARNESS-SEEN-OWN). Nobody at a terminal - a pipe, a scheduled job, an agent's tool call - is never a yes.
+    (HARNESS-SEEN-OWN). Nobody at a terminal - a pipe, a scheduled job, an agent's tool call, or a terminal at EOF
+    nobody can type into (HARNESS-SEEN-EOF) - is never a yes, and prints the `--digest` command that records what was
+    shown.
     """
     root = cfg["root"]
     if getattr(args, "ids", None):

@@ -218,7 +218,7 @@ def test_nobody_at_a_terminal_is_never_read_as_a_yes(monkeypatch):
         raise EOFError
 
     monkeypatch.setattr("builtins.input", closed)
-    assert cli._confirm("run it? ") is False
+    assert cli._confirm("run it? ") is None
 
 
 @pytest.mark.skipif(os.name == "nt", reason=POSIX_STUBS)
