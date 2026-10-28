@@ -825,9 +825,174 @@ def _verification_isolation_problem(root, record):
     return None
 
 
+def _unstaged_coordination_paths(root, candidate):
+    """Staged coordination paths whose working-tree bytes differ from the index."""
+    if not candidate or not candidate.get("changed_paths"):
+        return []
+    raw = A._git_output(root, "diff", "--name-only", "-z", "--no-renames", "--", *candidate["changed_paths"])
+    return sorted({os.fsdecode(item) for item in raw.split(b"\0") if item}, key=os.fsencode)
+
+
+def _commit_ok_coordination(cfg, args, candidate):
+    """Grant or refuse a coordination-only commit: a person's act with `--by`, without product gates (COORDINATION-COMMIT)."""
+    root = cfg["root"]
+    now = A.tree_digest(root, cfg)
+    scope = A.candidate_scope(candidate)
+    by = (getattr(args, "by", None) or "").strip()
+    ask = bool(getattr(args, "ask", False))
+    wanted_digest = (getattr(args, "digest", None) or "").strip()
+    digest = candidate["digest"]
+    reasons = []
+    role = A.invoking_role()
+    if role:
+        reasons.append(f"a coordination commit is a person's act, not the {role}'s")
+    if not by or not by.isprintable() or len(by) > 80:
+        reasons.append(
+            "--by is required: staged candidate holds only coordination paths, "
+            "and a coordination commit is a person's act (polyctl commit-ok --by <name> --ask)"
+        )
+    elif by.lower() in _agent_names(cfg):
+        reasons.append(f"--by names an agent or a role ({by}); a coordination commit is a person's act")
+    if ask and wanted_digest:
+        reasons.append("pass either --ask or --digest, not both")
+    try:
+        unstaged = _unstaged_coordination_paths(root, candidate)
+    except Exception as exc:
+        reasons.append(f"cannot measure unstaged coordination paths: {exc}")
+    else:
+        if unstaged:
+            reasons.append(
+                f"unstaged changes on staged coordination path(s) ({', '.join(unstaged)}) — "
+                "stage or revert them so what is checked is what lands"
+            )
+    try:
+        unseen = A.unseen_harness_config(root)
+    except Exception as exc:
+        reasons.append(f"cannot measure harness configuration changes: {exc}")
+    else:
+        if unseen:
+            reasons.append(
+                f"unseen harness configuration ({A.harness_config_line(unseen)}) cannot ride a coordination grant — "
+                "run `polyctl harness seen --ask` first"
+            )
+    held = A.hold_state(root)
+    if held:
+        reasons.append(f"project is held by {held.get('by')}: {held.get('reason', '')}")
+    for message in A.urgent_messages(root, cfg):
+        reasons.append(f"urgent message unacknowledged: {message['id']} — {message['title']}")
+
+    def _refuse(extra=()):
+        all_reasons = list(reasons) + list(extra)
+        try:
+            A.record_authority(root, False, all_reasons, now, None, candidate=candidate, scope=scope)
+        except Exception as exc:
+            all_reasons.append(f"authority ledger cannot record refusal: {exc}")
+        print(f"{C['red']}{C['b']}REFUSED{C['reset']}")
+        for reason in all_reasons:
+            print(f"  {C['red']}·{C['reset']} {A.shown_text(reason)}")
+        return 1
+
+    if reasons:
+        return _refuse()
+
+    digest_cmd = f"  polyctl commit-ok --by {A.copyable_word(by)} --digest {digest}"
+    if wanted_digest:
+        if wanted_digest != digest:
+            return _refuse([
+                f"--digest {wanted_digest} does not match the staged candidate ({digest}); "
+                f"read the staged paths again:\n{digest_cmd}"
+            ])
+        confirmed_via = "digest"
+    elif ask:
+        print(f"{C['b']}Coordination candidate{C['reset']} ({candidate['changed_count']} path(s), "
+              f"index tree {candidate['index_tree']}):")
+        for path in candidate["changed_paths"]:
+            print(f"  · {A.shown_text(path)}")
+        print(f"  {C['dim']}digest {digest}{C['reset']}")
+        answer = _confirm(
+            f"Grant this coordination commit as {A.shown_text(by)} ({digest[:12]})? [y/N]: "
+        )
+        if answer is None:
+            return _refuse([
+                f"--ask needs an interactive terminal; run this in one, or pass the digest:\n{digest_cmd}"
+            ])
+        if not answer:
+            return _refuse(["not confirmed at the terminal"])
+        current = A.index_candidate(root)
+        if current["digest"] != digest or _unstaged_coordination_paths(root, current):
+            return _refuse(["staged coordination candidate changed while waiting for confirmation; read it again"])
+        if A.unseen_harness_config(root):
+            return _refuse([
+                "harness configuration changed while waiting for confirmation — "
+                "run `polyctl harness seen --ask` first"
+            ])
+        confirmed_via = "ask"
+    else:
+        print(f"{C['b']}Coordination candidate{C['reset']} ({candidate['changed_count']} path(s), "
+              f"index tree {candidate['index_tree']}):")
+        for path in candidate["changed_paths"]:
+            print(f"  · {A.shown_text(path)}")
+        print(f"  {C['dim']}digest {digest}{C['reset']}")
+        return _refuse([
+            f"confirm on an interactive terminal with --ask, or pass the digest of this exact candidate:\n{digest_cmd}"
+        ])
+
+    user, interactive = A._login_and_terminal()
+    coordination = {
+        "by": by,
+        "user": user,
+        "interactive": interactive or confirmed_via == "ask",
+        "confirmed": confirmed_via,
+        "digest": digest,
+        "paths": list(candidate["changed_paths"]),
+    }
+    token = f"C-{A.unique_ns()}"
+    try:
+        A.record_authority(
+            root, True, [], now, None, token,
+            candidate=candidate, scope=scope, coordination=coordination,
+        )
+    except Exception as exc:
+        print(f"{C['red']}{C['b']}REFUSED{C['reset']}\n  {C['red']}·{C['reset']} "
+              f"authority ledger cannot record grant: {exc}")
+        return 1
+    print(f"{C['green']}{C['b']}GRANTED{C['reset']}  {token}")
+    print(f"  {C['dim']}coordination by {_person_line(coordination)} · "
+          f"{candidate['changed_count']} path(s){C['reset']}")
+    print(f"  {C['dim']}index tree {candidate['index_tree']}{C['reset']}")
+    return 0
+
+
 def cmd_commit_ok(cfg, args):
     """Grant authority only for the exact, isolated tree in Git's index."""
     root = cfg["root"]
+    try:
+        candidate = A.index_candidate(root)
+        issues = A.candidate_worktree_issues(root, cfg, candidate)
+    except RuntimeError as exc:
+        print(f"{C['red']}{C['b']}REFUSED{C['reset']}\n  {C['red']}·{C['reset']} {exc}")
+        return 1
+    if A.coordination_candidate(candidate, cfg):
+        return _commit_ok_coordination(cfg, args, candidate)
+    if (getattr(args, "by", None) is not None
+            or getattr(args, "ask", False)
+            or getattr(args, "digest", None) is not None):
+        reasons = A.candidate_issue_messages(issues)
+        if not candidate["changed_paths"]:
+            reasons.insert(0, "no staged candidate — stage exactly what you intend to commit")
+        elif not issues.get("staged_coordination"):
+            reasons.append("--by is only for a coordination commit: staged candidate holds product paths")
+        try:
+            A.record_authority(
+                root, False, reasons, A.tree_digest(root, cfg), None,
+                candidate=candidate, scope=A.candidate_scope(candidate),
+            )
+        except Exception as exc:
+            reasons.append(f"authority ledger cannot record refusal: {exc}")
+        print(f"{C['red']}{C['b']}REFUSED{C['reset']}")
+        for reason in reasons:
+            print(f"  {C['red']}·{C['reset']} {A.shown_text(reason)}")
+        return 1
     strict = M.is_strict(cfg)
     matrix_resolution = None
     if strict:
@@ -840,12 +1005,6 @@ def cmd_commit_ok(cfg, args):
             for problem in exc.problems:
                 print(f"  {C['red']}·{C['reset']} capability matrix: {problem}")
             return 1
-    try:
-        candidate = A.index_candidate(root)
-        issues = A.candidate_worktree_issues(root, cfg, candidate)
-    except RuntimeError as exc:
-        print(f"{C['red']}{C['b']}REFUSED{C['reset']}\n  {C['red']}·{C['reset']} {exc}")
-        return 1
     wanted = getattr(args, "review", None)
     if wanted:
         # A submitted review grants only the tree it pinned (S1).
@@ -2039,6 +2198,105 @@ def cmd_commit_check(cfg, args):
         return 1
 
 
+def _coordination_commit_check(root, cfg, args, enrollment, candidate, grant, reasons):
+    """Revalidate a coordination grant against the active index for `commit-check` (COORDINATION-COMMIT)."""
+    reasons = list(reasons)
+    if candidate is not None and candidate["changed_paths"] and not A.coordination_candidate(candidate, cfg):
+        try:
+            reasons.extend(A.candidate_issue_messages(
+                A.candidate_worktree_issues(root, cfg, candidate)
+            ))
+        except Exception as exc:
+            reasons.append(f"cannot measure the staged candidate: {exc}")
+        reasons.append("coordination grant covers only coordination paths")
+    if candidate is not None:
+        try:
+            unstaged = _unstaged_coordination_paths(root, candidate)
+        except Exception as exc:
+            reasons.append(f"cannot measure unstaged coordination paths: {exc}")
+        else:
+            if unstaged:
+                reasons.append(
+                    f"unstaged changes on staged coordination path(s) ({', '.join(unstaged)}) — "
+                    "stage or revert them so what is checked is what lands"
+                )
+    try:
+        unseen = A.unseen_harness_config(root)
+    except Exception as exc:
+        reasons.append(f"cannot measure harness configuration changes: {exc}")
+    else:
+        if unseen:
+            reasons.append(
+                f"unseen harness configuration ({A.harness_config_line(unseen)}) cannot ride a coordination grant — "
+                "run `polyctl harness seen --ask` first"
+            )
+    if grant.get("schema") != 2:
+        reasons.append("latest grant predates index-candidate binding")
+    if candidate is not None and grant.get("candidate") != candidate:
+        reasons.append("latest grant does not match the current index candidate")
+    stored_scope = grant.get("scope")
+    if not isinstance(stored_scope, dict):
+        reasons.append("latest grant has no valid candidate scope")
+    elif candidate is not None:
+        paths = stored_scope.get("paths")
+        if not isinstance(paths, list):
+            reasons.append("latest grant has no valid candidate scope paths")
+        else:
+            try:
+                current_scope = A.candidate_scope(candidate, paths)
+            except (TypeError, ValueError) as exc:
+                reasons.append(f"latest grant has an invalid candidate scope: {exc}")
+            else:
+                if current_scope["outside_paths"]:
+                    reasons.append(
+                        "staged paths fall outside the granted scope: "
+                        + ", ".join(current_scope["outside_paths"])
+                    )
+                if stored_scope != current_scope:
+                    reasons.append("latest grant scope does not exactly match the current candidate")
+    coord = grant.get("coordination")
+    by = (coord.get("by") if isinstance(coord, dict) else None) or grant.get("by") or ""
+    by = by.strip() if isinstance(by, str) else ""
+    if not by or not by.isprintable() or len(by) > 80:
+        reasons.append("coordination grant records no valid --by person")
+    elif by.lower() in _agent_names(cfg):
+        reasons.append(f"coordination grant --by names an agent or a role ({by})")
+    try:
+        A.grant_trailers(grant)
+    except ValueError as exc:
+        reasons.append(str(exc))
+    try:
+        held = A.hold_state(root)
+    except Exception as exc:
+        reasons.append(f"cannot validate project hold state: {exc}")
+    else:
+        if held:
+            reasons.append(f"project is held by {held.get('by')}: {held.get('reason', '')}")
+    try:
+        urgent = A.urgent_messages(root, cfg)
+    except Exception as exc:
+        reasons.append(f"cannot validate urgent messages: {exc}")
+    else:
+        for message in urgent:
+            reasons.append(
+                f"urgent message unacknowledged: {message['id']} — {message['title']}"
+            )
+    redirected = _commit_repository_binding(root)
+    if redirected:
+        reasons.append(redirected)
+    if reasons:
+        print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")
+        for reason in reasons:
+            print(f"  {C['red']}·{C['reset']} {A.shown_text(reason)}")
+        if enrollment["state"] == "legacy":
+            print(f"  {C['dim']}{enrollment['detail']}{C['reset']}")
+        return 1
+    token = grant.get("token") or "recorded grant"
+    print(f"{C['green']}{C['b']}AUTHORIZED{C['reset']}  {candidate['index_tree']} · {token}")
+    args.granted = grant
+    return 0
+
+
 def _bound_commit_check(cfg, args):
     """Revalidate the latest persisted grant against Git's exact active index.
 
@@ -2083,21 +2341,11 @@ def _bound_commit_check(cfg, args):
               f"born yet would read as a new repository's: {unkept}")
         return 1
     reasons = []
-    strict = M.is_strict(cfg)
-    matrix_resolution = None
-    if strict:
-        try:
-            matrix_resolution = _resolve_matrix(cfg, require_independent=False)
-        except M.MatrixError as exc:
-            reasons.extend("capability matrix: " + problem for problem in exc.problems)
     candidate = None
     try:
         candidate = A.index_candidate(root)
         if not candidate["changed_paths"]:
             reasons.append("no staged candidate")
-        reasons.extend(A.candidate_issue_messages(
-            A.candidate_worktree_issues(root, cfg, candidate)
-        ))
     except Exception as exc:
         reasons.append(f"cannot measure the staged candidate: {exc}")
 
@@ -2106,12 +2354,37 @@ def _bound_commit_check(cfg, args):
         grant = A.latest_authority_decision(root)
     except Exception as exc:
         reasons.append(f"authority ledger is unreadable: {exc}")
+    if grant and grant.get("granted") is True and grant.get("coordination"):
+        return _coordination_commit_check(root, cfg, args, enrollment, candidate, grant, reasons)
+
+    strict = M.is_strict(cfg)
+    matrix_resolution = None
+    if strict:
+        try:
+            matrix_resolution = _resolve_matrix(cfg, require_independent=False)
+        except M.MatrixError as exc:
+            reasons.extend("capability matrix: " + problem for problem in exc.problems)
+    if candidate is not None:
+        try:
+            reasons.extend(A.candidate_issue_messages(
+                A.candidate_worktree_issues(root, cfg, candidate)
+            ))
+        except Exception as exc:
+            reasons.append(f"cannot measure the staged candidate: {exc}")
     if grant is None:
         if not any(reason.startswith("authority ledger is unreadable:") for reason in reasons):
-            reasons.append("no recorded authority decision — run `polyctl commit-ok`")
+            cmd_hint = ("polyctl commit-ok --by <name> --ask"
+                        if candidate is not None and A.coordination_candidate(candidate, cfg)
+                        else "polyctl commit-ok")
+            reasons.append(f"no recorded authority decision — run `{cmd_hint}`")
     elif grant.get("granted") is not True:
         reasons.append("latest authority decision refused this commit")
     else:
+        if candidate is not None and A.coordination_candidate(candidate, cfg):
+            reasons.append(
+                "staged candidate holds only coordination paths — "
+                "grant with `polyctl commit-ok --by <name> --ask`"
+            )
         if strict:
             if matrix_resolution is not None:
                 reasons.extend(M.authority_problems(matrix_resolution, grant))

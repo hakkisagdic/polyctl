@@ -41,6 +41,7 @@ FORBIDDEN = (
     # by its digest or by a yes at the terminal (HARNESS-SEEN-OWN).
     ("records harness configuration as seen", "polyctl harness seen --by p --digest d"),
     ("records harness configuration as seen", "polyctl harness seen --by p --ask"),
+    ("grants a coordination commit", "polyctl commit-ok --by p"),
     ("attests a restored backup", "polyctl restore s --by p"),
     ("attests a restored backup", "polyctl restore s --by p --ask"),
     ("attests a restored backup", "polyctl restore s --ask --by p"),
@@ -1626,6 +1627,9 @@ OPERATIONS = (
     ("records harness configuration as seen", "polyctl harness seen --digest",
      _polyctl_act("harness", (("seen",),), ("--digest",))),
     ("records harness configuration as seen", "polyctl harness seen --ask", _polyctl_act("harness", (("seen",),), ("--ask",))),
+    ("grants a coordination commit", "polyctl commit-ok --by", _polyctl_act("commit-ok", (), ("--by",))),
+    ("grants a coordination commit", "polyctl commit-ok --ask", _polyctl_act("commit-ok", (), ("--ask",))),
+    ("grants a coordination commit", "polyctl commit-ok --digest", _polyctl_act("commit-ok", (), ("--digest",))),
     ("attests a restored backup", "polyctl restore --by", _polyctl_act("restore", (), ("--by",))),
     ("attests a restored backup", "polyctl restore --ask", _polyctl_act("restore", (), ("--ask",))),
     ("removes the hooks", "polyctl hooks uninstall", _polyctl_act("hooks", (("uninstall",),))),

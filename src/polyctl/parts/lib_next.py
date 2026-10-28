@@ -295,6 +295,33 @@ def grant_reuse_problem(cfg, grant, candidate, verification=None):
     stays `polyctl commit-ok`'s to refuse; this only stops `polyctl next` from calling a grant the hook cannot use
     a reason to commit.
     """
+    if grant.get("coordination"):
+        if not coordination_candidate(candidate, cfg):
+            return f"the grant {grant.get('token')} is a coordination grant, and the staged candidate holds product paths"
+        if grant.get("schema") != 2:
+            return f"the grant {grant.get('token')} predates index-candidate binding (schema {grant.get('schema')})"
+        if grant.get("candidate") != candidate:
+            granted = grant.get("candidate")
+            tree = granted.get("index_tree") if isinstance(granted, dict) else granted
+            return (f"the grant {grant.get('token')} is bound to another candidate: granted {tree}, "
+                    f"staged {candidate['index_tree']}")
+        scope = grant.get("scope")
+        if not isinstance(scope, dict) or not isinstance(scope.get("paths"), list):
+            return f"the grant {grant.get('token')} carries no candidate scope the hook can read"
+        try:
+            current = candidate_scope(candidate, scope["paths"])
+        except (TypeError, ValueError) as exc:
+            return f"the grant {grant.get('token')} has an invalid candidate scope: {reason_of(exc)}"
+        if current["outside_paths"]:
+            return (f"staged paths fall outside the granted scope of {grant.get('token')}: "
+                    f"{', '.join(current['outside_paths'][:5])}")
+        if current != scope:
+            return f"the grant {grant.get('token')}'s scope no longer matches the staged candidate"
+        unseen = unseen_harness_config(cfg["root"])
+        if unseen:
+            return (f"the grant {grant.get('token')} cannot carry unseen harness configuration "
+                    f"({harness_config_line(unseen)}): run `polyctl harness seen --ask` first")
+        return None
     from . import matrix as M
     strict = M.is_strict(cfg)
     if strict:
@@ -363,6 +390,37 @@ def pipeline_items(cfg):
                           "nothing is staged: an agent commits only the candidate it staged in the index",
                           f"polyctl slice start {ready[0]['id']}" if ready else "polyctl board ready",
                           slice=ready[0]["id"] if ready else None)]
+    if coordination_candidate(candidate, cfg):
+        unseen = unseen_harness_config(root)
+        if unseen:
+            return [next_item(PERSON, "coordination-commit",
+                              f"{len(candidate['changed_paths'])} coordination path(s) staged with unseen "
+                              f"{harness_config_line(unseen)}: a person sees harness configuration before it "
+                              "rides a coordination grant",
+                              "polyctl harness seen --by <your name> --ask", slice=slice_id)]
+        try:
+            grant = latest_authority_decision(root)
+        except Exception as exc:
+            return [next_item(PERSON, "authority-unreadable",
+                              f"the authority ledger cannot be read: {reason_of(exc)}",
+                              "polyctl commit-ok --by <your name> --ask", slice=slice_id)]
+        if not isinstance(grant, dict) or grant.get("granted") is not True or not grant.get("coordination"):
+            return [next_item(PERSON, "coordination-commit",
+                              f"{len(candidate['changed_paths'])} coordination path(s) staged: "
+                              "a coordination commit is a person's act",
+                              "polyctl commit-ok --by <your name> --ask", slice=slice_id)]
+        problem = grant_reuse_problem(cfg, grant, candidate)
+        if problem:
+            return [next_item(PERSON, "grant-stale", problem,
+                              "polyctl commit-ok --by <your name> --ask", slice=slice_id)]
+        held = hold_state(root)
+        if held:
+            return [next_item(PERSON, "project-held",
+                              f"this project is held by {held.get('by')}: {held.get('reason', '')}",
+                              "polyctl hold status")]
+        return [next_item("implementer", "granted",
+                          f"{len(candidate['changed_paths'])} path(s) stand granted on {grant.get('token')}: commit, "
+                          "and the hook takes this grant", 'polyctl commit -m "<message>"', slice=slice_id)]
 
     from . import features as F
     try:

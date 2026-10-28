@@ -518,14 +518,17 @@ def record_verification(root, record):
     return row
 
 
-def _granted_trees(root):
+def _granted_trees(root, include_coordination=True):
     """The index trees authority was granted for, and the commit the first grant built on, from the whole history.
 
     Read from the live rows, a seal moved the first grant forward, and every commit between the
-    two went unmeasured (the review of BOUNDED-STORES, LEDGER-HISTORY).
+    two went unmeasured (the review of BOUNDED-STORES, LEDGER-HISTORY). A coordination grant carries
+    no product review and must not make `harness_config_base` skip a commit's harness configuration
+    (the review of COORDINATION-COMMIT).
     """
     rows = [row for row in authority_history(root)
-            if isinstance(row, dict) and row.get("granted") is True]
+            if isinstance(row, dict) and row.get("granted") is True
+            and (include_coordination or not row.get("coordination"))]
     trees = {(row.get("candidate") or {}).get("index_tree") for row in rows}
     trees.discard(None)
     base = next(((row.get("candidate") or {}).get("head") for row in rows
@@ -632,6 +635,7 @@ def landed_without_grant(root):
 COMMIT_TRAILERS = ("Polyctl-Grant", "Polyctl-Tree", "Polyctl-Verification", "Polyctl-Review", "Polyctl-Waiver")
 TRAILER_PREFIX = "polyctl-"
 REVIEW_OFF = "off"
+COORDINATION_TRAILER = "coordination"
 # A trailer as git finds one with its default separator: letters, digits and hyphens, then the colon,
 # spaces or tabs allowed before it.
 _TRAILER_LINE = re.compile(r"[A-Za-z0-9-]+[ \t]*:")
@@ -642,20 +646,29 @@ def grant_trailers(grant):
     """[(key, value)] naming the grant a commit is made under, read from its authority row (COMMIT-TRAILER).
 
     Nothing is worked out again: the tree is the candidate's index tree the grant names, and the review
-    or the waiver is the one it recorded resting on. ValueError when the row is not a grant, or holds a
-    value one line of a message cannot carry.
+    or the waiver is the one it recorded resting on. A coordination commit has no product verification or
+    review, and its trailers name `coordination` and the person who granted it (COORDINATION-COMMIT).
+    ValueError when the row is not a grant, or holds a value one line of a message cannot carry.
     """
     token = grant.get("token") if isinstance(grant, dict) else None
     if not isinstance(grant, dict) or grant.get("granted") is not True:
         raise ValueError(f"{token or 'the authority decision'} is not a grant")
     candidate = grant.get("candidate") if isinstance(grant.get("candidate"), dict) else {}
-    named = [("Polyctl-Grant", token), ("Polyctl-Tree", candidate.get("index_tree")),
-             ("Polyctl-Verification", grant.get("verification"))]
-    waivers = ", ".join(dict.fromkeys(w for w in (grant.get("waiver"), grant.get("gates_waiver"))
-                                      if isinstance(w, str) and w.strip()))
-    rested = ([("Polyctl-Review", grant["review"])] if grant.get("review") else []) \
-        + ([("Polyctl-Waiver", waivers)] if waivers else [])
-    named += rested or [("Polyctl-Review", REVIEW_OFF)]
+    coordination = grant.get("coordination")
+    if coordination:
+        by = (coordination.get("by") if isinstance(coordination, dict) else None) or grant.get("by")
+        review_val = (f"{COORDINATION_TRAILER} ({by})"
+                      if isinstance(by, str) and by and by == by.strip() else None)
+        named = [("Polyctl-Grant", token), ("Polyctl-Tree", candidate.get("index_tree")),
+                 ("Polyctl-Verification", COORDINATION_TRAILER), ("Polyctl-Review", review_val)]
+    else:
+        named = [("Polyctl-Grant", token), ("Polyctl-Tree", candidate.get("index_tree")),
+                 ("Polyctl-Verification", grant.get("verification"))]
+        waivers = ", ".join(dict.fromkeys(w for w in (grant.get("waiver"), grant.get("gates_waiver"))
+                                          if isinstance(w, str) and w.strip()))
+        rested = ([("Polyctl-Review", grant["review"])] if grant.get("review") else []) \
+            + ([("Polyctl-Waiver", waivers)] if waivers else [])
+        named += rested or [("Polyctl-Review", REVIEW_OFF)]
     for key, value in named:
         if not isinstance(value, str) or not value or value != value.strip() \
                 or any(ch in value for ch in "\r\n\0"):
@@ -770,6 +783,15 @@ def trailer_problems(commit, grants=None):
     if said["Polyctl-Tree"] != commit["tree"]:
         problems.append(f"its tree {commit['tree'][:12]} is not {said['Polyctl-Tree'][:12]}, the tree its grant names: "
                         "it changed after the grant")
+    review_trailer = said.get("Polyctl-Review") or ""
+    if (said["Polyctl-Verification"] == COORDINATION_TRAILER
+            or review_trailer == COORDINATION_TRAILER
+            or review_trailer.startswith(f"{COORDINATION_TRAILER} (")):
+        prefix = f"{COORDINATION_TRAILER} ("
+        by_part = (review_trailer[len(prefix):-1].strip()
+                   if review_trailer.startswith(prefix) and review_trailer.endswith(")") else "")
+        if said["Polyctl-Verification"] != COORDINATION_TRAILER or not by_part or "Polyctl-Waiver" in carried:
+            problems.append("carries an incomplete coordination grant in its Polyctl-Verification / Polyctl-Review trailers")
     grant = (grants or {}).get(said["Polyctl-Grant"])
     if grant is not None:
         try:
@@ -853,7 +875,8 @@ def record_authority(root, granted, reasons, tree, verification, token=None,
                      review=None, reviewer=None, candidate=None, scope=None,
                      matrix=None, role_bindings=None, implementer_identity=None,
                      reviewer_identity=None, waiver=None, gates_waiver=None,
-                     waived_gates=None, author=None, move_only=None):
+                     waived_gates=None, author=None, move_only=None,
+                     coordination=None):
     """Persist one hash-chained authority decision, raising on any broken prefix."""
     from .storage import append_chained_jsonl
     record = {"at": int(time.time()), "granted": bool(granted),
@@ -886,6 +909,11 @@ def record_authority(root, granted, reasons, tree, verification, token=None,
     if move_only is not None:
         # The move proof a move-only grant stood on; catch-up runs it again on what landed (#44).
         record["move_only"] = move_only
+    if coordination is not None:
+        # A person's grant for a candidate that holds only coordination paths (COORDINATION-COMMIT).
+        record["coordination"] = coordination
+        if isinstance(coordination, dict) and coordination.get("by"):
+            record["by"] = coordination["by"]
     path = os.path.join(root, ".polyctl", "ledger", "authority.jsonl")
     # Keep the reviewer's identity here, not only in the review file. A grant is
     # not real until the chain prefix validates and the locked append, file
@@ -895,6 +923,7 @@ def record_authority(root, granted, reasons, tree, verification, token=None,
         # The machine's event log hears of a grant once it is real; a refusal stays in this ledger (EVENTS-LOG).
         emit_event(root, "authority-granted", {
             "token": token, "verification": verification, "review": review, "waiver": waiver,
+            "coordination": True if coordination else None,
             "index_tree": candidate.get("index_tree") if isinstance(candidate, dict) else None})
     return row
 

@@ -960,6 +960,24 @@ def _git_on_active_index(root, *args):
     return None
 
 
+def _tracked_coordination_files(root, cfg):
+    """The coordination paths tracked in the active index of `root`, sorted; empty when none or git cannot say."""
+    extra_env, problem = _project_index_env(root)
+    if problem:
+        return []
+    try:
+        result = _hook_git(root, "ls-files", "-z", "--", extra_env=extra_env)
+    except _HookResolutionError:
+        return []
+    if result.returncode:
+        return []
+    return sorted(
+        (os.fsdecode(raw) for raw in result.stdout.split(b"\0")
+         if raw and A._is_coordination_path(os.fsdecode(raw), cfg)),
+        key=os.fsencode,
+    )
+
+
 def _adopt_project(cfg, args):
     """`polyctl init --adopt`: enroll polyctl state no tracked .polyctl-project covers, keeping all of it (INIT-ADOPTION).
 
@@ -1051,6 +1069,10 @@ def _adopt_project(cfg, args):
         ledgers = []
     held = f" with its {len(ledgers)} ledger(s) ({', '.join(ledgers)})" if ledgers else ""
     print(f"  {C['dim']}kept   .polyctl/{held}: adoption writes nothing there{C['reset']}")
+    tracked_coord = _tracked_coordination_files(root, cfg)
+    if tracked_coord:
+        print(f"  {C['yellow']}tracked{C['reset']} coordination file(s) ({len(tracked_coord)}): "
+              f"{', '.join(tracked_coord)}")
 
     allow = bool(getattr(args, "allow_shared_hooks", False))
     # Its exit status is not the answer: a foreign pre-push it preserves fails it and leaves commit
@@ -1084,6 +1106,11 @@ def _adopt_project(cfg, args):
               "polyctl commit -m \"…\" - and the project is adopted for good")
         print(f"  · keep it staged until then: the current hooks enforce while {PROJECT_MARKER} is in the index "
               "or in HEAD")
+    if tracked_coord:
+        quoted = " ".join(A._shell_word(path) for path in tracked_coord)
+        print(f"  · tracked coordination file(s) ({', '.join(tracked_coord)}) must not share a product commit: "
+              f"stage changes to them (or untrack them with `git rm --cached -- {quoted}`) in a commit of their own "
+              "and grant it with `polyctl commit-ok --by <name> --ask`, then `polyctl commit -m \"…\"`")
     return 0 if proof["installed"] else 1
 
 

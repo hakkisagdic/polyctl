@@ -704,3 +704,312 @@ def test_digest_surfaces_broken_authority_chain_without_trusting_counts(
     assert "AUTHORITY LEDGER INTEGRITY BROKEN" in output
     # Captured output is no terminal, so it carries no colour (CLI-ROBUST): the line is looked for as printed.
     assert "commit-ok  0 granted" not in output
+
+
+def _install_current_hook_for_git(root, project, tmp_path, monkeypatch):
+    bin_dir = tmp_path / "hook-bin"
+    bin_dir.mkdir(exist_ok=True)
+    src_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
+    if os.name == "nt":
+        shim = bin_dir / "polyctl.cmd"
+        shim.write_text(
+            f'@echo off\r\nset "PYTHONPATH={src_root};%PYTHONPATH%"\r\n"{sys.executable}" -m polyctl %*\r\n',
+            encoding="utf-8",
+        )
+    else:
+        shim = bin_dir / "polyctl"
+        shim.write_text(
+            f'#!/bin/sh\nPYTHONPATH={shlex.quote(src_root)} exec {shlex.quote(sys.executable)} -m polyctl "$@"\n',
+            encoding="utf-8",
+        )
+        shim.chmod(0o755)
+    monkeypatch.setenv("HOME", A.HOME)
+    monkeypatch.setenv("USERPROFILE", A.HOME)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    assert cli.cmd_hooks(project, SimpleNamespace(action="install", allow_shared_hooks=False)) == 0
+
+
+def test_coordination_commit_granted_with_by_lands_through_hook_and_trailers_say_so(
+    project, tmp_path, monkeypatch, capsys
+):
+    root = project["root"]
+    steering_dir = os.path.join(root, ".kiro", "steering")
+    reviews_dir = os.path.join(root, "semantic-review")
+    os.makedirs(steering_dir, exist_ok=True)
+    os.makedirs(reviews_dir, exist_ok=True)
+    open(os.path.join(steering_dir, "product.md"), "w", encoding="utf-8").write("old steering\n")
+    open(os.path.join(steering_dir, "tech.md"), "w", encoding="utf-8").write("old tech\n")
+    open(os.path.join(reviews_dir, "20261027-MIGRATION-1.md"), "w", encoding="utf-8").write("old review\n")
+    _git(
+        root, "add", "-f",
+        ".kiro/steering/product.md",
+        ".kiro/steering/tech.md",
+        "semantic-review/20261027-MIGRATION-1.md",
+    )
+    _git(root, "commit", "-q", "-m", "track steering and review records")
+
+    _install_current_hook_for_git(root, project, tmp_path, monkeypatch)
+    capsys.readouterr()
+
+    _git(root, "mv", ".kiro/steering/product.md", ".kiro/steering/polyctl-product.md")
+    _git(root, "rm", "--cached", "-q", "--", ".kiro/steering/tech.md")
+    open(os.path.join(reviews_dir, "20261027-MIGRATION-1.md"), "w", encoding="utf-8").write("updated review\n")
+    _git(root, "add", "-f", "semantic-review/20261027-MIGRATION-1.md")
+
+    candidate = A.index_candidate(root)
+    assert A.coordination_candidate(candidate, project) is True
+    assert A.candidate_worktree_issues(root, project, candidate)["staged_coordination"] == []
+
+    monkeypatch.setattr(cli, "_confirm", lambda question: True)
+    assert cli.cmd_harness(
+        project,
+        cli.build_parser().parse_args(["harness", "seen", "--by", "alice (owner)", "--ask"]),
+    ) == 0
+    capsys.readouterr()
+
+    args = cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
+    assert cli.cmd_commit_ok(project, args) == 0
+    out = capsys.readouterr().out
+    assert "GRANTED" in out
+    assert "coordination by alice (owner)" in out
+
+    grant = A.latest_authority_decision(root)
+    assert grant["granted"] is True
+    assert grant["verification"] is None
+    assert grant["review"] is None
+    assert grant["coordination"]["by"] == "alice (owner)"
+    assert grant["coordination"]["paths"] == [
+        ".kiro/steering/polyctl-product.md",
+        ".kiro/steering/product.md",
+        ".kiro/steering/tech.md",
+        "semantic-review/20261027-MIGRATION-1.md",
+    ]
+    trailers = dict(A.grant_trailers(grant))
+    assert trailers["Polyctl-Grant"] == grant["token"]
+    assert trailers["Polyctl-Tree"] == candidate["index_tree"]
+    assert trailers["Polyctl-Verification"] == "coordination"
+    assert trailers["Polyctl-Review"] == "coordination (alice (owner))"
+
+    commit_args = cli.build_parser().parse_args(["commit", "-m", "rename steering and review records for MIGRATION-1"])
+    assert cli.cmd_commit(project, commit_args) == 0
+    capsys.readouterr()
+
+    range_args = cli.build_parser().parse_args(["commit-check", "--range", "HEAD~1..HEAD"])
+    assert cli.cmd_commit_check(project, range_args) == 0
+    range_out = capsys.readouterr().out
+    assert "Polyctl-Verification: coordination" in A._git_text(root, "log", "-1", "--format=%B")
+    assert "Polyctl-Review: coordination (alice (owner))" in A._git_text(root, "log", "-1", "--format=%B")
+    assert "1 commit(s) checked" in range_out and grant["token"] in range_out
+
+    # Untracking the remaining coordination file also lands directly through Git's pre-commit hook.
+    _git(root, "rm", "--cached", "-q", "--", "semantic-review/20261027-MIGRATION-1.md")
+    assert cli.cmd_commit_ok(
+        project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
+    ) == 0
+    capsys.readouterr()
+    _git(root, "commit", "-q", "-m", "untrack review record")
+
+
+def test_coordination_commit_refused_without_by_or_by_an_agent_or_role(
+    project, monkeypatch, capsys
+):
+    root = project["root"]
+    reviews_dir = os.path.join(root, "semantic-review")
+    os.makedirs(reviews_dir, exist_ok=True)
+    review_file = os.path.join(reviews_dir, "20261027-MIGRATION-1.md")
+    open(review_file, "w", encoding="utf-8").write("v1\n")
+    _git(root, "add", "-f", "semantic-review/20261027-MIGRATION-1.md")
+    _git(root, "commit", "-q", "-m", "track review")
+
+    open(review_file, "w", encoding="utf-8").write("v2\n")
+    _git(root, "add", "-f", "semantic-review/20261027-MIGRATION-1.md")
+    candidate = A.index_candidate(root)
+
+    assert cli.cmd_commit_ok(project, cli.build_parser().parse_args(["commit-ok"])) == 1
+    out = capsys.readouterr().out
+    assert "REFUSED" in out
+    assert "--by is required: staged candidate holds only coordination paths" in out
+    assert A.latest_authority_decision(root)["granted"] is False
+
+    for bad_name in ("implementer", "architect", "reviewer", "claude-code", "kiro", "codex"):
+        assert cli.cmd_commit_ok(
+            project, cli.build_parser().parse_args(["commit-ok", "--by", bad_name])
+        ) == 1
+        out = capsys.readouterr().out
+        assert f"--by names an agent or a role ({bad_name}); a coordination commit is a person's act" in out
+        assert A.latest_authority_decision(root)["granted"] is False
+
+    # --by without --ask or --digest, non-interactive, is refused and prints the --digest command.
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
+    monkeypatch.setattr(cli, "_confirm", lambda question: None)
+    assert cli.cmd_commit_ok(
+        project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)"])
+    ) == 1
+    out = capsys.readouterr().out
+    assert "REFUSED" in out
+    assert f"polyctl commit-ok --by {A.copyable_word('alice (owner)')} --digest {candidate['digest']}" in out
+    assert A.latest_authority_decision(root)["granted"] is False
+
+    # An agent (POLYCTL_ROLE unset, non-interactive) is refused even when --ask is given.
+    assert cli.cmd_commit_ok(
+        project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
+    ) == 1
+    out = capsys.readouterr().out
+    assert "REFUSED" in out
+    assert f"polyctl commit-ok --by {A.copyable_word('alice (owner)')} --digest {candidate['digest']}" in out
+    assert A.latest_authority_decision(root)["granted"] is False
+
+    # A wrong --digest is refused and prints the candidate's --digest command.
+    assert cli.cmd_commit_ok(
+        project,
+        cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--digest", "sha256:" + "0" * 64]),
+    ) == 1
+    out = capsys.readouterr().out
+    assert "REFUSED" in out
+    assert f"polyctl commit-ok --by {A.copyable_word('alice (owner)')} --digest {candidate['digest']}" in out
+    assert A.latest_authority_decision(root)["granted"] is False
+
+    monkeypatch.setenv("POLYCTL_ROLE", "implementer")
+    assert cli.cmd_commit_ok(
+        project,
+        cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--digest", candidate["digest"]]),
+    ) == 1
+    out = capsys.readouterr().out
+    assert "a coordination commit is a person's act, not the implementer's" in out
+    assert A.latest_authority_decision(root)["granted"] is False
+
+    # With POLYCTL_ROLE unset and the exact candidate's --digest, the person's grant succeeds.
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
+    assert cli.cmd_commit_ok(
+        project,
+        cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--digest", candidate["digest"]]),
+    ) == 0
+    assert A.latest_authority_decision(root)["granted"] is True
+
+
+def test_coordination_commit_refuses_unseen_claude_settings_and_grants_once_seen(
+    project, tmp_path, monkeypatch, capsys
+):
+    root = project["root"]
+    _install_current_hook_for_git(root, project, tmp_path, monkeypatch)
+    capsys.readouterr()
+
+    assert A.unseen_harness_config(root) == []
+    base_head = A._git_text(root, "rev-parse", "HEAD")
+
+    claude_dir = os.path.join(root, ".claude")
+    os.makedirs(claude_dir, exist_ok=True)
+    settings_path = os.path.join(claude_dir, "settings.json")
+    open(settings_path, "w", encoding="utf-8").write(
+        '{"hooks": {"SessionStart": [{"command": "echo hi"}]}}\n'
+    )
+    _git(root, "add", "-f", ".claude/settings.json")
+
+    candidate = A.index_candidate(root)
+    assert A.coordination_candidate(candidate, project) is True
+    assert [path for path, _, _ in A.unseen_harness_config(root)] == [".claude/settings.json"]
+
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
+    monkeypatch.setattr(cli, "_confirm", lambda question: True)
+
+    # Refused while .claude/settings.json is unseen, naming `polyctl harness seen --ask`.
+    assert cli.cmd_commit_ok(
+        project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
+    ) == 1
+    out = capsys.readouterr().out
+    assert "REFUSED" in out
+    assert "polyctl harness seen --ask" in out
+    assert A.latest_authority_decision(root)["granted"] is False
+
+    # Even if a coordination grant row is persisted before the hook runs, the pre-commit check
+    # refuses while .claude/settings.json is unseen and names `polyctl harness seen --ask`, and
+    # harness_config_base does not treat the coordination grant's tree as product-granted.
+    A.record_authority(
+        root, True, [], A.tree_digest(root, project), None, "C-unseen",
+        candidate=candidate, scope=A.candidate_scope(candidate),
+        coordination={"by": "alice (owner)", "user": "alice", "interactive": True, "paths": [".claude/settings.json"]},
+    )
+    assert cli.cmd_commit_check(project, SimpleNamespace(range=None)) == 1
+    check_out = capsys.readouterr().out
+    assert "COMMIT REFUSED" in check_out
+    assert "polyctl harness seen --ask" in check_out
+
+    _git(root, "commit", "--no-verify", "-q", "-m", "unseen coordination commit")
+    assert A.harness_config_base(root) == base_head
+    assert [path for path, _, _ in A.unseen_harness_config(root)] == [".claude/settings.json"]
+    _git(root, "reset", "--soft", "HEAD~1")
+
+    # Once a person sees .claude/settings.json, commit-ok --by --ask grants and the commit lands.
+    assert cli.cmd_harness(
+        project,
+        cli.build_parser().parse_args(["harness", "seen", "--by", "alice (owner)", "--ask"]),
+    ) == 0
+    capsys.readouterr()
+    assert A.unseen_harness_config(root) == []
+
+    assert cli.cmd_commit_ok(
+        project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)", "--ask"])
+    ) == 0
+    assert "GRANTED" in capsys.readouterr().out
+
+    commit_args = cli.build_parser().parse_args(["commit", "-m", "record seen claude settings for MIGRATION-1"])
+    assert cli.cmd_commit(project, commit_args) == 0
+    capsys.readouterr()
+    assert A.unseen_harness_config(root) == []
+
+
+def test_allowlist_forbids_commit_ok_by_and_bound_commit_check_is_not_reindented():
+    import ast
+    from polyctl import allowlist as AL
+
+    assert ("grants a coordination commit", "polyctl commit-ok --by p") in AL.FORBIDDEN
+    for rule in (
+        "Bash(polyctl commit-ok --by alice)",
+        "Bash(polyctl commit-ok --by alice --ask)",
+        "Bash(polyctl commit-ok --by alice --digest sha256:0)",
+        "Bash(polyctl commit-ok:*)",
+    ):
+        found = AL.problems(["claude", "-p", "{prompt}", "--allowedTools", f"Read,{rule}"], {})
+        assert [(reason, granted) for reason, _, granted in found] == [
+            ("grants a coordination commit", rule)
+        ]
+
+    for ident in ("claude-code", "qoder", "qwen"):
+        argv = A.role_commands(A.load_adapter(ident))["implementer"]
+        assert AL.problems(argv, A.load_adapter(ident).get("options") or {}) == []
+        assert not any(AL.admits(rule, "polyctl commit-ok --by alice") for rule in AL.rules(argv))
+
+    assert callable(getattr(cli, "_coordination_commit_check", None))
+    auth_path = os.path.join(
+        os.path.dirname(__file__), "..", "src", "polyctl", "parts", "cli_authority.py"
+    )
+    tree = ast.parse(open(auth_path, encoding="utf-8").read())
+    fn = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_bound_commit_check")
+    top_targets = [
+        node.targets[0].id
+        for node in fn.body
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+    ]
+    assert "strict" in top_targets
+
+
+def test_mixed_candidate_and_product_candidate_with_by_are_refused(project, capsys):
+    root = project["root"]
+    _repo_with_change(root)
+    steering_dir = os.path.join(root, ".kiro", "steering")
+    os.makedirs(steering_dir, exist_ok=True)
+    open(os.path.join(steering_dir, "product.md"), "w", encoding="utf-8").write("steering\n")
+    _git(root, "add", "-f", ".kiro/steering/product.md")
+
+    assert A.coordination_candidate(A.index_candidate(root), project) is False
+    for argv in (["commit-ok"], ["commit-ok", "--by", "alice (owner)"]):
+        assert cli.cmd_commit_ok(project, cli.build_parser().parse_args(argv)) == 1
+        out = capsys.readouterr().out
+        assert "coordination paths must not share a product commit: .kiro/steering/product.md" in out
+
+    _git(root, "rm", "--cached", "-q", "--", ".kiro/steering/product.md")
+    assert cli.cmd_commit_ok(
+        project, cli.build_parser().parse_args(["commit-ok", "--by", "alice (owner)"])
+    ) == 1
+    out = capsys.readouterr().out
+    assert "--by is only for a coordination commit: staged candidate holds product paths" in out

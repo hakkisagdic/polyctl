@@ -272,7 +272,7 @@ start. Run anything in a repository whose owner has not approved it.
 |---|---|
 | `polyctl start [--yes]` | a person's first-run wizard: detect installed agent CLIs and model families, propose a cross-family implementer/reviewer pair (measured `verified` levels first), write the profile, ask before `polyctl demo`, `polyctl init`, `polyctl hooks install` and `polyctl prove` (`--yes` runs only the steps that need no person), and list the steps only a person can take; never records a person's approval or installs software |
 | `polyctl init` | write polyctl state plus an exact unstaged `.polyctl-project` enrollment marker; idempotent |
-| `polyctl init --adopt` | adopt polyctl state no tracked `.polyctl-project` covers: keep it all, stage the marker, install the current hooks; idempotent |
+| `polyctl init --adopt` | adopt polyctl state no tracked `.polyctl-project` covers: keep it all, stage the marker, install the current hooks, and name any tracked coordination files with the command that lands or untracks them; idempotent |
 | `polyctl skill install` | (re)write this playbook for the detected agents (polyctl-owned files only; `--rules` for the owner's rule files) |
 | `polyctl remove --yes` | two phases: commit `.polyctl-project` deletion under enforcement, then remove POLYCTL-owned state |
 | `polyctl update [--dry-run\|--yes]` / `polyctl uninstall [--yes] [--purge]` | a person's commands, never an agent's: update polyctl the way it was installed, the command shown first; take polyctl's jobs, hooks and MCP entries off the machine, a dry run unless `--yes` |
@@ -322,7 +322,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `polyctl review --commits <range>` | retrospective review of landed work; never authorizes a candidate |
 | `polyctl ci review --base B --reviewer A --model M --family F --author-family F` | a step a person writes into a CI workflow, never an agent's command: a pull request's change reviewed by a model of another family; it grants nothing |
 | `polyctl review submit [--boundary …]` / `polyctl review collect <R-id>\|--any` / `polyctl reviews` / `polyctl review cancel <R-id>` | submit pins the staged tree and reviews it in the background, returning an id at once; collect takes a finished one; `polyctl reviews` lists them with what each is doing - starting, preparing, waiting and on what, or which reviewer runs; cancel ends a review and the reviewer it started, never a bare `kill`; `polyctl commit-ok --review <R-id>` grants only on the pinned tree |
-| `polyctl commit-ok` | persist authority for the exact isolated index candidate, verification and prospective review |
+| `polyctl commit-ok [--verify] [--by NAME] [--ask] [--digest D]` | persist authority for the exact isolated index candidate, verification and prospective review; a candidate holding only coordination paths (and no unseen harness configuration: `polyctl harness seen --ask` first) is a person's coordination commit (`--by NAME` with `--ask` or `--digest D`, never an agent's) without product gates |
 | `polyctl commit-check` | revalidate the latest persisted grant against Git's active index without issuing or consuming one; `--range A..B` holds each landed commit to the tree its Polyctl- trailers name |
 | `polyctl writers [--clean]` | live turns (not processes); orphans set aside |
 | `polyctl hold` / `polyctl hold release` | stop unattended turns and keep them stopped |

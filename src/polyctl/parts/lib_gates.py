@@ -1471,6 +1471,12 @@ def gate_inputs_of(spec):
     return sorted(globs)
 
 
+def coordination_candidate(candidate, cfg):
+    """Whether a staged candidate holds only coordination paths (COORDINATION-COMMIT)."""
+    paths = (candidate or {}).get("changed_paths") or []
+    return bool(paths) and all(_is_coordination_path(path, cfg) for path in paths)
+
+
 def candidate_worktree_issues(root, cfg, candidate=None, inputs="declared"):
     """State that would make gates execute bytes other than the staged candidate.
 
@@ -1478,6 +1484,8 @@ def candidate_worktree_issues(root, cfg, candidate=None, inputs="declared"):
     On 2026-09-06 seven untracked files outside the slice withheld commit authority
     until a person moved them. A path no gate reads is listed as `worktree_noise`,
     never fatal; while any gate declares no inputs, every dirty path counts.
+    A candidate that holds only coordination paths shares no product commit, so its
+    staged coordination paths are not a product-isolation issue (COORDINATION-COMMIT).
     """
     candidate = candidate or index_candidate(root)
     if inputs == "declared":
@@ -1496,7 +1504,7 @@ def candidate_worktree_issues(root, cfg, candidate=None, inputs="declared"):
         ).split(b"\0")
         if raw and not _is_coordination_path(os.fsdecode(raw), cfg)
     }
-    coordination = {
+    coordination = set() if coordination_candidate(candidate, cfg) else {
         path for path in candidate["changed_paths"] if _is_coordination_path(path, cfg)
     }
     if inputs is None:

@@ -515,6 +515,11 @@ def build_parser(root=None, prog=None):
     ck.add_argument("--verify", action="store_true", help="run the quick gates first when the verification is stale")
     ck.add_argument("-p", "--profile", help="gate profile for --verify (default quick)")
     ck.add_argument("--review", help="grant only if the staged tree is the tree this submitted review pinned")
+    ck.add_argument("--by", help="person authorising a coordination-only commit (never an agent)")
+    ck.add_argument("--ask", action="store_true",
+                    help="with --by: show the coordination candidate and ask at this terminal before granting")
+    ck.add_argument("--digest", metavar="SHA256",
+                    help="with --by: the staged candidate digest polyctl printed to confirm")
     ck.set_defaults(fn=cmd_commit_ok)
     cc = sub.add_parser(
         "commit-check",

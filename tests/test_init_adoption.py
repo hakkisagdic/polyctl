@@ -266,3 +266,23 @@ def test_prove_sends_a_legacy_project_to_adoption_rather_than_to_a_refused_insta
 
     assert cli.PROJECT_ADOPT_COMMAND in out
     assert "— polyctl hooks install" not in out
+
+
+def test_adoption_names_tracked_coordination_files_and_the_command_that_lands_or_untracks_them(
+    tmp_path, monkeypatch, capsys
+):
+    root, cfg, _ = _legacy(tmp_path, monkeypatch)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
+    (root / ".kiro" / "steering").mkdir(parents=True, exist_ok=True)
+    (root / "semantic-review").mkdir(parents=True, exist_ok=True)
+    (root / ".kiro" / "steering" / "product.md").write_text("steering\n", encoding="utf-8")
+    (root / "semantic-review" / "20261027-MIGRATION-1.md").write_text("review\n", encoding="utf-8")
+    _git(root, "add", "-f", ".kiro/steering/product.md", "semantic-review/20261027-MIGRATION-1.md")
+    _git(root, *COMMIT, "-m", "track steering and review records")
+
+    assert cli.cmd_init(cfg, _init("--adopt")) == 0
+    out = _plain(capsys)
+
+    assert "tracked coordination file(s) (2): .kiro/steering/product.md, semantic-review/20261027-MIGRATION-1.md" in out
+    assert "git rm --cached -- .kiro/steering/product.md semantic-review/20261027-MIGRATION-1.md" in out
+    assert "polyctl commit-ok --by <name>" in out

@@ -235,14 +235,27 @@ A passing record with a different definitions digest does not verify that merge;
 ## Commit authority is bound to a verification
 
 ```bash
-polyctl commit-ok                  # the newest verification passed on exactly the staged candidate
-polyctl commit-ok --review R-<id>  # and a finished submitted review pinned that same tree
+polyctl commit-ok                         # the newest verification passed on exactly the staged candidate
+polyctl commit-ok --review R-<id>         # and a finished submitted review pinned that same tree
+polyctl commit-ok --by <name> --ask       # a person grants a coordination-only commit without product gates
 ```
 
 `polyctl` refuses to grant commit authority against a stale verification — one taken before the
 last file change — or against a verification produced by the same actor that wrote the
 code. Both refusals are enforced, not advised; see separation of duties in
 [`safety.md`](safety.md).
+
+*In polyctl since slice COORDINATION-COMMIT: a staged candidate that holds only coordination paths
+(for example `.kiro/steering/*.md` or `semantic-review/*.md` tracked in git, or `git rm --cached`
+removing them) is a coordination commit. Harness configuration never rides a coordination grant unseen:
+when `unseen_harness_config` is non-empty, `polyctl commit-ok` and the pre-commit hook refuse and name
+`polyctl harness seen --ask`, and a coordination grant never hides an unseen harness change from
+`harness_config_base`. `polyctl commit-ok --by <name>` attests the person's act the way `harness seen`
+does — with `--ask` on an interactive terminal or `--digest <sha256>` for that exact candidate, refused
+to agents, in `allowlist.FORBIDDEN`, and when `--by` names an agent or role — without the product gates,
+records it in `.polyctl/ledger/authority.jsonl` with `coordination`, and `polyctl commit` writes
+`Polyctl-Verification: coordination` and `Polyctl-Review: coordination (<name>)`. A candidate
+mixing coordination and product paths is refused as before.*
 
 *In polyctl since slice CRITERIA-VERDICTS: when the boundary lists criteria, an approval is not
 enough. The review records a verdict for each criterion ([pipeline.md](pipeline.md), §2c), and

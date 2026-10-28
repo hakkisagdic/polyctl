@@ -994,9 +994,18 @@ def harness_config_base(root, key=None):
     is in HEAD and differed from nothing, so a hook committed so ran in the next nudge; and in a project that had made
     no grant at all, or one where a granted commit came after it, it went unseen all the same (the reviews of
     HARNESS-CONFIG). Measured from below the oldest ungranted commit, it is a change until a person sees it."""
-    trees, base, _ = _granted_trees(root)
+    trees, base, rows = _granted_trees(root)
+    if rows:
+        product = [row for row in rows if not row.get("coordination")]
+        trees = {(row.get("candidate") or {}).get("index_tree") for row in product}
+        trees.discard(None)
+        base = next(((row.get("candidate") or {}).get("head") for row in product
+                     if (row.get("candidate") or {}).get("head")), None)
     lower = _nearest_ancestor(root, [base, (harness_seen_record(root, key=key) or {}).get("head"),
                                      harness_baseline(root, key=key)])
+    if lower is None and rows:
+        lower = _nearest_ancestor(root, [next(((row.get("candidate") or {}).get("head") for row in rows
+                                               if (row.get("candidate") or {}).get("head")), None)])
     if lower is None:
         return None
     try:

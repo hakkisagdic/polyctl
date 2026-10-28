@@ -1597,9 +1597,15 @@ def _agent_names(cfg):
     """Names that belong to agents or roles, never to the person a waiver or a person's review must name.
 
     Every actor in the role table counts, not only those holding a role now: an actor
-    waiting for the next slice is an agent all the same (REVIEW-TIERS).
+    waiting for the next slice is an agent all the same (REVIEW-TIERS). Every shipped
+    adapter's id, name, actor_name and family count too, so an agent's name is refused
+    even when another adapter holds the role in this project (COORDINATION-COMMIT).
     """
     names = {"architect", "implementer", "reviewer", "watchdog", "polyctl", "agent", "human"}
+    for ident, spec in A.package_adapters().items():
+        names.add(str(ident))
+        if isinstance(spec, dict):
+            names.update(str(spec.get(key) or "") for key in ("id", "name", "actor_name", "family"))
     for role in ("implementer", "architect"):
         block = cfg.get(role) or {}
         names.update(str(block.get(key) or "") for key in ("name", "adapter", "session"))
