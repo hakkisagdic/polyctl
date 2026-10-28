@@ -135,7 +135,9 @@ polyctl init --language tr                        # a new project, before init w
 `polyctl init` writes its files in the language in force when it runs, and a project has no config of
 its own until then: `polyctl init --language tr` sets the project's choice in the config it writes, before
 any other file, and a machine's choice set first serves as well.
-`polyctl init` never rewrites a file that exists, so a project keeps the files it was given, and a
+`polyctl init` keeps every file and role block that exists (adding only role blocks a profile or flag
+names that `.polyctl/config.json` lacks, and saying which it kept and which it added), so a project keeps
+the files it was given, and a
 change of language changes what polyctl writes from then on. The markers of both languages are read in
 every project whatever it chose: mail written before a change, or by an agent following an older
 playbook, is still found, surfaced and escalated.
@@ -217,8 +219,10 @@ the config leaves `lite` while the newest attested `mode` row is `lite`, reading
 an attested `full` row by `polyctl` so writing `"mode": "lite"` back later stays `full` until a person
 records `polyctl mode lite --by <name>` again. `polyctl mode full` checks what `full` needs - a reviewer
 route that passes the independence check and probe (or the `person` review tier), and a `pre-commit`
-commit hook that can be installed or kept current and passes the execution probe (leaving any
-repository-owned `pre-push` hook untouched with the push guard reported as off; shared, external or global
+commit hook that can be installed or kept current and passes the execution probe (leaving a
+repository-owned `pre-push` hook - tracked in `core.hooksPath` or present before enrollment and never
+replaced by polyctl - untouched with the push guard reported as off, refusing a changed `pre-push` where
+polyctl's own stood, and reporting why when an eligible `pre-push` could not be installed; shared, external or global
 hook directories still require `--allow-shared-hooks`) - records `full` before writing the config, and
 refuses, naming what is missing, rather than half-switching; `polyctl mode show` prints the mode and what
 each mode does and does not protect ([safety.md](safety.md)).

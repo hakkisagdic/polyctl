@@ -343,6 +343,15 @@ def _can_architect(adapter_id, adapter=None):
     return A.turn_refusal("architect", adapter_id, argv) is None
 
 
+def _configured_roles(root, cfg):
+    """The role blocks `cfg` already has, directly or through its role table."""
+    if not isinstance(cfg, dict):
+        return []
+    resolved = A.resolve_roles(root, dict(cfg))
+    table = cfg.get("roles") if isinstance(cfg.get("roles"), dict) else {}
+    return [role for role in ("implementer", "reviewer", "architect") if role in resolved or role in table]
+
+
 def _profile_config(root, args, base):
     """Return the profile's intended config and added block names without writing.
 
@@ -363,19 +372,10 @@ def _profile_config(root, args, base):
         opted.append("review.same_family labeled")
     if not impl_adapter and not prof:
         return cfg, opted
-    if isinstance(cfg.get("roles"), dict) or isinstance(cfg.get("actors"), dict):
-        return cfg, opted
-    if "implementer" in cfg and (
-        ("reviewer" in cfg and "capability_matrix" not in cfg)
-        or all(
-            os.path.lexists(os.path.join(root, ".polyctl", name))
-            for name in ("board.md", "authority.md", "backlog.md")
-        )
-    ):
-        return cfg, opted
+    present = set(_configured_roles(root, cfg))
     roles = prof or presets.get(A.default_profile(root)) or {}
     added = []
-    if "implementer" not in cfg:
+    if "implementer" not in present:
         impl_adapter = impl_adapter or roles.get("implementer")
         block = {"adapter": impl_adapter, "session": "auto",
                  "name": A.load_adapter(impl_adapter).get("actor_name") or impl_adapter}
@@ -386,15 +386,16 @@ def _profile_config(root, args, base):
             block["effort"] = args.effort
         cfg["implementer"] = block
         added.append("implementer")
-    if "reviewer" not in cfg and tier != "person":
+    if "reviewer" not in present and tier != "person":
         # With --review-tier person no model reviews: a person reviews each candidate.
-        reviewer = impl_adapter if tier == "same-family" and not prof else roles.get("reviewer")
+        existing_impl = (cfg.get("implementer") or {}).get("adapter") if isinstance(cfg.get("implementer"), dict) else None
+        reviewer = (impl_adapter or existing_impl) if tier == "same-family" and not prof else roles.get("reviewer")
         rmodel = getattr(args, "reviewer_model", None) or _models(reviewer).get("review")
         cfg["reviewer"] = dict(_reviewer_block(reviewer, rmodel),
                                _why="must not be the implementer; a different model where one is available")
         added.append("reviewer")
     architect = roles.get("architect")
-    if "architect" not in cfg and architect and _can_architect(architect):
+    if "architect" not in present and architect and _can_architect(architect):
         cfg["architect"] = {"adapter": architect, "session": "auto", "cwd": root, "name": "architect",
                             "argv": _architect_argv(architect),
                             "_why": "resumable and woken only into absence; read-only tools plus polyctl"}
@@ -681,7 +682,8 @@ def cmd_init(cfg, args):
                   "ledgers in .polyctl; make it a folder of the project's own, then run polyctl init again")
             return 1
     if config_existed:
-        kept.append(".polyctl/config.json")
+        kept_roles = _configured_roles(root, base_config)
+        kept.append(".polyctl/config.json" + (f" ({', '.join(kept_roles)})" if kept_roles else ""))
     else:
         wrote.append(".polyctl/config.json")
     if added:
@@ -817,10 +819,12 @@ def cmd_init(cfg, args):
     registered = {} if args.no_mcp else skillkit.register_mcp(root, agents, exe, ours=ours, unwritten=refused)
     unwritten += refused
     # What init wrote, so `polyctl remove` can take exactly that away again.
+    hook_inv = _polyctl_hook_inventory(root)
     manifest = {"at": int(time.time()),
                 "wrote": list(wrote) + [r for r, w in playbook_files.items() if w in ("wrote", "updated", "appended")],
                 "mcp": [k for k, v in registered.items() if v == "registered"],
-                "gitignore": any(rel.startswith(".gitignore") for rel in wrote)}
+                "gitignore": any(rel.startswith(".gitignore") for rel in wrote),
+                **_manifest_pre_push_fields(root, hook_inv)}
     # Replaced whole under a name no file had, so a link an agent left at its name is replaced, never written through
     # (LEADS-ADAPTERS).
     manifest_path = os.path.join(root, ".polyctl", "init-manifest.json")
@@ -861,7 +865,6 @@ def cmd_init(cfg, args):
         print(f"  {C['dim']}commit hook{C['reset']} not installed ({ENFORCEMENT_OFF_LITE} — nothing is enforced)")
         print(f"  {C['dim']}reviewer probe{C['reset']} not enforced ({ENFORCEMENT_OFF_LITE} — nothing is enforced)")
     else:
-        hook_inv = _polyctl_hook_inventory(root)
         hook_proof = _hook_execution_probe(hook_inv)
         tone = C["green"] if hook_proof["installed"] else C["yellow"]
         print(f"  {tone}commit hook{C['reset']} {_hook_probe_text(hook_proof)}")

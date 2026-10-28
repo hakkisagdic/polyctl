@@ -50,12 +50,13 @@ the phone; `polyctl init --language tr` has them in Turkish ([configuration](con
 Each file it makes - the marker, the first configuration, the board, backlog, authority and gates of
 `.polyctl`, the mailbox's README, a harness's coordination - is made exclusively: a file, folder or link
 that appears before the open is kept. In a project whose state already exists, `polyctl init` keeps every
-file it finds - `.polyctl/config.json`, `.polyctl/gates.json`, `.polyctl/board.md`, `.polyctl/backlog.md`,
-`.polyctl/authority.md` and `.polyctl/ledger/*.jsonl` - never overwriting the project's configuration, and
+file and role block it finds - `.polyctl/config.json`, `.polyctl/gates.json`, `.polyctl/board.md`, `.polyctl/backlog.md`,
+`.polyctl/authority.md` and `.polyctl/ledger/*.jsonl` - adds any role blocks (`implementer`, `reviewer`,
+`architect`) a profile or flag names that `.polyctl/config.json` lacks, and
 writes only what is missing (the playbook, the skill, the steering and `.polyctl/init-manifest.json`),
-saying which it kept and which it wrote (INIT-OWN-PRE-PUSH). A configuration that appears after init
+saying which files and role blocks it kept and which it added (INIT-OWN-PRE-PUSH, INIT-OWN-PRE-PUSH-2). A configuration that appears after init
 planned without one is named, and init exits 1 before writing the rest; run init again to plan from it.
-Existing configuration changes (`--language`, `--review-tier same-family`) and a missing manifest are
+Existing configuration changes (`--language`, `--review-tier same-family`, missing role blocks) and a missing manifest are
 written whole. On POSIX a link at the manifest's name is replaced without following it; Windows refuses
 it. The same tree primitives write `.polyctl/project-key`; if that write is refused, the machine's
 registry keeps the name.
@@ -95,10 +96,13 @@ unknown enrollment, a hook path that is not a directory, a foreign or tracked no
 hook, or a shared hooks path on Windows), it refuses with nothing written and says how a person can start
 in `lite` mode instead: `polyctl mode lite --by <name>`, then `polyctl init` (for a shared hooks path
 elsewhere, `polyctl init` succeeds and names `polyctl hooks install --allow-shared-hooks` as the next
-step). The commit gate is the `pre-commit` hook: a `pre-push` hook the repository keeps - tracked or not,
-not polyctl's - is left byte for byte by `polyctl init` and `polyctl mode full`, `polyctl init` reports in
+step). The commit gate is the `pre-commit` hook: a `pre-push` hook the repository keeps - one polyctl did not
+install, tracked in the tree `core.hooksPath` names or present before polyctl's enrollment and never
+replaced by polyctl - is left byte for byte by `polyctl init` and `polyctl mode full`, `polyctl init` reports in
 one line that the push guard is off (why it is not installed here and what installing it would take), and
-`polyctl status` and `polyctl doctor` show the push guard as off rather than an error (INIT-OWN-PRE-PUSH).
+`polyctl status` and `polyctl doctor` show the push guard as off rather than an error; a `pre-push` where
+polyctl's own stood is warned about as a changed guard, and if `polyctl mode full` cannot install an
+eligible `pre-push` it says that `pre-push` was not installed and why (INIT-OWN-PRE-PUSH, INIT-OWN-PRE-PUSH-2).
 `lite` is the basic setup without enforcement: no reviewer probe and no commit hooks, `polyctl commit`
 refuses because there is no gate to commit through, and every surface that reads the mode
 (`polyctl status`, `polyctl doctor`, the MCP status) says plainly `enforcement: off - lite` that nothing

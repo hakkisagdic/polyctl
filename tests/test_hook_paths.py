@@ -1673,7 +1673,7 @@ def test_init_in_a_clone_of_this_repository_leaves_gitignore_unchanged(
 ):
     repo = Path(__file__).resolve().parent.parent
     repo_gitignore = (repo / ".gitignore").read_bytes()
-    assert cli._gitignore_block(cli.POLYCTL_GITIGNORE).encode("utf-8") in repo_gitignore
+    assert cli.POLYCTL_GITIGNORE_MARK.encode("utf-8") not in repo_gitignore
 
     clone = _init_repo(tmp_path / "clone")
     (clone / ".gitignore").write_bytes(repo_gitignore)
@@ -1695,5 +1695,146 @@ def test_init_in_a_clone_of_this_repository_leaves_gitignore_unchanged(
     assert (clone / ".gitignore").read_bytes() == repo_gitignore
     assert cli.cmd_init(_cfg(clone), _init_args(profile="agy-codex", no_mcp=True)) == 0
     assert (clone / ".gitignore").read_bytes() == repo_gitignore
-    _, _, removed_count, unclaimed = cli._gitignore_without_polyctl(str(clone))
-    assert removed_count == 1 + len(cli.POLYCTL_GITIGNORE) and unclaimed == []
+    _, keep, removed_count, unclaimed = cli._gitignore_without_polyctl(str(clone))
+    assert removed_count == 0 and unclaimed == []
+    assert "\n".join(keep).encode("utf-8") == repo_gitignore
+
+
+def test_reinit_adds_missing_reviewer_or_architect_blocks_and_names_kept_and_added_roles(
+    tmp_path, monkeypatch, capsys
+):
+    import json
+
+    root = _init_repo(tmp_path / "reinit-roles")
+    monkeypatch.setattr(
+        cli,
+        "_reviewer_probe",
+        lambda probe_cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
+            "configured": True,
+            "ok": True,
+            "route": "fixture-reviewer",
+            "binary": sys.executable,
+            "version": "fixture",
+            "reason": "exact nonce echoed",
+            "kind": "success",
+        },
+    )
+
+    assert (
+        cli.cmd_init(
+            _cfg(root),
+            _init_args(profile=None, implementer="claude-code", review_tier="person"),
+        )
+        == 0
+    )
+    capsys.readouterr()
+    first_cfg = json.loads((root / ".polyctl" / "config.json").read_text(encoding="utf-8"))
+    assert "implementer" in first_cfg and "architect" in first_cfg
+    assert "reviewer" not in first_cfg
+
+    # Re-running init with --profile claude-codex adds the missing reviewer while keeping implementer and architect.
+    assert cli.cmd_init(_cfg(root), _init_args(profile="claude-codex")) == 0
+    reinit_out = _strip_colour(capsys.readouterr().out)
+    second_cfg = json.loads((root / ".polyctl" / "config.json").read_text(encoding="utf-8"))
+    assert second_cfg["implementer"] == first_cfg["implementer"]
+    assert second_cfg["architect"] == first_cfg["architect"]
+    assert "reviewer" in second_cfg
+    assert "kept   .polyctl/config.json (implementer, architect)" in reinit_out
+    assert "wrote  .polyctl/config.json (+reviewer)" in reinit_out
+
+    # When architect is missing from an existing config, re-init adds architect and keeps implementer and reviewer.
+    without_arch = dict(second_cfg)
+    del without_arch["architect"]
+    (root / ".polyctl" / "config.json").write_text(
+        json.dumps(without_arch, indent=2) + "\n", encoding="utf-8"
+    )
+    assert cli.cmd_init(_cfg(root), _init_args(profile="claude-codex")) == 0
+    arch_out = _strip_colour(capsys.readouterr().out)
+    third_cfg = json.loads((root / ".polyctl" / "config.json").read_text(encoding="utf-8"))
+    assert third_cfg["implementer"] == without_arch["implementer"]
+    assert third_cfg["reviewer"] == without_arch["reviewer"]
+    assert "architect" in third_cfg
+    assert "kept   .polyctl/config.json (implementer, reviewer)" in arch_out
+    assert "wrote  .polyctl/config.json (+architect)" in arch_out
+
+
+def test_replaced_polyctl_pre_push_in_git_hooks_is_warned_as_changed_guard_not_own_pre_push(
+    tmp_path, monkeypatch, capsys
+):
+    import json
+
+    _make_current_polyctl_available(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "_reviewer_probe",
+        lambda probe_cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
+            "configured": True,
+            "ok": True,
+            "route": "fixture-reviewer",
+            "binary": sys.executable,
+            "version": "fixture",
+            "reason": "exact nonce echoed",
+            "kind": "success",
+        },
+    )
+
+    # 1. Pre-existing untracked pre-push present before enrollment is kept as the repository's own.
+    pre_repo = _init_repo(tmp_path / "pre-existing-untracked-push")
+    pre_hook = pre_repo / ".git" / "hooks" / "pre-push"
+    pre_hook.parent.mkdir(parents=True, exist_ok=True)
+    custom_push = b"#!/bin/sh\necho pre-enrollment hook\n"
+    pre_hook.write_bytes(custom_push)
+    pre_hook.chmod(0o755)
+    assert cli.cmd_init(_cfg(pre_repo), _init_args(profile="agy-codex")) == 0
+    _git(pre_repo, "add", cli.PROJECT_MARKER)
+    cli.cmd_hooks(_cfg(pre_repo), _args("install"))
+    capsys.readouterr()
+    assert pre_hook.read_bytes() == custom_push
+    assert (pre_repo / ".git" / "hooks" / "pre-commit").is_file()
+    assert cli._own_pre_push_target(cli._polyctl_hook_inventory(str(pre_repo))) is not None
+
+    # 2. A project where polyctl installed pre-push that an agent then overwrites with `exit 0` is a changed guard.
+    repo = _init_repo(tmp_path / "tampered-push")
+    assert cli.cmd_init(_cfg(repo), _init_args(profile="agy-codex")) == 0
+    _git(repo, "add", cli.PROJECT_MARKER)
+    assert cli.cmd_hooks(_cfg(repo), _args("install")) == 0
+    capsys.readouterr()
+
+    push_hook = repo / ".git" / "hooks" / "pre-push"
+    assert b"polyctl-hook-v7" in push_hook.read_bytes()
+    push_hook.write_bytes(b"#!/bin/sh\nexit 0\n")
+    push_hook.chmod(0o755)
+
+    assert cli._own_pre_push_target(cli._polyctl_hook_inventory(str(repo))) is None
+    loaded = dict(A.load_config(str(repo)), root=str(repo))
+    facts = cli.status_facts(loaded)
+    assert "push_guard" not in facts
+    panel = _strip_colour(cli.render(loaded, facts=facts))
+    assert "push guard  off (" not in panel
+
+    monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)
+    monkeypatch.setattr(A, "colour_enabled", lambda stream=None: True)
+    cli.cmd_doctor(loaded, SimpleNamespace(check=False))
+    raw_doctor = capsys.readouterr().out
+    doctor = _strip_colour(raw_doctor)
+    assert "push guard" not in doctor
+    assert re.search(
+        r"^push hook\s+foreign / untracked\s+polyctl push-window hook unavailable$",
+        doctor,
+        re.M,
+    )
+    for line in raw_doctor.splitlines():
+        if "push hook" in line:
+            assert "\033[33m" in line
+
+    assert cli.cmd_init(loaded, _init_args(profile="agy-codex")) == 1
+    refused_init = _strip_colour(capsys.readouterr().out)
+    assert "init refused: commit hooks cannot be installed" in refused_init
+    assert "pre-push hook at" in refused_init and "foreign / untracked" in refused_init
+
+    # Even if .git/polyctl-enrolled.json loses its pre_push field, .polyctl/init-manifest.json still names it.
+    enrolled_file = repo / ".git" / A.ENROLLMENT_RECORD
+    enrolled_doc = json.loads(enrolled_file.read_text(encoding="utf-8"))
+    enrolled_doc.pop("pre_push", None)
+    enrolled_file.write_text(json.dumps(enrolled_doc), encoding="utf-8")
+    assert cli._own_pre_push_target(cli._polyctl_hook_inventory(str(repo))) is None

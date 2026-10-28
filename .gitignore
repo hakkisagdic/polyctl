@@ -9,7 +9,7 @@ __pycache__/
 # ledger lock sidecars (polyctl storage)
 .polyctl/ledger/*.lock
 
-# polyctl: mail is transient; the ledger and reviews are not (polyctl: 6 lines below, 6269e247fedc1f14)
+# mail is transient; the ledger and reviews are not
 agent-mail/*.md
 !agent-mail/README.md
 .polyctl/inbox/

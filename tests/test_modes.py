@@ -612,17 +612,83 @@ def test_mode_full_and_init_accept_own_pre_push_and_still_require_pre_commit_and
     assert "mode full refused" in refused and "pre-commit hook at" in refused
     assert cli.project_mode(dict(A.load_config(str(repo)), root=str(repo))) == "lite"
 
-    # 3. Shared hooks directory with a custom pre-push still requires --allow-shared-hooks for mode full.
+    # 3. Shared hooks directory with a pre-enrollment custom pre-push still requires --allow-shared-hooks for mode full.
+    shared_repo = tmp_path / "repo-shared-push"
+    shared_repo.mkdir()
+    _git_repo(str(shared_repo), with_marker=False)
     shared_dir = tmp_path / "shared-hooks"
     shared_dir.mkdir()
     (shared_dir / "pre-push").write_bytes(custom_push)
     (shared_dir / "pre-push").chmod(stat.S_IRWXU)
-    subprocess.run(["git", "config", "core.hooksPath", str(shared_dir)], cwd=repo, check=True)
-    assert cli.cmd_mode(dict(A.load_config(str(repo)), root=str(repo)), _mode_args("full", allow_shared_hooks=False)) == 1
+    subprocess.run(["git", "config", "core.hooksPath", str(shared_dir)], cwd=shared_repo, check=True)
+    assert cli.cmd_mode({"root": str(shared_repo)}, _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+    assert cli.cmd_init({"root": str(shared_repo)}, _init_args(profile="agy-codex")) == 0
+    _plain(capsys)
+    subprocess.run(["git", "add", ".polyctl-project"], cwd=shared_repo, check=True)
+    assert cli.cmd_mode(dict(A.load_config(str(shared_repo)), root=str(shared_repo)), _mode_args("full", allow_shared_hooks=False)) == 1
     shared_refused = _plain(capsys)
     assert "--allow-shared-hooks" in shared_refused
     if os.name != "nt":
-        assert cli.cmd_mode(dict(A.load_config(str(repo)), root=str(repo)), _mode_args("full", allow_shared_hooks=True)) == 0
+        assert cli.cmd_mode(dict(A.load_config(str(shared_repo)), root=str(shared_repo)), _mode_args("full", allow_shared_hooks=True)) == 0
         _plain(capsys)
         assert (shared_dir / "pre-push").read_bytes() == custom_push
-        assert cli.project_mode(dict(A.load_config(str(repo)), root=str(repo))) == "full"
+        assert cli.project_mode(dict(A.load_config(str(shared_repo)), root=str(shared_repo))) == "full"
+
+
+def test_mode_full_refuses_tampered_pre_push_and_reports_when_pre_push_install_fails(
+    tmp_path, monkeypatch, capsys
+):
+    from tests.test_hook_paths import _make_current_polyctl_available
+
+    bin_dir = tmp_path / "bin"
+    _make_fake_claude_reviewer(str(bin_dir))
+    monkeypatch.setenv("PATH", str(bin_dir), prepend=os.pathsep)
+    _make_current_polyctl_available(monkeypatch, tmp_path)
+
+    repo = tmp_path / "mode-full-push-failure"
+    repo.mkdir()
+    _git_repo(str(repo), with_marker=False)
+    assert cli.cmd_mode({"root": str(repo)}, _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+    assert cli.cmd_init({"root": str(repo)}, _init_args(profile="agy-codex")) == 0
+    _plain(capsys)
+    subprocess.run(["git", "add", ".polyctl-project"], cwd=repo, check=True)
+
+    # Install pre-commit alone and make writing pre-push fail with an OSError during `polyctl mode full`.
+    hooks_dir = repo / ".git" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    pre_commit = hooks_dir / "pre-commit"
+    pre_commit.write_bytes(cli._render_local_hook("pre-commit", ".", cli._hook_fallback()))
+    pre_commit.chmod(stat.S_IRWXU)
+
+    real_write = cli._atomic_hook_write
+
+    def fail_pre_push(path, payload, *args, **kwargs):
+        if os.path.basename(path) == "pre-push":
+            raise OSError("simulated pre-push write error")
+        return real_write(path, payload, *args, **kwargs)
+
+    monkeypatch.setattr(cli, "_atomic_hook_write", fail_pre_push)
+    cfg = dict(A.load_config(str(repo)), root=str(repo))
+    assert cli.cmd_mode(cfg, _mode_args("full")) == 0
+    out = _plain(capsys)
+    assert "mode = 'full'" in out
+    assert "pre-push was not installed" in out
+    assert "simulated pre-push write error" in out
+    assert not (hooks_dir / "pre-push").exists()
+
+    # Restore hook writer, install both hooks, then tamper with pre-push in .git/hooks and switch lite -> full:
+    # `mode full` must refuse the changed guard rather than treating it as the repository's own.
+    monkeypatch.setattr(cli, "_atomic_hook_write", real_write)
+    assert cli.cmd_hooks(dict(A.load_config(str(repo)), root=str(repo)), SimpleNamespace(action="install", allow_shared_hooks=False)) == 0
+    _plain(capsys)
+    assert (hooks_dir / "pre-push").exists()
+    assert cli.cmd_mode(dict(A.load_config(str(repo)), root=str(repo)), _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+    (hooks_dir / "pre-push").write_bytes(b"#!/bin/sh\nexit 0\n")
+    (hooks_dir / "pre-push").chmod(stat.S_IRWXU)
+    assert cli.cmd_mode(dict(A.load_config(str(repo)), root=str(repo)), _mode_args("full")) == 1
+    refused = _plain(capsys)
+    assert "mode full refused" in refused
+    assert "pre-push hook at" in refused and "foreign / untracked" in refused
