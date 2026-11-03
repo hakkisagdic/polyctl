@@ -8,8 +8,8 @@ class Polyctl < Formula
 
   desc "Your agents commit, every change is granted first or flagged"
   homepage "https://hakkisagdic.github.io/polyctl/"
-  url "https://github.com/hakkisagdic/polyctl/archive/refs/tags/v0.6.0.tar.gz"
-  sha256 "4db6b1ee88180c2e6dfc6a60f82eacce64834bfd72930f2e4ed07bb1ecec8af3"
+  url "https://github.com/hakkisagdic/polyctl/archive/refs/tags/v0.7.0.tar.gz"
+  sha256 "c64478c9116c1e3ff720a8ff2a5f5596380ddfdf6280f6577450186f506a69ac"
   license "MIT"
   head "https://github.com/hakkisagdic/polyctl.git", branch: "main"
 
