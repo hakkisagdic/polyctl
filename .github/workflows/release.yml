@@ -25,11 +25,19 @@ permissions:
 jobs:
   tests:
     # A tag publishes only what passed: the support floor and a current interpreter.
+    # On 2026-10-21 GitHub moved ubuntu-latest to Ubuntu 26.04, which has no Python 3.9
+    # build at actions/setup-python (failing the v0.7.0 release run 41642398467 before
+    # it built anything): the 3.9 leg runs on ubuntu-24.04, the newest Ubuntu image with
+    # a 3.9 build, and the pin moves when that image is retired (RELEASE-PY39-IMAGE).
     strategy:
       fail-fast: true
       matrix:
-        python: ['3.9', '3.12']
-    runs-on: ubuntu-latest
+        include:
+          - os: ubuntu-24.04
+            python: '3.9'
+          - os: ubuntu-latest
+            python: '3.12'
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     env:
       PYTHONDONTWRITEBYTECODE: '1'
