@@ -5,9 +5,9 @@
    `polyctl.ps1` beside it with every argument it was given and exits with its exit code), with the
    same parser, exit codes and `--version` line, while help and error messages name the command the
    person typed; `poly` is not offered because a BlackArch tool already uses that name.
-2. `CHANGELOG.md` opens `[Unreleased]` with the old name (`ao`, `ao-orchestrator` on PyPI,
-   `github.com/hakkisagdic/agent-orchestrator`), and `README.md` and `README.tr.md` state the same
-   in one sentence under the install section.
+2. `CHANGELOG.md` opens the `[0.7.0]` section (`## [0.7.0] - ...`, the release the rename ships in)
+   with the old name (`ao`, `ao-orchestrator` on PyPI, `github.com/hakkisagdic/agent-orchestrator`),
+   and `README.md` and `README.tr.md` state the same in one sentence under the install section.
 3. `README.md`, `README.tr.md`, `docs/windows.md`, `docs/commands.md` and `docs/commands.tr.md`
    state the 0.7.0 platform support plainly, and `docs/backlog.md` carries the `WINDOWS-LANE-0.7`
    row they point to.
@@ -343,11 +343,11 @@ def test_homebrew_formula_windows_wrapper_and_command_docs_offer_pctl(tmp_path):
 
 def test_changelog_and_readmes_state_the_old_name_once_and_the_platform_support_plainly():
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    unreleased = changelog.split("## [Unreleased]\n", 1)[1].split("\n## ", 1)[0].strip()
-    assert unreleased.startswith(OLD_NAME_SENTENCE)
-    assert unreleased.count("ao-orchestrator") == 1
-    assert unreleased.count("github.com/hakkisagdic/agent-orchestrator") == 1
-    [after_rename_line] = [line for line in unreleased.splitlines() if "(POLYCTL-AFTER-RENAME)" in line]
+    release_070 = changelog.split("## [0.7.0] - ", 1)[1].split("\n", 1)[1].split("\n## ", 1)[0].strip()
+    assert release_070.startswith(OLD_NAME_SENTENCE)
+    assert release_070.count("ao-orchestrator") == 1
+    assert release_070.count("github.com/hakkisagdic/agent-orchestrator") == 1
+    [after_rename_line] = [line for line in release_070.splitlines() if "(POLYCTL-AFTER-RENAME)" in line]
     assert "`bin/pctl.ps1`" in after_rename_line
     assert "`bin/polyctl.ps1`" not in after_rename_line
 

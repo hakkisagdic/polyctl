@@ -38,14 +38,18 @@ polyctl catchup --plan
 
 ## 2. Bump the version (anyone prepares; it lands through polyctl)
 
-The version is written once, as `__version__` in `src/polyctl/__init__.py`: `pyproject.toml` and
-`polyctl --version` read it, and the release workflow refuses a tag that differs from it. In
+The package reads its version from `__version__` in `src/polyctl/__init__.py` (`pyproject.toml` and
+`polyctl --version` read it, and the release workflow refuses a tag that differs from it); a release
+also sets `action.yml`'s `polyctl-version` default (`tests/test_github_action.py`) and
+`index.html`'s two `v<version>` stamps (`tests/test_landing_page.py`). In
 CHANGELOG.md, rename `## [Unreleased]` to `## [<version>] - <date>`, open an empty
 `## [Unreleased]` above it, point the `[Unreleased]` link at `v<version>...HEAD` and add a
 `[<version>]` link from the previous tag. The clone must still run with nothing installed.
 
 ```bash
 sed -i.bak "s/^__version__ = .*/__version__ = \"$V\"/" src/polyctl/__init__.py && rm src/polyctl/__init__.py.bak
+sed -i.bak "/^  polyctl-version:/,/^    default:/s/^    default: .*/    default: \"$V\"/" action.yml && rm action.yml.bak
+sed -i.bak "s/v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/v$V/g" index.html && rm index.html.bak
 PYTHONPATH=src python3 -m polyctl --version
 ./bin/polyctl adapters
 polyctl verify
