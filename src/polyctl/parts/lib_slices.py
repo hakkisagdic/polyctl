@@ -3220,9 +3220,11 @@ def export_otlp(root, cfg=None, *, attested=False):
 
     spans = []
     for key in group_order:
+        # Same-second rows of one step keep the ledger's own append order; breaking ties by
+        # record_digest put an earlier grant row after a later one whenever its hash sorted higher (CI-LINUX-0.7).
         group = sorted(
             grouped[key],
-            key=lambda item: (item["start_ns"], _OTLP_STEP_RANK.get(item["step"], 9), item["record_digest"]),
+            key=lambda item: (item["start_ns"], _OTLP_STEP_RANK.get(item["step"], 9)),
         )
         trace_slice = next((item["slice"] for item in reversed(group) if item["slice"]), None)
         trace_candidate = next((item["candidate"] for item in reversed(group) if item["candidate"]), None)

@@ -60,6 +60,15 @@ def _own_environment(environ):
     environ["USERPROFILE"] = SESSION_HOME
 
 
+def write_gitconfig(home):
+    """Give `home` the suite's git identity and turn Git's background maintenance off (SUITE-MAINTENANCE,
+    CI-LINUX-0.7)."""
+    os.makedirs(home, exist_ok=True)
+    with open(os.path.join(home, ".gitconfig"), "w", encoding="utf-8") as fh:
+        fh.write("[user]\n\tname = %s\n\temail = %s\n" % GIT_IDENTITY)
+        fh.write("[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n")
+
+
 def _own_home():
     """The suite's home holds only a git identity and Git's background maintenance turned off, and the
     environment names it.
@@ -72,9 +81,7 @@ def _own_home():
     """
     os.makedirs(SESSION_HOME)
     os.makedirs(SESSION_BIN)
-    with open(os.path.join(SESSION_HOME, ".gitconfig"), "w", encoding="utf-8") as fh:
-        fh.write("[user]\n\tname = %s\n\temail = %s\n" % GIT_IDENTITY)
-        fh.write("[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n")
+    write_gitconfig(SESSION_HOME)
     _own_environment(os.environ)
 
 

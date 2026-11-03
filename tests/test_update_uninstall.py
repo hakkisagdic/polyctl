@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 
 from polyctl import cli, lib as A
-from tests.conftest import GIT
+from tests.conftest import GIT, write_gitconfig
 from tests.test_safe_remove import LAUNCHD_ONLY, _executable, _home, _jobs, _launchd, _plain, _project
 
 POSIX_STUBS = "the stub programs are /bin/sh scripts"
@@ -55,6 +55,7 @@ def clone(tmp_path, monkeypatch):
 
     git runs with a scratch home, so the pull reads none of the configuration of the machine the tests run on.
     """
+    write_gitconfig(tmp_path / "git-home")
     monkeypatch.setenv("HOME", str(tmp_path / "git-home"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "git-home" / ".config"))
     upstream = tmp_path / "upstream"

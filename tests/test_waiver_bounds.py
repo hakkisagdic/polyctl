@@ -520,18 +520,38 @@ def test_gates_waiver_with_review_enabled_checks_review_and_combines_waiver_trai
 
     otlp_doc = A.export_otlp(root, cfg=on_cfg, attested=True)
     otlp_spans = otlp_doc["resourceSpans"][0]["scopeSpans"][0]["spans"]
-    waiver_attrs = {
-        span["name"]: {
-            item["key"]: item["value"].get("stringValue")
-            for item in span.get("attributes", [])
-        }.get("polyctl.waiver.id")
+    spans_by_id = {
+        span["spanId"]: (
+            span,
+            {
+                item["key"]: (
+                    item["value"]["boolValue"]
+                    if "boolValue" in item["value"]
+                    else item["value"].get("stringValue")
+                )
+                for item in span.get("attributes", [])
+            },
+        )
         for span in otlp_spans
-        if span["name"] in ("grant", "commit")
     }
-    assert waiver_attrs == {
-        "grant": f"{rwaiver['id']}, {gwaiver['id']}",
-        "commit": f"{rwaiver['id']}, {gwaiver['id']}",
-    }
+    grant_waivers = [
+        (attrs.get("polyctl.granted"), attrs.get("polyctl.waiver.id"))
+        for span, attrs in spans_by_id.values()
+        if span["name"] == "grant"
+    ]
+    assert grant_waivers == [
+        (False, None),
+        (True, gwaiver["id"]),
+        (True, f"{rwaiver['id']}, {gwaiver['id']}"),
+    ]
+    commit_span, commit_attrs = next(
+        (span, attrs) for span, attrs in spans_by_id.values() if span["name"] == "commit"
+    )
+    _, granted_attrs = spans_by_id[commit_span["parentSpanId"]]
+    assert granted_attrs["polyctl.step"] == "grant"
+    assert granted_attrs["polyctl.granted"] is True
+    assert granted_attrs["polyctl.waiver.id"] == f"{rwaiver['id']}, {gwaiver['id']}"
+    assert commit_attrs["polyctl.waiver.id"] == f"{rwaiver['id']}, {gwaiver['id']}"
 
 
 def test_catchup_limit_bounds_gate_reruns_and_reports_expired_failing_gates_waivers_and_configured_wait(

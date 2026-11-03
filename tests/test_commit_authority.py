@@ -750,6 +750,7 @@ def _install_current_hook_for_git(root, project, tmp_path, monkeypatch):
             encoding="utf-8",
         )
         shim.chmod(0o755)
+    conftest.write_gitconfig(A.HOME)
     monkeypatch.setenv("HOME", A.HOME)
     monkeypatch.setenv("USERPROFILE", A.HOME)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))

@@ -933,3 +933,68 @@ def test_otlp_exports_all_waiver_ids_from_combined_grant_and_commit_trailer(proj
     ]
     assert len(grant_spans) == 1
     assert grant_spans[0]["polyctl.slice"] == "SLICE-A"
+
+
+def test_otlp_orders_same_second_grant_spans_by_ledger_order(project):
+    """Same-second grant rows in authority.jsonl stay in ledger order even when an earlier row's
+    record_digest sorts higher than a later row's (CI-LINUX-0.7)."""
+    from polyctl.storage import chained_row_digest
+
+    root = project["root"]
+    cand = {
+        "head": "a" * 40,
+        "index_tree": "b" * 40,
+        "changed_paths": ["doc.md"],
+        "changed_count": 1,
+        "digest": "sha256:" + "c" * 64,
+    }
+    scope = A.candidate_scope(cand)
+    with _at_epoch(1700002000):
+        refused = A.record_authority(
+            root,
+            False,
+            ["no APPROVED prospective review is bound to this staged candidate"],
+            "tree-1",
+            "V-1",
+            candidate=cand,
+            scope=scope,
+        )
+        early_grant = A.record_authority(
+            root,
+            True,
+            [],
+            "tree-1",
+            "V-1",
+            "C-1700002000-1",
+            candidate=cand,
+            scope=scope,
+            waiver="W-1700002000-1",
+            waived_gates=["focused"],
+        )
+        late_grant = A.record_authority(
+            root,
+            True,
+            [],
+            "tree-1",
+            "V-1",
+            "C-1700002000-2",
+            candidate=cand,
+            scope=scope,
+            waiver="W-1700002000-2",
+            gates_waiver="W-1700002000-1",
+            waived_gates=["focused"],
+        )
+
+    assert chained_row_digest(early_grant, A.AUTHORITY_CHAIN) > chained_row_digest(late_grant, A.AUTHORITY_CHAIN)
+
+    doc = A.export_otlp(root, cfg=project)
+    spans = doc["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    grant_spans = [_attr_map(s["attributes"]) for s in spans if s["name"] == "grant"]
+    assert [
+        (attrs["polyctl.granted"], attrs.get("polyctl.waiver.id"))
+        for attrs in grant_spans
+    ] == [
+        (False, None),
+        (True, "W-1700002000-1"),
+        (True, "W-1700002000-2, W-1700002000-1"),
+    ]
