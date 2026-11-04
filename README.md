@@ -153,7 +153,7 @@ These are not style preferences. Each one is a failure that cost real hours.
 | **full** — every capability exercised in a production run | kiro, claude-code, antigravity |
 | **partial** — reads state, some capabilities unexercised | opencode, command-code, codex, qoder, openai-api, warp |
 | **documented** — written from published docs, not yet run | cursor-agent |
-| **untested** — schema present, needs a first run | gemini, aider, amp, copilot, amazon-q, deepseek, ollama, droid, grok, hermes, kilocode, kimi, omp, pi, pr-agent, qwen, reasonix, trae |
+| **untested** — schema present, needs a first run | gemini, aider, amp, copilot, amazon-q, deepseek, ollama, droid, grok, harnessrouter, hermes, kilocode, kimi, omp, pi, pr-agent, qwen, reasonix, trae |
 
 Warp uses `oz`; polyctl finds it in the Warp app bundle under `/Applications` or
 `~/Applications` even when it is off PATH. `polyctl init --agent warp` uses the

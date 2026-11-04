@@ -17,6 +17,7 @@ from polyctl import cli, lib as A, mcp, settings as S, storage
 
 @pytest.mark.parametrize("adapter, model, family", [
     ("openai-api", "local/glm-5.3", "zhipu"),
+    ("harnessrouter", "claude-code/claude-sonnet-4-6", "anthropic"),
     ("pr-agent", "gpt-5", "openai"),
 ])
 @pytest.mark.parametrize("fallback", [False, True], ids=["primary", "fallback"])
@@ -28,7 +29,7 @@ def test_doctor_accepts_composed_file_tool_reviewers(project, adapter, model, fa
     assert not [problem for problem in cli._actor_grant_problems(cfg) if problem[0].startswith("reviewer-tools:")]
 
 
-@pytest.mark.parametrize("adapter", ["openai-api", "pr-agent"])
+@pytest.mark.parametrize("adapter", ["openai-api", "harnessrouter", "pr-agent"])
 def test_a_file_tool_command_without_the_tool_route_kind_is_still_named(project, adapter):
     route = A.compose_reviewer(adapter, model="m", family="other")
     route.pop("kind")

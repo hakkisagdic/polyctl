@@ -1,17 +1,18 @@
-"""polyctl-api-review: an answer from an OpenAI-compatible chat API, run by polyctl as a tool reviewer (API-REVIEWER).
+"""polyctl-api-review: an answer from an OpenAI-compatible chat API or a UHP /responses gateway, run by polyctl as a tool reviewer (API-REVIEWER).
 
 polyctl hands a tool reviewer the review prompt, which carries the candidate's diff, and a file to answer
 in (docs/adapters.md, "A reviewer can be a tool polyctl runs"). Without `--tree`, this client asks a
-provider's `/chat/completions` once, with the prompt as the only message and no tools, and writes the
-answer it gets. With `--tree DIR`, it offers four read-only function tools (`read`, `grep`, `glob`,
-`list`) confined to the unpacked candidate tree at `DIR`, answers tool calls within per-answer and
-per-turn bounds (keeping `tools` on every request of the turn and sending `tool_choice: "none"` once
-a bound is reached), and writes the final verdict and the tool usage (`rounds`, `read_bytes`) beside
-it (API-REVIEWER-TOOLS, API-REVIEWER-TOOLS-3).
+provider's `/chat/completions` (or `/responses` under `--protocol uhp`) once, with the prompt as the
+only message and no tools, and writes the answer it gets. With `--tree DIR`, it offers four read-only
+function tools (`read`, `grep`, `glob`, `list`) confined to the unpacked candidate tree at `DIR`,
+answers tool calls within per-answer and per-turn bounds (keeping `tools` on every request of the turn
+and sending `tool_choice: "none"` once a bound is reached), and writes the final verdict and the tool
+usage (`rounds`, `read_bytes`) beside it (API-REVIEWER-TOOLS, API-REVIEWER-TOOLS-3).
 
 The provider is the machine's. `review.api_providers` names each by a word, with its base URL and
-the environment variable that holds its key; the model is `<provider>/<model>`. The key is read
-from that variable at the moment it is sent, sent to that URL alone - over HTTPS, or to this
+the environment variable that holds its key; the model is `<provider>/<model>` (or under `--protocol uhp`,
+`[<provider>/][<harness_id>/]<model>` when the adapter declares `--default-url` and `--key-env`). The key
+is read from that variable at the moment it is sent, sent to that URL alone - over HTTPS, or to this
 machine with no proxy between - and never carried through a redirect. It is never written anywhere.
 """
 import argparse
@@ -25,6 +26,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 from . import __version__, lib as A, outbound
 
@@ -168,6 +170,51 @@ def _content(answer):
     if isinstance(content, list):
         content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
     return content if isinstance(content, str) else ""
+
+
+def _uhp_content(answer):
+    """The assistant text of a UHP `/responses` object: output message items (`output_text` parts), or `output_text`."""
+    if not isinstance(answer, dict):
+        return ""
+    output = answer.get("output")
+    if isinstance(output, list):
+        parts = []
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") not in (None, "message") or item.get("role") not in (None, "assistant"):
+                continue
+            content = item.get("content")
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") in (None, "output_text", "text"):
+                        text = part.get("text")
+                        if isinstance(text, str):
+                            parts.append(text)
+        joined = "".join(parts)
+        if joined:
+            return joined
+    top = answer.get("output_text")
+    return top if isinstance(top, str) else ""
+
+
+def _uhp_problem(provider, model, answer):
+    """Refusal reason when a UHP `/responses` payload failed, fell back to another model, or answered under another model."""
+    if not isinstance(answer, dict):
+        return f"{provider} gave no answer for {model}"
+    status = answer.get("status")
+    if answer.get("error") or status in ("failed", "incomplete", "cancelled"):
+        return f"{provider} did not complete the UHP review for {model} (status: {status or 'error'})"
+    meta = answer.get("metadata") if isinstance(answer.get("metadata"), dict) else {}
+    if meta.get("model_fallback"):
+        return (f"{provider} answered for {model} after a model fallback, which polyctl refuses so a reviewer "
+                "cannot silently change model or family")
+    answered_model = answer.get("model")
+    if isinstance(answered_model, str) and answered_model.strip() and answered_model.strip() != model:
+        return f"{provider} answered with model {answered_model.strip()!r}, not the requested {model!r}"
+    return None
 
 
 def _no_answer(provider, model, answer):
@@ -730,11 +777,16 @@ def _dispatch_tool(state, name, raw_args):
     return f"error: unknown tool {name!r}"
 
 
-def _ask_provider(opener, url, key, payload, timeout):
+def _ask_provider(opener, url, key, payload, timeout, endpoint_path="/chat/completions", extra_headers=None):
     body = json.dumps(payload).encode(UTF8)
-    request = urllib.request.Request(url + "/chat/completions", data=body, method="POST", headers={
-        "Content-Type": "application/json", "Authorization": f"Bearer {key}",
-        "User-Agent": f"polyctl/{__version__}"})
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {key}",
+        "User-Agent": f"polyctl/{__version__}",
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+    request = urllib.request.Request(url + endpoint_path, data=body, method="POST", headers=headers)
     with opener.open(request, timeout=timeout) as response:
         return json.loads(response.read().decode(UTF8, "replace"))
 
@@ -753,6 +805,14 @@ def main(argv=None):
     A.utf8_streams()
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("--protocol", choices=("chat", "uhp"), default="chat",
+                        help="wire protocol: chat (/chat/completions) or uhp (/responses)")
+    parser.add_argument("--default-url", default=None,
+                        help="default base URL when --model omits a provider in review.api_providers")
+    parser.add_argument("--base-url-env", default=None,
+                        help="environment variable overriding --default-url")
+    parser.add_argument("--key-env", default=None,
+                        help="environment variable holding the key for the default base URL")
     parser.add_argument("--model", required=True, help="<provider>/<model>, the provider named in review.api_providers")
     parser.add_argument("--diff-file", required=True, help="the candidate polyctl wrote; the prompt carries the same diff")
     parser.add_argument("--output", required=True, help="where the answer is written")
@@ -765,18 +825,54 @@ def main(argv=None):
         print(f"{parser.prog}: {text}", file=sys.stderr)
         return code
 
-    provider, _, model = args.model.partition("/")
-    if not provider or not model:
-        return refuse(f"--model is {args.model!r}; it names <provider>/<model>")
+    if args.protocol == "uhp" and args.tree is not None:
+        return refuse("--tree cannot be used with --protocol uhp: a UHP endpoint runs tools inside its own "
+                      "container and reserves the client tools field")
+
     from . import settings
     try:
         table = providers(settings.get({}, "review.api_providers"))
     except ValueError as exc:
         return refuse(str(exc))
-    if provider not in table:
-        return refuse(f"review.api_providers names no {provider}; the machine's providers are "
-                      f"{', '.join(sorted(table)) or 'none'}")
-    url, variable = table[provider]
+
+    harness_tag = None
+    if args.protocol == "uhp" and (args.default_url or args.base_url_env) and args.key_env:
+        head, sep, tail = args.model.partition("/")
+        if sep and head in table:
+            provider = head
+            url, variable = table[provider]
+            model_spec = tail
+        else:
+            raw_url = (os.environ.get(args.base_url_env) if args.base_url_env else None) or args.default_url
+            provider = args.base_url_env.split("_", 1)[0].lower() if args.base_url_env else "uhp"
+            try:
+                url, variable = providers([f"{provider} {raw_url} {args.key_env}"])[provider]
+            except ValueError as exc:
+                return refuse(str(exc))
+            model_spec = args.model
+        if "/" in model_spec:
+            harness_tag, _, model = model_spec.partition("/")
+            if not harness_tag or not model:
+                return refuse(f"--model is {args.model!r}; it names [<provider>/][<harness_id>/]<model>")
+        else:
+            model = model_spec
+        if not model:
+            return refuse(f"--model is {args.model!r}; it names [<provider>/][<harness_id>/]<model>")
+    else:
+        provider, _, model_spec = args.model.partition("/")
+        if not provider or not model_spec:
+            return refuse(f"--model is {args.model!r}; it names <provider>/<model>")
+        if provider not in table:
+            return refuse(f"review.api_providers names no {provider}; the machine's providers are "
+                          f"{', '.join(sorted(table)) or 'none'}")
+        url, variable = table[provider]
+        if args.protocol == "uhp" and "/" in model_spec:
+            harness_tag, _, model = model_spec.partition("/")
+            if not harness_tag or not model:
+                return refuse(f"--model is {args.model!r}; it names <provider>/[<harness_id>/]<model>")
+        else:
+            model = model_spec
+
     key = os.environ.get(variable)
     if not key:
         return refuse(f"{variable} is not set, and it holds {provider}'s key")
@@ -794,6 +890,37 @@ def main(argv=None):
     if urllib.parse.urlparse(url).hostname in LOOPBACK:
         handlers.append(urllib.request.ProxyHandler({}))
     opener = outbound.opener(*handlers)
+
+    if args.protocol == "uhp":
+        uhp_payload = {"model": model, "input": prompt, "stream": False}
+        if harness_tag:
+            uhp_payload["metadata"] = {"harness_id": harness_tag}
+        try:
+            answer = _ask_provider(
+                opener, url, key, uhp_payload, args.timeout,
+                endpoint_path="/responses",
+                extra_headers={"Idempotency-Key": uuid.uuid4().hex},
+            )
+        except urllib.error.HTTPError as exc:
+            if outbound.is_redirect(exc.code):
+                return refuse(f"{provider} answered HTTP {exc.code}, a redirect, which polyctl does not follow with the key: "
+                              "write the URL its endpoint moved to in review.api_providers", FAILED)
+            try:
+                said = _scrub(exc.read(300).decode(UTF8, "replace"), key) if exc.fp else ""
+            except Exception:
+                said = ""
+            detail = f": {' '.join(said.split())}" if said else ""
+            return refuse(f"{provider} answered HTTP {exc.code}{detail}", FAILED)
+        except Exception as exc:
+            return refuse(f"{provider} could not be asked ({type(exc).__name__}: {_scrub(str(exc), key)})", FAILED)
+        problem = _uhp_problem(provider, model, answer)
+        if problem:
+            return refuse(problem, FAILED)
+        text = _uhp_content(answer)
+        if not text.strip():
+            return refuse(_no_answer(provider, model, answer if isinstance(answer, dict) else {}), FAILED)
+        _write_answer(args.output, text, rounds=0, read_bytes=0)
+        return 0
 
     use_tools = args.tree is not None
     state = {
@@ -907,7 +1034,7 @@ def main(argv=None):
             state["bound"] = f"tool round limit ({TURN_MAX_ROUNDS} rounds) reached"
         if state["bound"] is not None:
             messages[-1]["content"] += (f"\n\n[turn bound reached: {state['bound']}; tool_choice is \"none\" on the "
-                                        "next request — provide your final review verdict now]")
+                                        "next request \u2014 provide your final review verdict now]")
 
     text = _content(answer)
     if not text.strip():

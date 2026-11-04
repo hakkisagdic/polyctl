@@ -116,6 +116,31 @@ def normalise_mail_party(name, cfg=None):
     return role
 
 
+def _disambiguate_adapters(found, argv):
+    """When two shipped adapters share one binary, tell them apart by the literal flags their `send.argv` carries."""
+    if len(found) <= 1:
+        return found[0] if found else None
+    rest = {str(part) for part in (argv or [])[1:]}
+    if not rest:
+        scored = [(len([p for p in ((adapter.get("send") or {}).get("argv") or [])[1:]
+                        if isinstance(p, str) and "{" not in p and p != "-"]), adapter)
+                  for adapter in found]
+        lowest = min(score for score, _ in scored)
+        winners = [adapter for score, adapter in scored if score == lowest]
+        return winners[0] if len(winners) == 1 else None
+    scored = []
+    for adapter in found:
+        send_argv = ((adapter.get("send") or {}).get("argv") or [])[1:]
+        literals = [str(part) for part in send_argv if isinstance(part, str) and "{" not in part and part != "-"]
+        if all(token in rest for token in literals):
+            scored.append((len(literals), adapter))
+    if not scored:
+        return None
+    best = max(score for score, _ in scored)
+    winners = [adapter for score, adapter in scored if score == best]
+    return winners[0] if len(winners) == 1 else None
+
+
 def block_adapter(block):
     """The adapter a role block or reviewer route runs: the one it names, else the shipped one whose command it runs.
 
@@ -129,11 +154,12 @@ def block_adapter(block):
     program = _program_name(argv[0]) if argv and isinstance(argv[0], str) else ""
     if not program:
         return None
-    found = [ident for ident, adapter in package_adapters().items()
+    found = [adapter for ident, adapter in sorted(package_adapters().items())
              if program in {_program_name(name) for name in
                             [ident, *adapter_binaries(adapter), *((adapter.get("detect") or {}).get("processes") or [])]
                             if name}]
-    return found[0] if len(found) == 1 else None
+    chosen = _disambiguate_adapters(found, argv) if len(found) > 1 else (found[0] if len(found) == 1 else None)
+    return chosen.get("id") if isinstance(chosen, dict) else None
 
 
 def declared_family(block):
@@ -855,7 +881,7 @@ def command_adapter(argv):
     program = _program_name(argv[0])
     found = [adapter for ident, adapter in sorted(package_adapters().items())
              if program in {_program_name(name) for name in [ident, *adapter_binaries(adapter)] if name}]
-    return found[0] if len(found) == 1 else None
+    return _disambiguate_adapters(found, argv)
 
 
 def _config_part(part):

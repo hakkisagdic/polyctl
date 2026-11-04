@@ -302,6 +302,23 @@ polyctl config set review.api_providers "example https://api.example.com/v1 EXAM
 polyctl role set reviewer openai-api --model example/<model> --family <family>
 ```
 
+`harnessrouter` is a second tool reviewer over `polyctl-api-review`, speaking the Universal Harness Protocol
+(`--protocol uhp`, `POST <base_url>/responses`) for [HarnessRouter](https://github.com/HarnessRouter/harnessrouter)
+and compatible UHP gateways. It reads `HARNESSROUTER_BASE_URL` (default `http://localhost:3000/api/harness/v1`)
+and `HARNESSROUTER_API_KEY` directly — matching `keyflip`'s `harnessrouter` provider preset — or a named
+provider in `review.api_providers` when `--model` starts with `<provider>/`. When `--model` names a harness
+and a model (`<harness_id>/<model>`, or `<provider>/<harness_id>/<model>`), the client includes
+`metadata.harness_id` in the UHP payload alongside an `Idempotency-Key` header. Because UHP executes tools
+inside the remote harness container and reserves the client `tools` field on `/v1/responses`, `harnessrouter`
+takes no `--tree` flag and hands the reviewer the candidate diff in the prompt alone. Any UHP response whose
+`metadata.model_fallback` is true or whose `model` differs from the requested model is refused so cross-family
+review independence cannot silently degrade:
+
+```bash
+export HARNESSROUTER_API_KEY=...
+polyctl role set reviewer harnessrouter --model claude-code/claude-sonnet-4-6 --family anthropic
+```
+
 ## A prompt past one argument reaches its command another way
 
 A review prompt carries a diff of up to 400 KB and the context it is judged against, and it went to the
@@ -680,6 +697,7 @@ the adapter says so in its `disclaimer`. **Reviewer** is whether the adapter can
 | `cloud` | `cloud-generic` | partial | ineligible | Generic cloud agent (pull-request delivered) |
 | `pr-agent` | `pr-agent` | untested | eligible | PR-Agent, a tool reviewer polyctl runs over the candidate (#86) |
 | `openai-api` | `openai-api` | partial | eligible | an OpenAI-compatible chat API, through polyctl's own client, a tool reviewer (API-REVIEWER) |
+| `harnessrouter` | `harnessrouter` | untested | eligible | a UHP `/v1/responses` gateway (HarnessRouter), through polyctl's own client, a tool reviewer |
 
 Warp runs `oz`, which polyctl finds on PATH or where Warp installs it:
 `/Applications/Warp.app/Contents/Resources/bin` and

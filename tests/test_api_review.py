@@ -1117,3 +1117,107 @@ def test_read_window_limits_are_independent_of_other_tool_limits(monkeypatch, tm
     grep_out = api_review._tool_grep(state, {"pattern": "item_"})
     assert len(grep_out.encode("utf-8")) <= 256
     assert "truncated at 256 bytes" in grep_out
+
+
+def test_the_harnessrouter_adapter_composes_a_uhp_tool_reviewer_and_answers(monkeypatch, tmp_path, endpoint, capsys):
+    """UHP-REVIEWER: `harnessrouter` composes a tool reviewer over `polyctl-api-review --protocol uhp`, sends a UHP
+    `POST /v1/responses` request with `metadata.harness_id` and `Idempotency-Key`, and writes the assistant output_text."""
+    adapter = A.load_adapter("harnessrouter")
+    assert A.reviewer_eligibility(adapter) == (True, None) and A.tool_review_problems(adapter) == []
+    route = A.compose_reviewer("harnessrouter", model="claude-code/claude-sonnet-4-6", family="anthropic")
+    assert route["kind"] == "tool" and route["argv"] == adapter["send"]["argv"]
+    assert A.command_adapter(route["argv"])["id"] == "harnessrouter"
+    assert A.block_adapter({"argv": route["argv"]}) == "harnessrouter"
+
+    served = endpoint(reply={
+        "id": "resp_uhp_1",
+        "object": "response",
+        "status": "completed",
+        "model": "claude-sonnet-4-6",
+        "output": [
+            {
+                "type": "message",
+                "id": "msg_1",
+                "status": "completed",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": APPROVED}],
+            }
+        ],
+        "metadata": {"harness_id": "claude-code", "model_fallback": False},
+    })
+    monkeypatch.setenv("HARNESSROUTER_BASE_URL", served.url)
+    monkeypatch.setenv("HARNESSROUTER_API_KEY", "uhp-secret-key")
+    diff, out = tmp_path / "candidate.diff", tmp_path / "answer.md"
+    diff.write_text("diff --git a/x b/x\n", encoding="utf-8")
+
+    code = api_review.main([
+        "--protocol", "uhp",
+        "--default-url", "http://localhost:3000/api/harness/v1",
+        "--base-url-env", "HARNESSROUTER_BASE_URL",
+        "--key-env", "HARNESSROUTER_API_KEY",
+        "--model", "claude-code/claude-sonnet-4-6",
+        "--diff-file", str(diff),
+        "--output", str(out),
+        "review this candidate",
+    ])
+
+    assert code == 0 and out.read_text(encoding="utf-8") == APPROVED
+    (asked,) = served.requests
+    assert asked["path"] == "/v1/responses"
+    assert asked["headers"]["Authorization"] == "Bearer uhp-secret-key"
+    assert asked["headers"].get("Idempotency-Key")
+    assert asked["body"] == {
+        "model": "claude-sonnet-4-6",
+        "input": "review this candidate",
+        "stream": False,
+        "metadata": {"harness_id": "claude-code"},
+    }
+    assert "uhp-secret-key" not in capsys.readouterr().out
+
+
+def test_uhp_refuses_silent_model_fallback_mismatched_model_and_tree_flag(monkeypatch, tmp_path, endpoint, capsys):
+    """UHP-REVIEWER: cross-family independence requires refusing a UHP response that fell back to another model or
+    answered under a different model, and refusing `--tree` since UHP reserves client `tools` on `/v1/responses`."""
+    fallback_ep = endpoint(reply={
+        "id": "resp_fb",
+        "object": "response",
+        "status": "completed",
+        "model": "claude-sonnet-4-6",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": APPROVED}]}],
+        "metadata": {"harness_id": "claude-code", "model_fallback": True},
+    })
+    mismatch_ep = endpoint(reply={
+        "id": "resp_mm",
+        "object": "response",
+        "status": "completed",
+        "model": "gpt-5.3-codex",
+        "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": APPROVED}]}],
+        "metadata": {"harness_id": "codex", "model_fallback": False},
+    })
+    monkeypatch.setenv("HARNESSROUTER_API_KEY", "uhp-secret-key")
+    diff, out = tmp_path / "candidate.diff", tmp_path / "answer.md"
+    diff.write_text("diff --git a/x b/x\n", encoding="utf-8")
+
+    monkeypatch.setenv("HARNESSROUTER_BASE_URL", fallback_ep.url)
+    code_fb = api_review.main([
+        "--protocol", "uhp", "--default-url", fallback_ep.url,
+        "--base-url-env", "HARNESSROUTER_BASE_URL", "--key-env", "HARNESSROUTER_API_KEY",
+        "--model", "claude-code/claude-sonnet-4-6", "--diff-file", str(diff), "--output", str(out), "prompt",
+    ])
+    assert code_fb == 1 and not out.exists() and "model fallback" in capsys.readouterr().err
+
+    monkeypatch.setenv("HARNESSROUTER_BASE_URL", mismatch_ep.url)
+    code_mm = api_review.main([
+        "--protocol", "uhp", "--default-url", mismatch_ep.url,
+        "--base-url-env", "HARNESSROUTER_BASE_URL", "--key-env", "HARNESSROUTER_API_KEY",
+        "--model", "claude-code/claude-sonnet-4-6", "--diff-file", str(diff), "--output", str(out), "prompt",
+    ])
+    assert code_mm == 1 and not out.exists() and "not the requested" in capsys.readouterr().err
+
+    code_tree = api_review.main([
+        "--protocol", "uhp", "--default-url", mismatch_ep.url,
+        "--base-url-env", "HARNESSROUTER_BASE_URL", "--key-env", "HARNESSROUTER_API_KEY",
+        "--model", "claude-sonnet-4-6", "--diff-file", str(diff), "--output", str(out),
+        "--tree", str(tmp_path), "prompt",
+    ])
+    assert code_tree == 2 and "--tree cannot be used with --protocol uhp" in capsys.readouterr().err

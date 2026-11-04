@@ -155,7 +155,7 @@ söyler.
 | **full** — her yetenek gerçek koşumda sınandı | kiro, claude-code, antigravity |
 | **partial** — durumu okur, bazı yetenekler sınanmadı | opencode, command-code, codex, qoder, openai-api, warp |
 | **documented** — yayımlanmış dokümandan yazıldı, henüz koşulmadı | cursor-agent |
-| **untested** — şema hazır, ilk koşumu bekliyor | gemini, aider, amp, copilot, amazon-q, deepseek, ollama, droid, grok, hermes, kilocode, kimi, omp, pi, pr-agent, qwen, reasonix, trae |
+| **untested** — şema hazır, ilk koşumu bekliyor | gemini, aider, amp, copilot, amazon-q, deepseek, ollama, droid, grok, harnessrouter, hermes, kilocode, kimi, omp, pi, pr-agent, qwen, reasonix, trae |
 
 Warp, `oz` kullanır; polyctl, PATH üzerinde olmasa da programı `/Applications` veya
 `~/Applications` altındaki Warp uygulama paketinde bulur. `polyctl init --agent warp`

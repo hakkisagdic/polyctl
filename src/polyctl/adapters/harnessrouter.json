@@ -1,0 +1,83 @@
+{
+  "id": "harnessrouter",
+  "name": "HarnessRouter (UHP /v1/responses)",
+  "contract": 1,
+  "kind": "tool-reviewer",
+  "verified": "untested",
+  "disclaimer": "Written from the Universal Harness Protocol (UHP) specification and HarnessRouter source at 80d5d369a1ddf14cad8bd9cf3a1a5891d15616b6 (Apache 2.0), read 2026-11-04. Tested against a loopback UHP /v1/responses stand-in in tests/test_api_review.py; a live HarnessRouter instance is proven on a local candidate by the owner.",
+  "notes": "Not a harness polyctl drives: a Tier-3 UHP tool reviewer polyctl runs over the staged candidate via polyctl-api-review --protocol uhp. Sends a single POST <base_url>/responses with {model, input, stream: false} (and metadata.harness_id when the model is written as <harness_id>/<model> or <provider>/<harness_id>/<model>) plus an Idempotency-Key header. Reads HARNESSROUTER_BASE_URL (default http://localhost:3000/api/harness/v1) and HARNESSROUTER_API_KEY, or a provider entry in review.api_providers when the model starts with <provider>/. Refuses any UHP response whose metadata.model_fallback is true or whose returned model differs from the requested model so cross-family reviewer independence cannot silently degrade.",
+  "sources": [
+    "https://github.com/HarnessRouter/harnessrouter",
+    "https://github.com/HarnessRouter/harnessrouter/blob/80d5d369a1ddf14cad8bd9cf3a1a5891d15616b6/docs/SPEC-UHP.md",
+    "https://github.com/HarnessRouter/harnessrouter/blob/80d5d369a1ddf14cad8bd9cf3a1a5891d15616b6/packages/core/src/schemas/response.ts",
+    "https://github.com/HarnessRouter/harnessrouter/blob/80d5d369a1ddf14cad8bd9cf3a1a5891d15616b6/packages/server/src/routes/responses.ts"
+  ],
+  "roles": {
+    "reviewer": "eligible: one UHP POST /v1/responses completion over the review prompt through polyctl's stdlib client, refusing silent model fallback",
+    "implementer": "ineligible: UHP runs inside a remote harness container rather than this repository's working tree",
+    "architect": "ineligible: it answers one review request and keeps no local session store"
+  },
+  "send": {
+    "argv": [
+      "polyctl-api-review",
+      "--protocol",
+      "uhp",
+      "--default-url",
+      "http://localhost:3000/api/harness/v1",
+      "--base-url-env",
+      "HARNESSROUTER_BASE_URL",
+      "--key-env",
+      "HARNESSROUTER_API_KEY",
+      "--model",
+      "{model}",
+      "--diff-file",
+      "{diff_file}",
+      "--output",
+      "{output}",
+      "{prompt}"
+    ],
+    "note": "The prompt carries the candidate's diff; the diff file is the same bytes, handed as every tool reviewer is handed them.",
+    "stdin": {
+      "replaces": [
+        "{prompt}"
+      ],
+      "with": [
+        "-"
+      ],
+      "note": "A prompt past what one argument carries is read from standard input: polyctl-api-review takes - for it."
+    }
+  },
+  "options": {
+    "trust_none": [],
+    "trust_none_note": "nothing to deny locally: polyctl runs polyctl-api-review outside any repository over the diff file it wrote, and UHP reserves the client tools field on /v1/responses",
+    "model": null,
+    "model_note": "[<provider>/][<harness_id>/]<model>: uses HARNESSROUTER_BASE_URL (default http://localhost:3000/api/harness/v1) and HARNESSROUTER_API_KEY, or a <provider> named in review.api_providers; when <harness_id> is given (e.g. claude-code/claude-sonnet-4-6), sends metadata.harness_id in the UHP request",
+    "effort": null,
+    "effort_note": "polyctl composes no effort for a tool"
+  },
+  "review": {
+    "candidate": "diff-file",
+    "encoding": "utf-8",
+    "answer": {
+      "from": "output"
+    },
+    "environment": {
+      "remove": [
+        "^POLYCTL_SETTINGS$"
+      ],
+      "note": "Named providers are read from the machine's own settings file: one named through POLYCTL_SETTINGS could send the review, and its key, elsewhere. HARNESSROUTER_BASE_URL is held to https or loopback by polyctl-api-review."
+    },
+    "limits": [
+      "UHP reserves the client tools field on /v1/responses because tools execute inside the server's harness container; polyctl hands harnessrouter the diff in the prompt alone",
+      "polyctl refuses a UHP response that sets metadata.model_fallback or names another model, but relies on the UHP server to report model_fallback honestly"
+    ]
+  },
+  "detect": {
+    "binaries": [
+      "polyctl-api-review"
+    ],
+    "headless": [
+      "--output"
+    ]
+  }
+}
