@@ -120,25 +120,27 @@ def _disambiguate_adapters(found, argv):
     """When two shipped adapters share one binary, tell them apart by the literal flags their `send.argv` carries."""
     if len(found) <= 1:
         return found[0] if found else None
-    rest = {str(part) for part in (argv or [])[1:]}
-    if not rest:
-        scored = [(len([p for p in ((adapter.get("send") or {}).get("argv") or [])[1:]
-                        if isinstance(p, str) and "{" not in p and p != "-"]), adapter)
-                  for adapter in found]
-        lowest = min(score for score, _ in scored)
-        winners = [adapter for score, adapter in scored if score == lowest]
-        return winners[0] if len(winners) == 1 else None
-    scored = []
-    for adapter in found:
+    args = [str(part) for part in (argv or [])[1:]]
+    args = args[:args.index("--")] if "--" in args else args
+    tokens = {part for arg in args for part in (arg.split("=", 1) if arg.startswith("--") and "=" in arg else [arg])}
+
+    def _literals(adapter):
         send_argv = ((adapter.get("send") or {}).get("argv") or [])[1:]
-        literals = [str(part) for part in send_argv if isinstance(part, str) and "{" not in part and part != "-"]
-        if all(token in rest for token in literals):
-            scored.append((len(literals), adapter))
-    if not scored:
-        return None
-    best = max(score for score, _ in scored)
-    winners = [adapter for score, adapter in scored if score == best]
-    return winners[0] if len(winners) == 1 else None
+        return [str(part) for part in send_argv if isinstance(part, str) and "{" not in part and part != "-"]
+
+    scored = [(len(lits), adapter) for adapter in found for lits in (_literals(adapter),)
+              if tokens and all(token in tokens for token in lits)]
+    if scored:
+        best = max(score for score, _ in scored)
+        winners = [adapter for score, adapter in scored if score == best]
+        if len(winners) == 1:
+            return winners[0]
+    by_len = [(len(_literals(adapter)), adapter) for adapter in found]
+    lowest = min(score for score, _ in by_len)
+    simplest = [adapter for score, adapter in by_len if score == lowest]
+    if len(simplest) == 1 and (not tokens or all(adapter.get("kind") == "tool-reviewer" for adapter in found)):
+        return simplest[0]
+    return None
 
 
 def block_adapter(block):

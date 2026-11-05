@@ -4,7 +4,7 @@
   "contract": 1,
   "kind": "tool-reviewer",
   "verified": "untested",
-  "disclaimer": "Written from the Universal Harness Protocol (UHP) specification and HarnessRouter source at 80d5d369a1ddf14cad8bd9cf3a1a5891d15616b6 (Apache 2.0), read 2026-11-04. Tested against a loopback UHP /v1/responses stand-in in tests/test_api_review.py; a live HarnessRouter instance is proven on a local candidate by the owner.",
+  "disclaimer": "Written from the Universal Harness Protocol (UHP) specification and HarnessRouter source at 80d5d369a1ddf14cad8bd9cf3a1a5891d15616b6 (Apache 2.0), read 2026-11-04. Tested against a loopback UHP /v1/responses stand-in in tests/test_api_review.py; a live HarnessRouter instance is to be proven on a local candidate by the owner.",
   "notes": "Not a harness polyctl drives: a Tier-3 UHP tool reviewer polyctl runs over the staged candidate via polyctl-api-review --protocol uhp. Sends a single POST <base_url>/responses with {model, input, stream: false} (and metadata.harness_id when the model is written as <harness_id>/<model> or <provider>/<harness_id>/<model>) plus an Idempotency-Key header. Reads HARNESSROUTER_BASE_URL (default http://localhost:3000/api/harness/v1) and HARNESSROUTER_API_KEY, or a provider entry in review.api_providers when the model starts with <provider>/. Refuses any UHP response whose metadata.model_fallback is true or whose returned model differs from the requested model so cross-family reviewer independence cannot silently degrade.",
   "sources": [
     "https://github.com/HarnessRouter/harnessrouter",

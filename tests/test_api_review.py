@@ -1128,6 +1128,15 @@ def test_the_harnessrouter_adapter_composes_a_uhp_tool_reviewer_and_answers(monk
     assert route["kind"] == "tool" and route["argv"] == adapter["send"]["argv"]
     assert A.command_adapter(route["argv"])["id"] == "harnessrouter"
     assert A.block_adapter({"argv": route["argv"]}) == "harnessrouter"
+    equals_uhp = ["polyctl-api-review", "--protocol=uhp", "--default-url=http://localhost:3000/api/harness/v1",
+                  "--base-url-env=HARNESSROUTER_BASE_URL", "--key-env=HARNESSROUTER_API_KEY",
+                  "--model=claude-code/claude-sonnet-4-6", "--diff-file=f", "--output=o", "{prompt}"]
+    assert A.command_adapter(equals_uhp)["id"] == "harnessrouter"
+    equals_oai = ["polyctl-api-review", "--model=p/m", "--diff-file=f", "--output=o", "{prompt}"]
+    assert A.command_adapter(equals_oai)["id"] == "openai-api"
+    assert A.reading_problems(equals_oai) == [
+        "openai-api is a tool reviewer, which reads a file polyctl writes for it, not a tree"
+    ]
 
     served = endpoint(reply={
         "id": "resp_uhp_1",
