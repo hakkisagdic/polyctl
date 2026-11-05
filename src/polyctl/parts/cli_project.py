@@ -542,6 +542,10 @@ def cmd_init(cfg, args):
     by = (getattr(args, "by", None) or "").strip()
     opt_in = None
     if getattr(args, "review_tier", None) == "same-family":
+        refusal = A.agent_harness_refusal()
+        if refusal:
+            print(f"{C['red']}init refused{C['reset']}: {refusal}")
+            return 2
         if not by:
             print(f"{C['red']}init refused{C['reset']}: --by is required with --review-tier same-family: a person "
                   "opts into weaker independence, on the record")
@@ -553,6 +557,10 @@ def cmd_init(cfg, args):
         user, interactive = A._login_and_terminal()
         opt_in = {"value": "labeled", "by": by, "user": user, "interactive": interactive}
     elif by:
+        refusal = A.agent_harness_refusal()
+        if refusal:
+            print(f"{C['red']}init refused{C['reset']}: {refusal}")
+            return 2
         print(f"{C['red']}init refused{C['reset']}: --by names the person who opts in with --review-tier same-family")
         return 1
     # A quick profile that exercises none of the code gives every verify a green it did

@@ -656,3 +656,83 @@ def test_a_configuration_file_deleted_in_an_ungranted_commit_is_named_deleted(pr
     _git(root, "commit", "-q", "-m", "rules gone, no grant")
 
     assert _named(root) == [("CLAUDE.md", "deleted")]
+
+
+def test_an_agent_harness_in_the_environment_cannot_record_a_persons_act(project, monkeypatch, capsys, tmp_path):
+    root = project["root"]
+    _write(root, ".claude/settings.json", '{"hooks": {}}\n')
+    expected_vars = (
+        "TRAYCER_AGENT_ID",
+        "TRAYCER_EPIC_ID",
+        "CLAUDECODE",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "AI_AGENT",
+        "GEMINI_CLI",
+        "CODEX_SANDBOX",
+        "KIRO_SESSION_ID",
+    )
+    assert tuple(A.AGENT_HARNESS_ENV) == expected_vars
+
+    safety_doc = open(
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs", "safety.md"),
+        encoding="utf-8",
+    ).read()
+    for var in expected_vars:
+        assert var in safety_doc, f"{var} missing from docs/safety.md"
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+    for var in expected_vars:
+        monkeypatch.setenv(var, "1")
+        assert cli.cmd_harness(project, SimpleNamespace(
+            action="seen", ids=[], by="Sam", digest=None, ask=False)) == 2
+        out = capsys.readouterr().out
+        assert var in out and "own terminal" in out
+        assert A.unseen_harness_config(root) != []
+        monkeypatch.delenv(var, raising=False)
+
+    acts = [
+        ("TRAYCER_AGENT_ID", lambda: cli.cmd_harness(project, SimpleNamespace(
+            action="seen", ids=[], by="Sam", digest=None, ask=False))),
+        ("TRAYCER_AGENT_ID", lambda: cli.cmd_harness(project, SimpleNamespace(
+            action="seen", ids=[], by="Sam", digest="sha256:00", ask=False))),
+        ("TRAYCER_AGENT_ID", lambda: cli.cmd_harness(project, SimpleNamespace(
+            action="seen", ids=[], by="Sam", digest=None, ask=True))),
+        ("TRAYCER_EPIC_ID", lambda: cli.cmd_waive(project, SimpleNamespace(
+            gate="review", slice="S1", why="flake", by="Sam", hours=1, gates=None))),
+        ("CLAUDECODE", lambda: cli.cmd_person_review(project, SimpleNamespace(
+            by="Sam", verdict=None, digest=None, findings=None, commits=None, boundary=None, paths=None))),
+        ("CLAUDE_CODE_ENTRYPOINT", lambda: cli.cmd_commit_ok(project, SimpleNamespace(
+            by="Sam", digest=None, ask=False, review=None, verify=False, profile=None))),
+        ("CLAUDE_CODE_ENTRYPOINT", lambda: cli.cmd_commit_ok(project, SimpleNamespace(
+            by="Sam", digest="sha256:00", ask=True, review=None, verify=False, profile=None))),
+        ("AI_AGENT", lambda: cli.cmd_mode(project, SimpleNamespace(
+            action="lite", by="Sam"))),
+        ("GEMINI_CLI", lambda: cli.cmd_config(project, SimpleNamespace(
+            action="set", key="review.same_family", value="labeled", by="Sam", machine=False))),
+        ("CODEX_SANDBOX", lambda: cli.cmd_features(project, SimpleNamespace(
+            action="off", key="inventory_review", by="Sam"))),
+        ("KIRO_SESSION_ID", lambda: cli.cmd_init(project, SimpleNamespace(
+            profile=None, architect=None, implementer="claude-code", reviewer=None,
+            review_tier="same-family", by="Sam", name=None, language=None,
+            allow_uncovered_gates=True, no_mcp=True, agent=None, adopt=False, rules=False))),
+        ("TRAYCER_AGENT_ID", lambda: cli.cmd_collect_review(project, SimpleNamespace(
+            by="Sam", model="gpt-5.4", nonce="N-1", response=str(tmp_path / "resp.md")))),
+        ("CLAUDECODE", lambda: cli.cmd_catchup(project, SimpleNamespace(
+            plan=False, limit=1, slice=None, reviewer=None,
+            author_family="claude", move_only=None, boundary=None, by="Sam"))),
+        ("GEMINI_CLI", lambda: cli.cmd_restore(project, SimpleNamespace(
+            source=str(tmp_path), by="Sam", ask=False))),
+        ("GEMINI_CLI", lambda: cli.cmd_restore(project, SimpleNamespace(
+            source=str(tmp_path), by="Sam", ask=True))),
+    ]
+    for var, act in acts:
+        monkeypatch.setenv(var, "active")
+        assert act() == 2, f"act under {var} was not refused"
+        out = capsys.readouterr().out
+        assert var in out and "own terminal" in out
+        monkeypatch.delenv(var, raising=False)
+
+    assert A.waiver_rows(root) == []
+    assert A.authority_history(root) == []

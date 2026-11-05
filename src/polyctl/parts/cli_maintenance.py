@@ -1751,17 +1751,31 @@ def cmd_worktrees(cfg, args):
 
 def _worktree_lines(cfg):
     """Worktrees whose branch is merged or gone, with their size on disk (#42)."""
+    mistaken = A.mistaken_worktree_projects(cfg["root"])
     try:
         going = [fact for fact in A.worktree_facts(cfg["root"], cfg, sizes=True) if fact["may_go"]]
     except Exception as exc:
-        return [f"{'worktrees':<16}{C['yellow']}cannot tell: {exc}{C['reset']}"]
-    if not going:
-        return []
-    total = sum(fact["bytes"] or 0 for fact in going)
-    lines = [f"{'worktrees':<16}{C['yellow']}{len(going)} may go ({_human_bytes(total)}){C['reset']}  "
-             f"{C['dim']}polyctl worktrees prune{C['reset']}"]
-    lines += [f"{'':<16}{C['dim']}{fact['path']}  {fact['why']}  "
-              f"{_human_bytes(fact['bytes']) if fact['bytes'] is not None else 'gone'}{C['reset']}" for fact in going[:5]]
+        lines = [f"{'worktrees':<16}{C['yellow']}cannot tell: {exc}{C['reset']}"]
+        for wt_key, wt_path, main_root in mistaken:
+            lines.append(
+                f"{'':<16}{C['yellow']}project {A.shown_text(wt_key)} ({A.shown_text(wt_path)}) under ~/.polyctl "
+                f"belongs to main checkout {A.shown_text(main_root)}{C['reset']}"
+            )
+        return lines
+    lines = []
+    if going:
+        total = sum(fact["bytes"] or 0 for fact in going)
+        lines.append(f"{'worktrees':<16}{C['yellow']}{len(going)} may go ({_human_bytes(total)}){C['reset']}  "
+                     f"{C['dim']}polyctl worktrees prune{C['reset']}")
+        lines += [f"{'':<16}{C['dim']}{fact['path']}  {fact['why']}  "
+                  f"{_human_bytes(fact['bytes']) if fact['bytes'] is not None else 'gone'}{C['reset']}"
+                  for fact in going[:5]]
+    for idx, (wt_key, wt_path, main_root) in enumerate(mistaken):
+        label = "worktrees" if (not going and idx == 0) else ""
+        lines.append(
+            f"{label:<16}{C['yellow']}project {A.shown_text(wt_key)} ({A.shown_text(wt_path)}) under ~/.polyctl "
+            f"belongs to main checkout {A.shown_text(main_root)}{C['reset']}"
+        )
     return lines
 
 
@@ -2099,6 +2113,11 @@ def cmd_restore(cfg, args):
     raw_by = getattr(args, "by", None)
     by = (raw_by or "").strip()
     ask = bool(getattr(args, "ask", False))
+    if raw_by is not None or ask:
+        refusal = A.agent_harness_refusal()
+        if refusal:
+            print(refusal)
+            return 2
     if raw_by is not None:
         if not by or not by.isprintable() or len(by) > 80:
             print("--by is required: the person who attests the restored backup, in one line of at most 80 characters")

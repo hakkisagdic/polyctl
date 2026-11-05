@@ -71,3 +71,31 @@ def test_configured_names_are_honoured(project):
     assert A.implementer_inbox(root, cfg) == []
     open(os.path.join(root, "agent-mail", "20260905-1800-lead-to-dev-DECISION-x.md"), "w", encoding="utf-8").write("# x\n")
     assert len(A.implementer_inbox(root, cfg)) == 1
+
+
+def test_mail_send_accepts_from_and_to_and_mail_list_shows_them(project, capsys):
+    import polyctl.cli as cli
+
+    root = project["root"]
+    assert cli.main(["-C", root, "mail", "send", "INFO", "route", "--body", "Default route"]) == 0
+    out = capsys.readouterr().out
+    assert "fable-to-kiro-INFO-route.md" in out
+
+    assert cli.main([
+        "-C", root, "mail", "send", "DECISION", "directive",
+        "--from", "admin", "--to", "architect", "--body", "Admin directive",
+    ]) == 0
+    out = capsys.readouterr().out
+    assert "admin-to-architect-DECISION-directive.md" in out
+
+    assert cli.main([
+        "-C", root, "mail", "send", "INFO", "scope",
+        "--from", "person", "--to", "reviewer", "--body", "Scope check",
+    ]) == 0
+    capsys.readouterr()
+
+    assert cli.main(["-C", root, "mail", "list"]) == 0
+    listed = capsys.readouterr().out
+    assert "fable" in listed and "kiro" in listed
+    assert "admin" in listed and "architect" in listed
+    assert "person" in listed and "reviewer" in listed

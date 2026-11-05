@@ -38,10 +38,10 @@ Her `polyctl` komutu ve ne yaptığı (`pctl` kısa komuttur: aynı ayrıştır�
 | `polyctl doctor --check` | zamanlayıcı için sessiz doctor: problem başına bir satır, exit 1, alarm — `polyctl watchdog install` 15 dakikalık launchd işi, Linux'ta systemd kullanıcı zamanlayıcısı olarak kurar |
 | `polyctl email setup` / `polyctl email test` | kırmızı alarm kanalı: formsubmit.co ile e-posta, sunucu yok ([alarms.md](alarms.md)) |
 | `polyctl alarms` / `polyctl alarms test --level red` | canlı alarm bölümleri ve seviyeleri; test tüm kanalları çaldırır |
-| `polyctl mail log` / `polyctl mail search <metin>` / `polyctl mail ack <glob>` | posta defteri: yazılan her mesaj ve ne zaman okunduğu, silindikten sonra da aranabilir |
+| `polyctl mail log` / `polyctl mail search <metin>` / `polyctl mail ack <glob>` | posta defteri: yazılan her mesaj ve ne zaman okunduğu, silindikten sonra da aranabilir; `polyctl room search <metin>` kayıtlı her projede hem `agent-mail/` içindeki bekleyen (`pending`) postayı hem de defter/depodaki işlenmiş (`consumed`) postayı arar ve her eşleşmede projeyi ve durumu yazar |
 | `polyctl watchdog explain` / `polyctl watchdog trace` | watchdog neden dürttü ya da dürtmedi: bu döngünün ve kayıtlı döngülerin ölçüm ve kararları ([watchdog.md](watchdog.md)) |
 | `polyctl source import` | takip sistemindeki işleri panoya kabul et |
-| `polyctl mail` · `polyctl notices` | koordinasyon mesajları; projenin ürettiği uyarılar |
+| `polyctl mail [list\|read\|send [--from <rol>] [--to <rol>]]` · `polyctl notices` | koordinasyon mesajları (`mail send` rol tablosundan, `admin` ya da `person` olarak `--from` ve `--to` alır, varsayılanı `architect` → `implementer` olur ve `mail list` `from → to` gösterir); projenin ürettiği uyarılar |
 | `polyctl watchdog install` | takılan ajanı yeniden başlatan launchd işi, Linux'ta systemd kullanıcı zamanlayıcısı ([watchdog.md](watchdog.md)) |
 | `polyctl mcp serve [--project all]` · `polyctl a2a serve` | durumu, salt okunur kaynakları ve prompt'ları MCP istemcilerine (`--project all` kayıtlı her projeyi sunar) / A2A görevi olarak sun |
 | `polyctl telegram setup` | telefona uyarı, telefondan karar; polyctl bot token'ını sorar ve ekrana basmaz, bota yazan sohbetleri bulur, `~/.polyctl/telegram.json` dosyasını kendisi yazar ([telegram.md](telegram.md)) |

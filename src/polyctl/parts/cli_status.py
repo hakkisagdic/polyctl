@@ -699,6 +699,9 @@ def _shown_lines(text):
 
 def cmd_mail(cfg, args):
     root = cfg["root"]
+    if not getattr(args, "root", None):
+        root = A.linked_worktree_main(root) or root
+        cfg = dict(cfg, root=root)
     d = os.path.join(root, cfg["mailbox"])
     if args.action in ("list", "read"):
         for line in _mailbox_banner(cfg):
@@ -711,7 +714,17 @@ def cmd_mail(cfg, args):
     # A message's name and body are its writer's, an agent's among them: shown escaped (LEADS-MCP).
     if args.action == "list":
         for f in A.mailbox(root, cfg["mailbox"]):
-            print(A.shown_text(f))
+            meta = A.mail_meta(os.path.join(d, f))
+            sender, recipient = meta.get("from"), meta.get("to")
+            if not (sender and recipient):
+                matched = A.re.match(r"^\d{8}-\d{4}-(.+?)-to-(.+?)-[A-Za-z]+-", f)
+                if matched:
+                    sender = sender or matched.group(1)
+                    recipient = recipient or matched.group(2)
+            if sender and recipient:
+                print(f"{A.shown_text(f)}  {C['dim']}{A.shown_text(sender)} → {A.shown_text(recipient)}{C['reset']}")
+            else:
+                print(A.shown_text(f))
     elif args.action == "read":
         for f in A.mailbox(root, cfg["mailbox"]):
             print(f"===== {A.shown_text(f)} =====\n{_shown_lines(open(os.path.join(d, f), encoding=UTF8).read())}")
@@ -720,10 +733,12 @@ def cmd_mail(cfg, args):
         stamp = datetime.now().strftime("%Y%m%d-%H%M")
         topic = A.safe_slug((args.topic or "note").lower())
         impl, arch = A.mail_names(cfg)
-        name = f"{stamp}-{arch}-to-{impl}-{A.safe_slug(args.type.upper(), 'INFO')}-{topic}.md"
+        sender = getattr(args, "mail_from", None) or arch
+        recipient = getattr(args, "mail_to", None) or impl
+        name = f"{stamp}-{sender}-to-{recipient}-{A.safe_slug(args.type.upper(), 'INFO')}-{topic}.md"
         body = args.body if args.body else sys.stdin.read()
         name = A.write_mail(root, cfg, name, body.rstrip() + "\n",
-                     {"kind": args.type.lower(), "from": arch, "to": impl,
+                     {"kind": args.type.lower(), "from": sender, "to": recipient,
                       "class": getattr(args, "mail_class", None)})
         print(name)
     elif args.action == "ack":

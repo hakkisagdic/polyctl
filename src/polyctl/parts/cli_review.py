@@ -3091,6 +3091,10 @@ def cmd_collect_review(cfg, args):
     """
     from types import SimpleNamespace
     root = cfg["root"]
+    refusal = A.agent_harness_refusal()
+    if refusal:
+        print(refusal)
+        return 2
     if M.is_strict(cfg):
         print(f"{C['red']}refused{C['reset']}: a capability-matrix project records reviews "
               "only from its declared bindings")
@@ -3445,6 +3449,10 @@ def cmd_person_review(cfg, args):
     """
     from types import SimpleNamespace
     root = cfg["root"]
+    refusal = A.agent_harness_refusal()
+    if refusal:
+        print(refusal)
+        return 2
     if M.is_strict(cfg):
         print(f"{C['red']}refused{C['reset']}: a capability-matrix project records reviews only from its declared "
               "bindings")

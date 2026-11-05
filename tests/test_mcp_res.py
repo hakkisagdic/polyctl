@@ -707,3 +707,57 @@ def test_project_keys_with_accents_spaces_parentheses_and_plus_work_across_every
                 assert shlex.split(cmd)[:3] == ["polyctl", "-C", str(proj_root)]
         assert "error" not in json.loads(single_answers[5]["result"]["content"][0]["text"])
         assert "not served by this server" in json.loads(single_answers[6]["result"]["content"][0]["text"])["error"]
+
+
+def test_mcp_serve_with_no_c_in_a_linked_worktree_serves_the_main_checkouts_project(
+        tmp_path, monkeypatch, capsys):
+    import os
+    import subprocess as sp
+
+    main_dir = _make_project(tmp_path, "governed-main", slice_id="GM-1")
+    for argv in (
+        ["init", "-q"],
+        ["config", "user.email", "t@e"],
+        ["config", "user.name", "t"],
+        ["add", ".polyctl/config.json", ".polyctl/board.md"],
+        ["commit", "-q", "-m", "init"],
+    ):
+        sp.run(["git", *argv], cwd=str(main_dir), check=True)
+    assert A.project_key(str(main_dir)) == "governed-main"
+    A.write_mail(
+        str(main_dir),
+        {"mailbox": "agent-mail"},
+        "20261019-1200-claude-arch-to-kiro-impl-DECISION-plan.md",
+        "# Plan\n\nShip GM-1.\n",
+        {"kind": "decision", "from": "claude-arch", "to": "kiro-impl"},
+    )
+
+    wt_dir = tmp_path / "wt-agent-1"
+    sp.run(["git", "worktree", "add", "-q", "-b", "wt-agent-1", str(wt_dir)], cwd=str(main_dir), check=True)
+
+    requests = [
+        {"id": 1, "method": "resources/list", "params": {"_meta": _meta("2026-07-28")}},
+        {"id": 2, "method": "tools/call",
+         "params": {"name": "polyctl_status", "arguments": {}, "_meta": _meta("2026-07-28")}},
+        {"id": 3, "method": "tools/call",
+         "params": {"name": "polyctl_inbox", "arguments": {}, "_meta": _meta("2026-07-28")}},
+    ]
+    stream = "\n".join([
+        json.dumps({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}}),
+        *(json.dumps({"jsonrpc": "2.0", **r}) for r in requests),
+    ]) + "\n"
+    monkeypatch.chdir(wt_dir)
+    monkeypatch.setattr("sys.stdin", io.StringIO(stream))
+    monkeypatch.setattr("sys.argv", ["polyctl-mcp"])
+    assert mcp.main() in (0, None)
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
+    answers = {msg.get("id"): msg for msg in lines}
+
+    uris = [r["uri"] for r in answers[1]["result"]["resources"]]
+    assert "polyctl://governed-main/board" in uris
+    status_payload = json.loads(answers[2]["result"]["content"][0]["text"])
+    assert status_payload["project"] == "governed-main"
+    assert os.path.realpath(status_payload["root"]) == os.path.realpath(str(main_dir))
+    inbox_payload = json.loads(answers[3]["result"]["content"][0]["text"])
+    assert inbox_payload["count"] == 1
+    assert set(A.project_registry()) == {"governed-main"}

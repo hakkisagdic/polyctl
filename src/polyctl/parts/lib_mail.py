@@ -903,7 +903,7 @@ def write_mail(root, cfg, name, body, meta=None):
         head = "---\n" + "".join(f"{k}: {meta[k]}\n" for k in keys if meta[k] not in (None, "")) + "---\n"
         with fh:
             fh.write(head + body.lstrip("\n"))
-        summary = next((l.lstrip("# ").strip() for l in body.split("\n") if l.startswith("#")), "")
+        summary = _mail_body_summary(body)
         mail_ledger_append(root, {"event": "written", "id": name, "kind": meta.get("kind"),
                                   "from": meta.get("from"), "to": meta.get("to"),
                                   "slice": meta.get("slice"), "summary": summary[:200]})
@@ -1181,20 +1181,112 @@ def compact_messages(root, days, now=None):
     return compacted
 
 
+ROOM_SEARCH_MAX_BYTES = 65_536
+
+
+def _mail_body_summary(text):
+    """First heading or first non-empty body line after any YAML front matter (ADMIN-FINDINGS-1)."""
+    body = text or ""
+    if body.startswith("---\n"):
+        end = body.find("\n---\n", 4)
+        if end != -1:
+            body = body[end + 5:]
+    lines = body.split("\n")
+    return (
+        next((line.lstrip("# ").strip() for line in lines if line.startswith("#")), "")
+        or next((line.strip() for line in lines if line.strip()), "")
+    )
+
+
+def _room_search_hit(project, mid, state, at_val, text, needle, primary, fallback):
+    """One room_search row when `needle` matches the message's id, text, summary or envelope fields."""
+    summary = primary.get("summary") or fallback.get("summary") or _mail_body_summary(text)
+    sender = primary.get("from") or fallback.get("from")
+    recipient = primary.get("to") or fallback.get("to")
+    kind = primary.get("kind") or fallback.get("kind")
+    slice_id = primary.get("slice") or fallback.get("slice")
+    hay = " ".join(str(x or "") for x in (mid, text, summary, sender, recipient, kind, slice_id)).lower()
+    if needle not in hay:
+        return None
+    return {
+        "id": mid,
+        "project": project,
+        "state": state,
+        "at": at_val,
+        "from": sender,
+        "to": recipient,
+        "kind": kind,
+        "slice": slice_id,
+        "summary": summary[:200],
+    }
+
+
 def room_search(text, root=None, limit=20):
-    """Stored messages in every registered project whose body mentions `text` (#80)."""
+    """Pending and consumed messages in every registered project that mention `text` (#80, ADMIN-FINDINGS-1)."""
     needle = str(text or "").lower()
     found = []
     for project, path in recall_roots(root):
+        box_name = "agent-mail"
         try:
-            rows = [row for row in mail_store_rows(path) if row.get("event") == "message"]
+            doc = project_config_document(path)
+            if isinstance(doc.get("config"), dict) and doc["config"].get("mailbox"):
+                box_name = str(doc["config"]["mailbox"])
         except Exception:
-            continue
-        for row in rows:
-            body = message_body(path, row["id"])
-            if body is not None and needle in body.decode(UTF8, "replace").lower():
-                found.append(dict(row, project=project))
-    found.sort(key=lambda row: -float(row.get("at") or 0))
+            pass
+        box_dir = os.path.join(path, box_name)
+        try:
+            pending_files = set(mailbox(path, box_name))
+        except Exception:
+            pending_files = set()
+        try:
+            ledger_rows = mail_log(path, limit=None)
+        except Exception:
+            ledger_rows = []
+        written_by_id = {}
+        consumed_at = {}
+        for row in ledger_rows:
+            if not isinstance(row, dict) or not row.get("id"):
+                continue
+            if row.get("event") == "written":
+                written_by_id[row["id"]] = row
+            elif row.get("event") == "consumed":
+                consumed_at[row["id"]] = row.get("at")
+        try:
+            store_rows = {row["id"]: row for row in mail_store_rows(path)
+                          if isinstance(row, dict) and row.get("event") == "message" and row.get("id")}
+        except Exception:
+            store_rows = {}
+        seen_ids = set()
+        for fname in sorted(pending_files):
+            fpath = os.path.join(box_dir, fname)
+            meta = mail_meta(fpath)
+            try:
+                with open(fpath, "rb") as fh:
+                    raw_text = fh.read(ROOM_SEARCH_MAX_BYTES).decode(UTF8, "replace")
+            except OSError:
+                raw_text = ""
+            wrow = written_by_id.get(fname) or store_rows.get(fname) or {}
+            try:
+                at_val = float(wrow.get("at") or os.path.getmtime(fpath))
+            except (OSError, TypeError, ValueError):
+                at_val = 0.0
+            hit = _room_search_hit(project, fname, "pending", at_val, raw_text, needle, meta, wrow)
+            if hit:
+                found.append(hit)
+            seen_ids.add(fname)
+        for mid in dict.fromkeys(list(written_by_id) + list(store_rows)):
+            if mid in seen_ids:
+                continue
+            wrow = written_by_id.get(mid) or {}
+            srow = store_rows.get(mid) or {}
+            body_bytes = message_body(path, mid)
+            body_text = body_bytes.decode(UTF8, "replace") if body_bytes is not None else ""
+            state = "pending" if mid in pending_files else "consumed"
+            at_val = float(wrow.get("at") or srow.get("at") or consumed_at.get(mid) or 0)
+            hit = _room_search_hit(project, mid, state, at_val, body_text, needle, wrow, srow)
+            if hit:
+                found.append(hit)
+    found.sort(key=lambda row: (-float(row.get("at") or 0), row.get("project") or "", row.get("id") or ""))
     return found[:limit]
 
 

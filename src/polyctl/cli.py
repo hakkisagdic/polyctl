@@ -128,6 +128,10 @@ def build_parser(root=None, prog=None):
     m.add_argument("type", nargs="?", default="INFO")
     m.add_argument("topic", nargs="?")
     m.add_argument("--body")
+    m.add_argument("--from", dest="mail_from", choices=A.MAIL_PARTIES,
+                   help="who sends the message: a role from the role table, admin or person (default: architect)")
+    m.add_argument("--to", dest="mail_to", choices=A.MAIL_PARTIES,
+                   help="who receives the message: a role from the role table, admin or person (default: implementer)")
     m.add_argument("--class", dest="mail_class", choices=A.MAIL_CLASSES,
                    help="what the message asks of its reader; needs-decision escalates while unseen")
     m.set_defaults(fn=cmd_mail)

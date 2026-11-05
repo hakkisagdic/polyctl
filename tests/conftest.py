@@ -39,6 +39,17 @@ SESSION_BIN = os.path.join(SESSION, "bin")
 GIT_IDENTITY = ("polyctl tests", "polyctl-tests@example.invalid")
 # Variables that point git or polyctl back into the person's home.
 HOME_POINTERS = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "GIT_CONFIG_GLOBAL")
+# Variables an external agent harness sets when the test suite itself is run from one (ADMIN-FINDINGS-1).
+HARNESS_POINTERS = (
+    "TRAYCER_AGENT_ID",
+    "TRAYCER_EPIC_ID",
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "AI_AGENT",
+    "GEMINI_CLI",
+    "CODEX_SANDBOX",
+    "KIRO_SESSION_ID",
+)
 # The suite's own switches (tests/test_scenario_fuzz.py): a person sets them to run it differently.
 SUITE_SWITCHES = ("POLYCTL_FUZZ_SEED", "POLYCTL_FUZZ_SEEDS")
 
@@ -54,7 +65,8 @@ def _own_environment(environ):
     USERPROFILE for Windows, name the suite's home.
     """
     for name in [name for name in environ
-                 if name in HOME_POINTERS or (name.startswith("POLYCTL_") and name not in SUITE_SWITCHES)]:
+                 if name in HOME_POINTERS or name in HARNESS_POINTERS
+                 or (name.startswith("POLYCTL_") and name not in SUITE_SWITCHES)]:
         del environ[name]
     environ["HOME"] = SESSION_HOME
     environ["USERPROFILE"] = SESSION_HOME

@@ -292,13 +292,76 @@ def time_arg(unit=None):
 
 # ── config ────────────────────────────────────────────────────────────────────
 
+def linked_worktree_main(path):
+    """The main checkout's root when `path` is in a linked git worktree of a governed project, else None (ADMIN-FINDINGS-1).
+
+    Reads only the `.git` pointer file and the worktree administration's `commondir` (no git child
+    process), so startup stays free of subprocesses. A temporary throwaway worktree made by
+    `polyctl prove` (`polyctl-prove-*`) keeps its own isolated `.polyctl/` during the proof.
+    """
+    if not path:
+        return None
+    cur = os.path.abspath(os.path.expanduser(str(path)))
+    wt_top = None
+    while True:
+        if cur == HOME:
+            break
+        dot_git = os.path.join(cur, ".git")
+        if os.path.isfile(dot_git) and not os.path.islink(dot_git):
+            wt_top = cur
+            break
+        if os.path.isdir(dot_git):
+            return None
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    if not wt_top:
+        return None
+    if os.path.basename(os.path.dirname(wt_top)).startswith("polyctl-prove-"):
+        return None
+    try:
+        with open(os.path.join(wt_top, ".git"), encoding=UTF8, errors="replace") as fh:
+            first = fh.readline(4096).strip()
+    except OSError:
+        return None
+    if not first.startswith("gitdir:"):
+        return None
+    raw_gitdir = first[len("gitdir:"):].strip()
+    if not raw_gitdir:
+        return None
+    admin_dir = os.path.realpath(raw_gitdir if os.path.isabs(raw_gitdir) else os.path.join(wt_top, raw_gitdir))
+    commondir_file = os.path.join(admin_dir, "commondir")
+    if os.path.isfile(commondir_file) and not os.path.islink(commondir_file):
+        try:
+            with open(commondir_file, encoding=UTF8, errors="replace") as fh:
+                rel = fh.readline(4096).strip() or "../.."
+        except OSError:
+            return None
+        common_dir = os.path.realpath(rel if os.path.isabs(rel) else os.path.join(admin_dir, rel))
+    elif os.path.basename(os.path.dirname(admin_dir)) == "worktrees":
+        common_dir = os.path.dirname(os.path.dirname(admin_dir))
+    else:
+        return None
+    if os.path.basename(common_dir) != ".git":
+        return None
+    main_top = os.path.realpath(os.path.dirname(common_dir))
+    if main_top == os.path.realpath(HOME) or main_top == os.path.realpath(wt_top):
+        return None
+    if not os.path.isdir(os.path.join(main_top, ".polyctl")):
+        return None
+    return main_top
+
+
 def find_root(start=None):
     """Nearest ancestor containing .polyctl/, else the git root, else cwd.
 
     An explicit path is taken at face value — asking for a directory and being
-    given its parent is never what the caller meant. And $HOME/.polyctl is the global
-    state directory, not a project marker, so the walk never treats home as a
-    project root.
+    given its parent is never what the caller meant. And $HOME/.polyctl is the
+    global state directory, not a project marker, so the walk never treats home
+    as a project root. When the walk finds no .polyctl/ in the checkout itself,
+    a linked git worktree falls back to its governed main checkout
+    (ADMIN-FINDINGS-1).
     """
     if start:
         return os.path.abspath(os.path.expanduser(start))
@@ -311,7 +374,9 @@ def find_root(start=None):
             break
         d = parent
     top = _git_text(start or os.getcwd(), "rev-parse", "--show-toplevel")
-    return top or os.path.abspath(start or os.getcwd())
+    if top:
+        return linked_worktree_main(top) or top
+    return os.path.abspath(start or os.getcwd())
 
 
 def _has_top_level_json_key(raw, wanted):

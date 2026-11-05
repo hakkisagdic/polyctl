@@ -311,8 +311,13 @@ def project_key(root):
     also written to `.polyctl/project-key` with the path, so a lost registry gives
     each project its own name back and a copied `.polyctl/` does not claim another's.
     A directory with no `.polyctl/` is not a polyctl project: it gets its basename and
-    nothing is written.
+    nothing is written. A linked git worktree of a governed project resolves to its
+    main checkout's project key, never a new project named after the worktree folder
+    (ADMIN-FINDINGS-1).
     """
+    main = linked_worktree_main(root)
+    if main:
+        root = main
     base = os.path.basename(os.path.abspath(root).rstrip("/\\")) or "root"
     real = os.path.realpath(root)
     if not os.path.isdir(os.path.join(real, ".polyctl")):
@@ -437,6 +442,67 @@ def project_file_names(key):
     filesystem that log is another file than one named from the key as it is.
     """
     return sorted({project_file_name(what, name) for what in PROJECT_FILES for name in (key, key.lower())})
+
+
+def mistaken_worktree_projects(root):
+    """Records under ~/.polyctl keyed by a linked worktree's folder name, with the main checkout they belong to (ADMIN-FINDINGS-1).
+
+    Returns sorted `(wt_key, wt_root, main_root)` tuples without deleting any record.
+    """
+    if not root:
+        return []
+    main_root = os.path.realpath(linked_worktree_main(root) or root)
+    if not os.path.isdir(os.path.join(main_root, ".polyctl")):
+        return []
+    main_key = project_key(main_root)
+    state_root = os.path.join(HOME, ".polyctl")
+    known = project_registry()
+    found = {}
+    worktrees_dir = os.path.join(main_root, ".git", "worktrees")
+    wt_paths = []
+    if os.path.isdir(worktrees_dir) and not os.path.islink(worktrees_dir):
+        try:
+            entries = sorted(os.listdir(worktrees_dir))
+        except OSError:
+            entries = []
+        for entry in entries:
+            gitdir_file = os.path.join(worktrees_dir, entry, "gitdir")
+            if not (os.path.isfile(gitdir_file) and not os.path.islink(gitdir_file)):
+                continue
+            try:
+                with open(gitdir_file, encoding=UTF8, errors="replace") as fh:
+                    raw = fh.readline(4096).strip()
+            except OSError:
+                continue
+            if not raw:
+                continue
+            wt_git = raw if os.path.isabs(raw) else os.path.join(worktrees_dir, entry, raw)
+            wt_path = os.path.dirname(os.path.abspath(wt_git))
+            if os.path.realpath(wt_path) != main_root:
+                wt_paths.append(wt_path)
+    wt_real_to_path = {os.path.realpath(p): p for p in wt_paths}
+    for name, row in sorted(known.items()):
+        if not isinstance(row, dict) or not row.get("root"):
+            continue
+        cand_root = str(row["root"])
+        cand_real = os.path.realpath(cand_root)
+        if cand_real == main_root:
+            continue
+        owner = linked_worktree_main(cand_root)
+        if (owner and os.path.realpath(owner) == main_root) or cand_real in wt_real_to_path:
+            found[name] = (name, cand_root, main_root)
+    for wt_path in wt_paths:
+        wt_key = os.path.basename(wt_path.rstrip("/\\"))
+        if not wt_key or wt_key == main_key or wt_key in found:
+            continue
+        has_record = any(
+            os.path.lexists(os.path.join(state_root, fname))
+            for fname in project_file_names(wt_key)
+        ) or os.path.lexists(os.path.join(state_root, "review-requests", wt_key)) \
+          or os.path.lexists(os.path.join(state_root, "archive", wt_key))
+        if has_record:
+            found[wt_key] = (wt_key, wt_path, main_root)
+    return [found[k] for k in sorted(found)]
 
 
 def registered_key(root):
@@ -1277,6 +1343,52 @@ def waiver_rows(root):
     return read_chained_jsonl(waivers_path(root), WAIVER_CHAIN, legacy_prefix=True)
 
 
+def _load_agent_harness_env():
+    """The environment variables that show an agent harness, read lazily from adapters/vendors.json (ADMIN-FINDINGS-1)."""
+    raw = _vendor_document().get("harness_env")
+    return tuple(str(name) for name in (raw or ()) if name)
+
+
+class _AgentHarnessEnv:
+    """Lazy sequence over `harness_env` in adapters/vendors.json so importing polyctl opens no adapter file."""
+
+    def __iter__(self):
+        return iter(_load_agent_harness_env())
+
+    def __len__(self):
+        return len(_load_agent_harness_env())
+
+    def __getitem__(self, item):
+        return _load_agent_harness_env()[item]
+
+    def __contains__(self, item):
+        return item in _load_agent_harness_env()
+
+    def __eq__(self, other):
+        return _load_agent_harness_env() == (tuple(other) if isinstance(other, (list, tuple)) else other)
+
+    def __repr__(self):
+        return repr(_load_agent_harness_env())
+
+
+AGENT_HARNESS_ENV = _AgentHarnessEnv()
+
+
+def agent_harness_env(environ=None):
+    """The first agent-harness variable set in `environ` (or `os.environ`), or None (ADMIN-FINDINGS-1)."""
+    env = os.environ if environ is None else environ
+    return next((name for name in AGENT_HARNESS_ENV if (env.get(name) or "").strip()), None)
+
+
+def agent_harness_refusal(environ=None):
+    """Refusal line when the environment shows an agent harness, or None (ADMIN-FINDINGS-1)."""
+    seen = agent_harness_env(environ)
+    if not seen:
+        return None
+    return (f"refused: {seen} is set in the environment, which shows an agent harness; "
+            "a person runs this in their own terminal")
+
+
 def _login_and_terminal():
     """The login a command ran under and whether a terminal was attached."""
     try:
@@ -1285,7 +1397,7 @@ def _login_and_terminal():
     except Exception:
         user = None
     try:
-        interactive = os.isatty(0)
+        interactive = os.isatty(0) and not agent_harness_env()
     except OSError:
         interactive = False
     return user, bool(interactive)

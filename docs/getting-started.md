@@ -46,6 +46,25 @@ or when the quick gates exercise none of your code. Its authority, board, backlo
 files are in English, and so is what polyctl tells you afterwards - the digest, the handoff, alarms and
 the phone; `polyctl init --language tr` has them in Turkish ([configuration](configuration.md)).
 
+A linked git worktree of a governed repository shares the main checkout's project key and mailbox, keeps
+its own checkout root when `.polyctl/` is tracked in the worktree (so `polyctl verify`, `polyctl commit-ok` and
+the commit hook act on the worktree's own tree and index), falls back to the main checkout when the
+worktree has no `.polyctl/` of its own, and `polyctl mcp serve` with no `-C` resolves the main checkout's
+project from its working directory. Beside the per-project MCP
+registration that `polyctl init` writes in the checkout (`.mcp.json` for Claude Code and
+`.kiro/settings/mcp.json` for Kiro, with `-C <project-root>`), one user-level registration without
+`-C` serves every checkout and every linked worktree you open (ADMIN-FINDINGS-1):
+
+```bash
+# Per-project registration (written by polyctl init in .mcp.json and .kiro/settings/mcp.json):
+polyctl mcp config                        # {"mcpServers": {"polyctl": {"command": "polyctl", "args": ["-C", "/path/to/repo", "mcp", "serve"]}}}
+
+# User-level registration (one registration serves every governed checkout and linked worktree):
+claude mcp add -s user polyctl -- polyctl mcp serve
+# or in ~/.claude.json (Claude Code) and ~/.kiro/settings/mcp.json (Kiro):
+# {"mcpServers": {"polyctl": {"command": "polyctl", "args": ["mcp", "serve"]}}}
+```
+
 *In polyctl since slice LEADS-ADAPTERS: `polyctl init` writes in the project alone, and keeps files already there.*
 Each file it makes - the marker, the first configuration, the board, backlog, authority and gates of
 `.polyctl`, the mailbox's README, a harness's coordination - is made exclusively: a file, folder or link

@@ -9,6 +9,7 @@ where it stood; it is not importable on its own.
 # ---- the role table is real, and messages are addressed to roles (#79, #31) -------------
 
 ROLE_BLOCKS = ("implementer", "architect", "reviewer")
+MAIL_PARTIES = (*ROLE_BLOCKS, "admin", "person")
 
 
 def effective_roles(root, cfg):
@@ -438,13 +439,32 @@ def implementer_adapter(cfg=None):
     return load_adapter(ident, (cfg or {}).get("root")) if ident else {}
 
 
+_VENDOR_DOCUMENT = {}
+
+
+def _vendor_document():
+    """adapters/vendors.json, read lazily and at most once per state of the file (ADMIN-FINDINGS-1)."""
+    path = os.path.join(adapters_dir(), VENDORS_FILE)
+    try:
+        mtime = os.stat(path).st_mtime_ns
+    except OSError:
+        _VENDOR_DOCUMENT.pop(path, None)
+        return {}
+    cached = _VENDOR_DOCUMENT.get(path)
+    if not cached or cached[0] != mtime:
+        try:
+            with open(path, encoding=UTF8) as fh:
+                document = json.load(fh)
+        except (OSError, ValueError):
+            document = {}
+        cached = (mtime, document if isinstance(document, dict) else {})
+        _VENDOR_DOCUMENT[path] = cached
+    return cached[1]
+
+
 def vendor_list():
     """Every vendor polyctl knows, with the adapter that drives it or why none does (#89)."""
-    try:
-        with open(os.path.join(adapters_dir(), VENDORS_FILE), encoding=UTF8) as fh:
-            vendors = json.load(fh).get("vendors")
-    except (OSError, ValueError, AttributeError):
-        return []
+    vendors = _vendor_document().get("vendors")
     return [vendor for vendor in vendors if isinstance(vendor, dict) and vendor.get("id")] \
         if isinstance(vendors, list) else []
 

@@ -12,6 +12,20 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+### New commands
+
+- `polyctl mail send` now accepts `--from` and `--to` (`implementer`, `architect`, `reviewer`, `admin` or `person`), keeping the default `architect`-to-`implementer` address when omitted, and `polyctl mail list` shows `from → to` beside each pending file (ADMIN-FINDINGS-1).
+
+### Fixes
+
+- `polyctl doctor` and `polyctl doctor --check` now name project records under `~/.polyctl` that a linked worktree created by mistake, together with the main checkout they belong to, without deleting them (ADMIN-FINDINGS-1).
+- Commands and `polyctl mcp serve` (with no `-C`) run inside a linked git worktree of a governed repository now resolve to the main checkout's project (`.polyctl/`, ledgers, mailbox and project key) instead of creating a new project named after the worktree folder, and `docs/getting-started.md` shows the user-level MCP registration for Claude Code and Kiro beside the per-project one (ADMIN-FINDINGS-1).
+- `polyctl room search <text>` now searches every registered project's pending `agent-mail/` files as well as consumed messages in the mail ledger and append-only store, and prints which project and which state (`pending` or `consumed`) each hit comes from (ADMIN-FINDINGS-1).
+
+### Security
+
+- Every command that records a person's act (`--by` on `polyctl harness seen`, `polyctl waive`, `polyctl person-review`, `polyctl commit-ok`, `polyctl mode lite`, `polyctl config`, `polyctl features`, `polyctl init --review-tier same-family`, `polyctl collect-review`, `polyctl catchup` and `polyctl restore`) now refuses when the environment contains an agent-harness variable from `AGENT_HARNESS_ENV` (`TRAYCER_AGENT_ID`, `TRAYCER_EPIC_ID`, `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `AI_AGENT`, `GEMINI_CLI`, `CODEX_SANDBOX`, `KIRO_SESSION_ID`), even on a pseudo-terminal, naming the variable seen and requiring a person's own terminal with no override flag (ADMIN-FINDINGS-1).
+
 ## [0.7.0] - 2026-11-03
 
 Until 0.7.0 polyctl was called ao, on PyPI ao-orchestrator, at github.com/hakkisagdic/agent-orchestrator (which GitHub now redirects); nothing of the old name is read any more - no command, variable, folder or format - and a project an older ao set up starts over with `polyctl init`.

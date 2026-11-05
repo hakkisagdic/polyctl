@@ -112,3 +112,134 @@ def test_polyctl_projects_names_the_projects_that_would_have_collided(tmp_path, 
     out = capsys.readouterr().out
     assert "2 projects are named api" in out
     assert os.path.realpath(first) in out and os.path.realpath(second) in out
+
+
+def test_a_linked_worktree_resolves_to_the_main_checkouts_project(tmp_path, home, monkeypatch, capsys):
+    import json
+    import subprocess as sp
+
+    main_dir = tmp_path / "repo"
+    (main_dir / ".polyctl" / "ledger").mkdir(parents=True)
+    (main_dir / "agent-mail").mkdir()
+    (main_dir / ".polyctl" / "config.json").write_text(json.dumps({
+        "architect": {"id": "claude-code", "name": "architect", "cmd": "claude"},
+        "implementer": {"id": "kiro-cli", "name": "implementer", "cmd": "kiro-cli"},
+    }), encoding="utf-8")
+    (main_dir / ".polyctl" / "board.md").write_text("# Board\n\n## Running\n- [S1] Slice one\n", encoding="utf-8")
+    for argv in (
+        ["init", "-q"],
+        ["config", "user.email", "t@e"],
+        ["config", "user.name", "t"],
+        ["add", ".polyctl/config.json", ".polyctl/board.md"],
+        ["commit", "-q", "-m", "init"],
+    ):
+        sp.run(["git", *argv], cwd=str(main_dir), check=True)
+
+    assert A.project_key(str(main_dir)) == "repo"
+    A.write_mail(
+        str(main_dir),
+        {"mailbox": "agent-mail"},
+        "20261019-1200-architect-to-implementer-NOTE-hello.md",
+        "# Hello from main\n",
+        {"kind": "note", "from": "architect", "to": "implementer"},
+    )
+
+    wt_dir = tmp_path / "wt-slice-1"
+    sp.run(["git", "worktree", "add", "-q", "-b", "wt-1", str(wt_dir)], cwd=str(main_dir), check=True)
+    assert (wt_dir / ".polyctl" / "config.json").is_file()
+
+    assert A.linked_worktree_main(str(wt_dir)) == os.path.realpath(str(main_dir))
+    sub = wt_dir / "src" / "pkg"
+    sub.mkdir(parents=True)
+    assert A.linked_worktree_main(str(sub)) == os.path.realpath(str(main_dir))
+    assert A.find_root(str(wt_dir)) == os.path.abspath(str(wt_dir))
+    monkeypatch.chdir(sub)
+    assert A.find_root() == os.path.abspath(str(wt_dir))
+    assert A.project_key(str(wt_dir)) == "repo"
+    assert set(A.project_registry()) == {"repo"}
+
+    monkeypatch.chdir(wt_dir)
+    assert cli.main(["mail", "list"]) == 0
+    out = capsys.readouterr().out
+    assert "NOTE-hello.md" in out
+    assert set(A.project_registry()) == {"repo"}
+
+
+def test_a_governed_worktree_verifies_grants_and_commits_its_own_tree_under_the_local_hook(
+    tmp_path, home, monkeypatch, capsys
+):
+    import json
+    import shlex
+    import subprocess as sp
+    import sys
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    source = os.path.dirname(os.path.dirname(os.path.abspath(cli.__file__))).replace("\\", "/")
+    python = sys.executable.replace("\\", "/")
+    wrapper = bindir / "polyctl"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        "export PYTHONDONTWRITEBYTECODE=1\n"
+        f"export PYTHONPATH={shlex.quote(source)}\n"
+        f"exec {shlex.quote(python)} -m polyctl.cli \"$@\"\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ.get("PATH", ""))
+    for var in A.AGENT_HARNESS_ENV:
+        monkeypatch.delenv(var, raising=False)
+
+    main_dir = tmp_path / "repo"
+    (main_dir / ".polyctl" / "ledger").mkdir(parents=True)
+    (main_dir / "agent-mail").mkdir()
+    (main_dir / ".githooks").mkdir()
+    (main_dir / cli.PROJECT_MARKER).write_bytes(cli.PROJECT_MARKER_BYTES)
+    (main_dir / ".polyctl" / "config.json").write_text(json.dumps({
+        "architect": {"id": "claude-code", "name": "architect", "cmd": "claude"},
+        "implementer": {"id": "kiro-cli", "name": "implementer", "cmd": "kiro-cli"},
+    }), encoding="utf-8")
+    (main_dir / ".polyctl" / "gates.json").write_text(json.dumps({
+        "gates": {
+            "lane-file": {
+                "run": f"{shlex.quote(sys.executable)} -c \"assert open('feature.txt').read() == 'lane work\\\\n'\"",
+                "timeout": 10,
+            },
+        },
+        "profiles": {"quick": ["lane-file"]},
+    }), encoding="utf-8")
+    (main_dir / ".polyctl" / "board.md").write_text("# Board\n\n## running\n- [S1] Slice one\n", encoding="utf-8")
+    hook = main_dir / ".githooks" / "pre-commit"
+    hook.write_bytes(cli._render_local_hook("pre-commit", "."))
+    hook.chmod(0o755)
+
+    for argv in (
+        ["init", "-q"],
+        ["config", "user.email", "t@e"],
+        ["config", "user.name", "t"],
+        ["config", "core.hooksPath", ".githooks"],
+        ["add", ".polyctl-project", ".polyctl/config.json", ".polyctl/gates.json", ".polyctl/board.md", ".githooks/pre-commit"],
+        ["commit", "-q", "--no-verify", "-m", "init"],
+    ):
+        sp.run(["git", *argv], cwd=str(main_dir), check=True)
+    main_head = sp.run(["git", "rev-parse", "HEAD"], cwd=str(main_dir), check=True, capture_output=True, text=True).stdout.strip()
+
+    wt_dir = tmp_path / "wt-lane-1"
+    sp.run(["git", "worktree", "add", "-q", "-b", "lane/s1", str(wt_dir)], cwd=str(main_dir), check=True)
+    (wt_dir / "feature.txt").write_text("lane work\n", encoding="utf-8")
+    sp.run(["git", "add", "feature.txt"], cwd=str(wt_dir), check=True)
+
+    monkeypatch.chdir(wt_dir)
+    assert cli.main(["verify", "-p", "quick"]) == 0
+    assert A.latest_verification(str(wt_dir)) is not None
+    assert A.latest_verification(str(main_dir)) is None
+
+    assert cli.main(["waive", "review", "--slice", "S1", "--why", "test", "--by", "Sam"]) == 0
+    assert cli.main(["commit-ok"]) == 0
+    capsys.readouterr()
+
+    sp.run(["git", "commit", "-q", "-m", "S1: lane work"], cwd=str(wt_dir), check=True)
+    wt_head = sp.run(["git", "rev-parse", "HEAD"], cwd=str(wt_dir), check=True, capture_output=True, text=True).stdout.strip()
+    assert wt_head != main_head
+    assert sp.run(["git", "rev-parse", "HEAD"], cwd=str(main_dir), check=True, capture_output=True, text=True).stdout.strip() == main_head
+    assert set(A.project_registry()) == {"repo"}

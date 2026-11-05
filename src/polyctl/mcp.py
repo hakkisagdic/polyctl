@@ -1257,7 +1257,10 @@ def main():
     notice = role_notice(role)
     if notice:
         print(notice, file=sys.stderr, flush=True)
-    cfg = {"root": A.find_root(root)} if project_scope == "all" else A.load_config(A.find_root(root))
+    found = A.find_root(root)
+    if root is None:
+        found = A.linked_worktree_main(found) or found
+    cfg = {"root": found} if project_scope == "all" else A.load_config(found)
 
     for line in sys.stdin:
         line = line.strip()

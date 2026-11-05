@@ -253,6 +253,10 @@ def _harness_seen(cfg, args):
     if getattr(args, "ids", None):
         print("polyctl harness seen names no adapter: it shows what every harness polyctl knows reads from this tree")
         return 2
+    refusal = A.agent_harness_refusal()
+    if refusal:
+        print(refusal)
+        return 2
     by = (getattr(args, "by", None) or "").strip()
     if not by or not by.isprintable() or len(by) > 80:
         print("--by is required: the person who reads the changes, in one line of at most 80 characters")

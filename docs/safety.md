@@ -685,6 +685,16 @@ again is unseen again. The record is kept outside the tree an agent writes, in
 It is a person's command: `--by` names a person, never an agent or a role, and no grant polyctl checks admits
 it (`allowlist.FORBIDDEN`).
 
+Before any command that records a person's act (`--by` on `polyctl harness seen`, `polyctl waive`,
+`polyctl person-review`, `polyctl commit-ok`, `polyctl mode lite`, `polyctl config`, `polyctl features`,
+`polyctl init --review-tier same-family`, `polyctl collect-review`, `polyctl catchup` and `polyctl restore`),
+polyctl checks the environment against one tripwire list (`AGENT_HARNESS_ENV`): `TRAYCER_AGENT_ID`, `TRAYCER_EPIC_ID`,
+`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `AI_AGENT`, `GEMINI_CLI`, `CODEX_SANDBOX` and `KIRO_SESSION_ID`. Even
+when an agent runs inside a pseudo-terminal (`isatty` true), seeing any of those variables refuses the
+command before anything is recorded, names the variable that was seen, and says that a person runs this in
+their own terminal; there is no override flag (ADMIN-FINDINGS-1). This check is a tripwire against a harness
+that leaves its environment variables set, not a boundary against a process that scrubs its environment.
+
 *In polyctl since slice LEADS-MCP: each command it prints to copy holds the name quoted as one word for the
 shell - `--by 'Ada Lovelace'`, and on Windows `--by "Ada Lovelace"`, which cmd.exe and PowerShell read
 alike - where a name with a space was copied as two words and refused, and a `;` in one ran a command

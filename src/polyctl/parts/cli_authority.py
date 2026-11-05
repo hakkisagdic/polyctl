@@ -835,6 +835,10 @@ def _unstaged_coordination_paths(root, candidate):
 
 def _commit_ok_coordination(cfg, args, candidate):
     """Grant or refuse a coordination-only commit: a person's act with `--by`, without product gates (COORDINATION-COMMIT)."""
+    refusal = A.agent_harness_refusal()
+    if refusal:
+        print(refusal)
+        return 2
     root = cfg["root"]
     now = A.tree_digest(root, cfg)
     scope = A.candidate_scope(candidate)
@@ -1011,6 +1015,10 @@ def cmd_commit_ok(cfg, args):
     if (getattr(args, "by", None) is not None
             or getattr(args, "ask", False)
             or getattr(args, "digest", None) is not None):
+        refusal = A.agent_harness_refusal()
+        if refusal:
+            print(refusal)
+            return 2
         reasons = A.candidate_issue_messages(issues)
         if not candidate["changed_paths"]:
             reasons.insert(0, "no staged candidate — stage exactly what you intend to commit")

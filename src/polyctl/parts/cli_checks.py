@@ -291,6 +291,10 @@ def cmd_mode(cfg, args):
         )
         return 0
     if action == "lite":
+        refusal = A.agent_harness_refusal()
+        if refusal:
+            print(refusal)
+            return 2
         if not by or not by.isprintable() or len(by) > 80:
             print(
                 "--by is required: switching to lite mode turns enforcement off (no reviewer probe, no commit hooks), "
@@ -675,6 +679,11 @@ def doctor_problems(cfg):
         ))
     out.extend(_harness_config_problem(root))
     out.extend(_environment_problem(root))
+    for wt_key, wt_path, main_root in A.mistaken_worktree_projects(root):
+        out.append((
+            f"worktree-project:{wt_key}",
+            f"project {wt_key} ({wt_path}) under ~/.polyctl was created by a worktree and belongs to main checkout {main_root}",
+        ))
 
     out.extend(_turn_problems(cfg))
     # A platform run polyctl recorded no longer covers this tree: red, naming a commit this repository
@@ -1460,6 +1469,10 @@ def cmd_config(cfg, args):
     by = (getattr(args, "by", None) or "").strip()
     if key in S.RECORDED:
         # A setting that weakens a guarantee is a person's act on one project, on the record (REVIEW-TIERS).
+        refusal = A.agent_harness_refusal()
+        if refusal:
+            print(refusal)
+            return 2
         if machine:
             print(f"{key} is a person's choice for one project, recorded there; set it without --machine")
             return 2
@@ -1471,6 +1484,10 @@ def cmd_config(cfg, args):
             print(f"--by names an agent or a role ({by}); changing {key} is a person's act")
             return 2
     elif by:
+        refusal = A.agent_harness_refusal()
+        if refusal:
+            print(refusal)
+            return 2
         print(f"--by records who changed a setting that weakens a guarantee ({', '.join(S.RECORDED)}); "
               f"{key} is not one")
         return 2
@@ -1545,6 +1562,10 @@ def cmd_features(cfg, args):
         # A switch that weakens a guarantee is turned off by a person, on the record (FEATURE-RECORDED).
         by = (getattr(args, "by", None) or "").strip()
         if args.key in F.RECORDED and args.action == "off":
+            refusal = A.agent_harness_refusal()
+            if refusal:
+                print(refusal)
+                return 2
             if not by or not by.isprintable() or len(by) > 80:
                 print(f"--by is required: turning {args.key} off lets a commit land without that review, and a person "
                       "does it on the record, in one line of at most 80 characters")
@@ -1553,6 +1574,10 @@ def cmd_features(cfg, args):
                 print(f"--by names an agent or a role ({by}); turning {args.key} off is a person's act")
                 return 2
         elif by and args.key not in F.RECORDED:
+            refusal = A.agent_harness_refusal()
+            if refusal:
+                print(refusal)
+                return 2
             print(f"--by records who turned off a switch that weakens a guarantee ({', '.join(F.RECORDED)}); "
                   f"{args.key} is not one")
             return 2
@@ -1623,6 +1648,10 @@ def _agent_names(cfg):
 def cmd_waive(cfg, args):
     """A person bypasses a gate for a slice, on the record. Reconciled later by `polyctl catchup`."""
     root = cfg["root"]
+    refusal = A.agent_harness_refusal()
+    if refusal:
+        print(refusal)
+        return 2
     if args.gate == "inventory":
         print("inventory is not a gate `polyctl commit-ok` checks; nothing reads an inventory waiver, "
               "so none is recorded (`polyctl features off inventory_review --by <name>` turns the playbook "
@@ -1690,8 +1719,15 @@ def _catchup_statement(cfg, args):
     if named is not None and (not moves or not all(move.isprintable() and len(move) <= 200 for move in moves)):
         return None, "--move-only names waived slices as the board writes them, separated by commas"
     if not family and not moves and not boundary:
+        if by:
+            refusal = A.agent_harness_refusal()
+            if refusal:
+                return None, refusal
         return None, ("--by names the person who states --author-family, --move-only or --boundary; give one with it"
                       if by else None)
+    refusal = A.agent_harness_refusal()
+    if refusal:
+        return None, refusal
     if family and not A.re.fullmatch(r"[a-z0-9][a-z0-9._:-]{0,63}", family):
         return None, "--author-family is one family name, such as the lowercase id its model family goes by"
     if not by and boundary:

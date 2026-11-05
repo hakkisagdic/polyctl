@@ -39,10 +39,10 @@ Every `polyctl` command and what it does (`pctl` is the short command: the same 
 | `polyctl doctor --check` | quiet doctor for a scheduler: one line per problem, exit 1, alarms raised — installed as a 15-minute launchd job, or systemd user timer on Linux, by `polyctl watchdog install` |
 | `polyctl email setup` / `polyctl email test` | the red alarm channel: e-mail via formsubmit.co, no server ([alarms.md](alarms.md)) |
 | `polyctl alarms` / `polyctl alarms test --level red` | live alarm episodes and their level; test rings every channel |
-| `polyctl mail log` / `polyctl mail search <text>` / `polyctl mail ack <glob>` | the mail ledger: every message written and when it was consumed, searchable after deletion |
+| `polyctl mail log` / `polyctl mail search <text>` / `polyctl mail ack <glob>` | the mail ledger: every message written and when it was consumed, searchable after deletion; `polyctl room search <text>` searches both pending mail in `agent-mail/` and consumed mail in the ledger/store across every registered project, naming the project and state (`pending` or `consumed`) on each hit |
 | `polyctl watchdog explain` / `polyctl watchdog trace` | why the watchdog did or did not act: measurements and verdicts of this cycle, and of the recorded ones ([watchdog.md](watchdog.md)) |
 | `polyctl source import` | admit tracker items onto the board |
-| `polyctl mail` · `polyctl notices` | coordination messages; alerts this project raised |
+| `polyctl mail [list\|read\|send [--from <role>] [--to <role>]]` · `polyctl notices` | coordination messages (`mail send` accepts `--from` and `--to` from the role table, `admin` or `person`, defaulting to `architect` → `implementer`, and `mail list` shows `from → to`); alerts this project raised |
 | `polyctl watchdog install` | launchd job, or systemd user timer on Linux, that restarts a stalled agent ([watchdog.md](watchdog.md)) |
 | `polyctl mcp serve [--project all]` · `polyctl a2a serve` | expose state, read-only resources and prompts to MCP clients (`--project all` serves every registered project) / as A2A tasks |
 | `polyctl telegram setup` | alerts to your phone, decisions back from it; polyctl asks for the bot token and does not show it, finds the chats that wrote to the bot, and writes `~/.polyctl/telegram.json` itself ([telegram.md](telegram.md)) |

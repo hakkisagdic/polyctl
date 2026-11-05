@@ -990,12 +990,16 @@ def cmd_content(cfg, args):
 
 
 def cmd_room(cfg, args):
-    """Stored messages in every registered project that mention the words (#80)."""
-    found = A.room_search(" ".join(args.text), cfg["root"])
+    """Pending and consumed messages in every registered project that mention the words (#80, ADMIN-FINDINGS-1)."""
+    query = args.text if isinstance(args.text, str) else " ".join(args.text or [])
+    found = A.room_search(query, cfg["root"])
     for row in found:
         when = time.strftime("%Y-%m-%d", time.localtime(float(row.get("at") or 0)))
-        print(f"{C['b']}{row['project']}{C['reset']}  {when}  {row['id']}  "
-              f"{C['dim']}{row.get('from') or '?'} → {row.get('to') or '?'}{C['reset']}")
+        state = row.get("state") or "consumed"
+        summary = f"  {A.shown_text(row['summary'])}" if row.get("summary") else ""
+        print(f"{C['b']}{A.shown_text(row['project'])}{C['reset']}  {state}  {when}  {A.shown_text(row['id'])}  "
+              f"{C['dim']}{A.shown_text(row.get('from') or '?')} → {A.shown_text(row.get('to') or '?')}{C['reset']}"
+              f"{summary}")
     if not found:
         print(f"{C['dim']}no stored message mentions that{C['reset']}")
     return 0 if found else 1

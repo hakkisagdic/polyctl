@@ -97,3 +97,38 @@ def test_a_reading_over_the_limit_is_exhausted_not_a_date_ahead():
     assert code == "credits-exhaust" and text.startswith("credits run out ")
     assert cli._credits_problem({"before_reset": False}, {"used": 10, "limit": 10000}) is None
     assert cli._credits_problem(None, None) is None
+
+
+def test_doctor_names_projects_created_by_a_linked_worktree_without_deleting_them(project, tmp_path, capsys):
+    import json
+    import os
+    import subprocess as sp
+
+    root = project["root"]
+    sp.run(["git", "add", ".polyctl/config.json"], cwd=root, check=True)
+    sp.run(["git", "commit", "-q", "--allow-empty", "-m", "init"], cwd=root, check=True)
+    A.project_key(root)
+
+    wt_dir = tmp_path / "wt-mistake"
+    sp.run(["git", "worktree", "add", "-q", "-b", "wt-mistake", str(wt_dir)], cwd=root, check=True)
+
+    reg_path = A.project_registry_path()
+    reg = A.project_registry()
+    reg["wt-mistake"] = {"root": str(wt_dir), "at": 1700000000}
+    os.makedirs(os.path.dirname(reg_path), exist_ok=True)
+    open(reg_path, "w", encoding="utf-8").write(json.dumps(reg))
+    mistake_state = os.path.join(A.HOME, ".polyctl", "heartbeat-wt-mistake")
+    os.makedirs(os.path.dirname(mistake_state), exist_ok=True)
+    open(mistake_state, "w", encoding="utf-8").write("{}\n")
+
+    problems = dict(cli.doctor_problems(project))
+    assert "worktree-project:wt-mistake" in problems
+    assert "wt-mistake" in problems["worktree-project:wt-mistake"]
+    assert os.path.realpath(root) in problems["worktree-project:wt-mistake"]
+
+    cli.cmd_doctor(project, SimpleNamespace(
+        check=False, page=False, fix=False, reconcile=False, adopt_orphans=False, json=False))
+    out = capsys.readouterr().out
+    assert "wt-mistake" in out and os.path.realpath(root) in out
+    assert "wt-mistake" in A.project_registry()
+    assert os.path.isfile(mistake_state)

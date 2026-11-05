@@ -280,7 +280,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `polyctl status` / `polyctl watch` / `polyctl watch --all` / `polyctl watch --web [--port N]` | the panel: who is working, quota, problems, mail; `--web` serves the panel, the board, the pipeline and the fleet as read-only pages and `/api/*` JSON on 127.0.0.1 |
 | `polyctl board` | READY / running / blocked (`needs:`) / verified / done |
 | `polyctl next [--json\|--short]` | what stands in the way now and whose hand closes it, each with the command: a person's items first, then the staged candidate's landing chain at its first open stage. Read-only — it names a person's command, never runs it |
-| `polyctl room search <words>` / `polyctl mail compact <days>` | stored messages across projects; collapse old bodies to stubs |
+| `polyctl room search <words>` / `polyctl mail compact <days>` | pending and consumed messages across registered projects (with project and `pending`/`consumed` state); collapse old bodies to stubs |
 | `polyctl content add <source>@<commit> [--skills a,b] [--steering c,d] [--agents e,f] [--from <dir>] [--dry-run]` / `verify` | borrow skills, steering and agent definitions pinned and text-only, hooks never; check they have not drifted |
 | `polyctl backup --to <dir|ref|remote:name>` / `polyctl restore <dir>` | the governance off this disk, and back, verified |
 | `polyctl hunt [run|discard <id>|status]` | a bounded read-only bug hunt; leads to the architect, never a verdict |
@@ -309,7 +309,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `polyctl harness probe [ID…] [--sessions]` | a person's command: ask each harness that speaks ACP what it supports, sending no prompt, and keep the answer |
 | `polyctl harness seen --by NAME` / `--digest D` / `--ask` | a person's command, never an agent's: read each change an agent made to what a harness reads here - hooks, plugins, MCP servers, instructions - then record exactly those bytes as seen, by the digest or on a yes at a terminal; until then no wake, refill, nudge, hunt or lane starts in the tree, so change none of it unless your slice asks. What `polyctl init` and `polyctl skill install` write of their own is seen already |
 | `polyctl events [--follow] [--project P] [--since T]` | what polyctl did on this machine, one line an event: verifications, submitted and finished reviews, grants, mail, nudges and wakes; `--follow` prints each as it is written, `--json` as a line of JSON |
-| `polyctl mail list|read|send|log|search|ack` | the mailbox and its ledger; `ack` deletes processed messages (delivery confirmation) |
+| `polyctl mail list|read|send|log|search|ack` | the mailbox and its ledger (`send` takes `--from` and `--to`: a role from the role table, `admin` or `person`, default `architect` → `implementer`, shown in `list`); `ack` deletes processed messages (delivery confirmation) |
 | `polyctl note` | architect → implementer note without raw file writes (`--urgent`) |
 | `polyctl decide` | record an architect decision (`--scope`, `--why`, `--answers D-…`) |
 | `polyctl ask` / `polyctl answer <D-id> <key>` / `polyctl decisions` | questions with options; the answers unpark slices. An answer is a key the question offers, `x <text>` for your own words; anything else is refused, naming the keys. An answered question keeps its answer: `--change` replaces it, and the first stays on the record |
