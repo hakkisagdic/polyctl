@@ -590,11 +590,16 @@ def commits_without_grant(root, why=None):
         # A head comes from a ledger an agent can write; it reaches git as a revision, never as an option.
         raise ValueError(f"the first grant names {str(base)[:80]!r} as the commit it was built on, which is no "
                          "commit id")
+    try:
+        lite_by_sha = {rec["sha"]: rec["tree"] for rec in lite_catchup_records(root)
+                       if rec.get("sha") and rec.get("tree")}
+    except Exception:
+        lite_by_sha = {}
     stray = []
     for commit in landed_commits(root, f"{base}..HEAD"):
         if len(commit["parents"]) > 1:
             reason = _merge_problems(commit)[0]
-        elif commit["tree"] in trees:
+        elif commit["tree"] in trees or lite_by_sha.get(commit["sha"]) == commit["tree"]:
             continue
         else:
             reason = "no grant bound its tree"
@@ -839,9 +844,15 @@ def trailer_audit(root, revisions, since_first=False):
                     older.add(sha)
                     reach.extend(parents.get(sha, ()))
     grants, unreadable = ledger_grants(root)
+    try:
+        lite_by_sha = {rec["sha"]: rec["tree"] for rec in lite_catchup_records(root)
+                       if rec.get("sha") and rec.get("tree")}
+    except Exception:
+        lite_by_sha = {}
     for commit in commits:
         commit["merge"] = len(commit["parents"]) > 1
-        commit["exempt"] = commit["sha"] in older
+        in_lite = lite_by_sha.get(commit["sha"]) == commit["tree"]
+        commit["exempt"] = commit["sha"] in older or in_lite
         held = not commit["exempt"] and not commit["merge"]
         if held:
             commit["problems"] = trailer_problems(commit, grants)

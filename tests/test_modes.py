@@ -32,8 +32,11 @@ def _git_repo(root, with_marker=True):
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=root, check=True)
 
 
-def _mode_args(action="show", by="", allow_shared_hooks=False):
-    return SimpleNamespace(action=action, by=by, allow_shared_hooks=allow_shared_hooks)
+def _mode_args(action="show", by="", allow_shared_hooks=False, review_lite=None, plan=False):
+    return SimpleNamespace(
+        action=action, by=by, allow_shared_hooks=allow_shared_hooks,
+        review_lite=review_lite, plan=plan,
+    )
 
 
 def _make_fake_claude_reviewer(bin_dir):
@@ -731,3 +734,512 @@ def test_mode_full_reports_replaced_or_uninstalled_pre_push_and_avoids_stale_ins
     for line in raw_replaced.splitlines():
         if "push guard" in line:
             assert "\033[33m" in line and "\033[2m" not in line
+
+
+def _commit_file(root, rel_path, content, message, author_name="Test", author_email="test@polyctl.local"):
+    full = os.path.join(root, rel_path)
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "w", encoding="utf-8") as fh:
+        fh.write(content)
+    subprocess.run(["git", "add", rel_path], cwd=root, check=True)
+    subprocess.run(
+        ["git", "-c", f"user.name={author_name}", "-c", f"user.email={author_email}", "commit", "-q", "-m", message],
+        cwd=root, check=True,
+    )
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _reviewer_script(verdict="APPROVED", finding=None, exit_code=0, capture_file=None):
+    lines = [
+        "import sys",
+        "stdin = '' if sys.stdin.isatty() else sys.stdin.read()",
+        "p = next((a for a in (*sys.argv[1:], stdin) if 'Reviewer invocation probe' in a), stdin or sys.argv[-1])",
+        "if p.startswith('Reviewer invocation probe'):",
+        "    print(p.splitlines()[-1])",
+        "    raise SystemExit(0)",
+    ]
+    if capture_file is not None:
+        lines.append(f"open({str(capture_file)!r}, 'a', encoding='utf-8').write(p + '\\n===\\n')")
+    if exit_code:
+        lines.append(f"raise SystemExit({exit_code})")
+    if verdict == "NEEDS_CHANGES":
+        body = (
+            "VERDICT: NEEDS_CHANGES\nBLOCKER: 0\nHIGH: 1\nMEDIUM: 0\nLOW: 0\n\n"
+            f"- [HIGH] {finding or 'missing validation on input'}"
+        )
+    elif verdict == "INVALID":
+        body = "not a structured review response"
+    else:
+        body = "VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0"
+    lines.append(f"print({body!r})")
+    return [sys.executable, "-c", "\n".join(lines), "{prompt}"]
+
+
+def test_lite_window_records_head_counts_first_parent_commits_and_shows_in_mode_show(project, capsys):
+    root = project["root"]
+    head0 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+
+    opt_in = A.recorded_opt_in(root, "mode")
+    assert opt_in["value"] == "lite"
+    assert opt_in["head"] == head0
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("show")) == 0
+    out0 = _plain(capsys)
+    assert "lite window: 0 commits in the window so far" in out0
+    assert head0[:12] in out0
+
+    sha1 = _commit_file(root, "a.py", "a = 1\n", "first lite commit", author_name="Alice")
+    assert cli.cmd_mode(A.load_config(root), _mode_args("show")) == 0
+    out1 = _plain(capsys)
+    assert "lite window: 1 commit in the window so far" in out1
+
+    # Create a side branch commit and merge it (--no-ff) to verify first-parent order excludes side-branch commits
+    subprocess.run(["git", "checkout", "-q", "-b", "side", head0], cwd=root, check=True)
+    _side_sha = _commit_file(root, "side.py", "s = 1\n", "side branch commit", author_name="Bob")
+    subprocess.run(["git", "checkout", "-q", "-"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Alice", "-c", "user.email=alice@polyctl.local", "merge", "--no-ff", "-q", "-m", "merge side", "side"],
+        cwd=root, check=True,
+    )
+    sha2 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+
+    window = A.lite_window(root)
+    assert [c["sha"] for c in window] == [sha1, sha2]
+    assert _side_sha not in [c["sha"] for c in window]
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("show")) == 0
+    out2 = _plain(capsys)
+    assert "lite window: 2 commits in the window so far" in out2
+
+
+def test_mode_full_plan_and_review_lite_choices_and_refusals(project, capsys):
+    root = project["root"]
+    cfg = A.load_config(root)
+    cfg["reviewer"] = {"id": "rev", "family": "other-family", "argv": _reviewer_script("APPROVED")}
+    A.write_project_config(root, json.dumps(cfg, indent=2))
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+
+    sha1 = _commit_file(root, "one.py", "x = 1\n", "add one", author_name="Alice")
+    sha2 = _commit_file(root, "two.py", "y = 2\n", "add two", author_name="Bob")
+
+    # --plan prints window and what each choice would do, writing nothing
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", plan=True)) == 0
+    plan_out = _plain(capsys)
+    assert "lite window: 2 commits" in plan_out
+    assert sha1[:12] in plan_out and "add one" in plan_out and "Alice" in plan_out
+    assert sha2[:12] in plan_out and "add two" in plan_out and "Bob" in plan_out
+    assert "--review-lite all" in plan_out
+    assert "--review-lite <sha>[,<sha>...]" in plan_out
+    assert "--review-lite none" in plan_out
+    assert cli.project_mode(A.load_config(root)) == "lite"
+    assert A.lite_catchup_records(root) == []
+
+    # Naming a commit not in the lite window is refused
+    head0 = A.recorded_opt_in(root, "mode")["head"]
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="Ada", review_lite=head0[:12])) == 2
+    refused_out = _plain(capsys)
+    assert "is not in the lite window" in refused_out
+    assert cli.project_mode(A.load_config(root)) == "lite"
+
+    # Mutually exclusive --review-lite choices are refused
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="Ada", review_lite=["all", "none"])) == 2
+    _plain(capsys)
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="Ada", review_lite=f"all,{sha1[:12]}")) == 2
+    _plain(capsys)
+
+    # With no --review-lite flag, prints the window and how to choose, and switches to full with nothing reviewed (like none)
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="Ada")) == 0
+    switch_out = _plain(capsys)
+    assert sha1[:12] in switch_out and "add one" in switch_out and "Alice" in switch_out
+    assert sha2[:12] in switch_out and "add two" in switch_out and "Bob" in switch_out
+    assert "--review-lite all" in switch_out
+    assert "--review-lite none" in switch_out
+    assert cli.project_mode(A.load_config(root)) == "full"
+    records = A.lite_catchup_records(root)
+    assert [(r["sha"], r["status"], r["by"], r["why"]) for r in records] == [
+        (sha1, "accepted-unreviewed", "Ada", "accepted unreviewed at the lite-to-full switch"),
+        (sha2, "accepted-unreviewed", "Ada", "accepted unreviewed at the lite-to-full switch"),
+    ]
+
+
+def test_mode_full_by_guard_and_accepted_unreviewed_not_flagged_by_doctor(project, monkeypatch, capsys):
+    root = project["root"]
+    cfg = A.load_config(root)
+    cfg["reviewer"] = {"id": "rev", "family": "other-family", "argv": _reviewer_script("APPROVED")}
+    A.write_project_config(root, json.dumps(cfg, indent=2))
+
+    # Record an initial grant in full mode so landed-without-grant has a base to check from
+    init_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    init_tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    A.record_authority(
+        root, True, [], 1, "V-1", "C-1",
+        review="r.md", reviewer="rev",
+        candidate={"head": init_head, "index_tree": init_tree, "digest": "sha256:0"},
+        scope={"paths": [], "digest": "sha256:0"},
+    )
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+    sha_lite = _commit_file(root, "lite_work.py", "val = 42\n", "work in lite mode", author_name="Alice")
+
+    # --by guard refuses missing --by when commits are in the window, agent/role names, >80 chars, and harness env
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="")) == 2
+    assert "--by is required" in _plain(capsys)
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="kiro")) == 2
+    assert "names an agent or a role" in _plain(capsys)
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="x" * 81)) == 2
+    _plain(capsys)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="Ada")) == 2
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    _plain(capsys)
+
+    # Switch to full with --review-lite none by Ada
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="Ada", review_lite="none")) == 0
+    _plain(capsys)
+
+    # Accepted-unreviewed commit is not flagged by commits_without_grant / landed_without_grant / doctor
+    assert A.commits_without_grant(root) == []
+    assert A.landed_without_grant(root) is None
+    problems = dict(cli.doctor_problems(A.load_config(root)))
+    assert "landed-without-grant" not in problems
+
+    # A new commit landed in full mode without a grant IS flagged
+    subprocess.run(["git", "-c", "user.name=Alice", "-c", "user.email=a@b", "commit", "--allow-empty", "--no-verify", "-q", "-m", "ungranted"], cwd=root, check=True)
+    # Modify a file and commit with --no-verify so tree is new and ungranted
+    with open(os.path.join(root, "stray.py"), "w", encoding="utf-8") as fh:
+        fh.write("stray = 1\n")
+    subprocess.run(["git", "add", "stray.py"], cwd=root, check=True)
+    subprocess.run(["git", "-c", "user.name=Alice", "-c", "user.email=a@b", "commit", "--no-verify", "-q", "-m", "stray commit"], cwd=root, check=True)
+    stray_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    assert stray_sha in A.commits_without_grant(root)
+    assert sha_lite not in A.commits_without_grant(root)
+
+
+def test_review_lite_selected_commits_findings_board_mail_status_and_catchup_retry(project, tmp_path, capsys):
+    root = project["root"]
+    capture = tmp_path / "prompts.txt"
+    fail_three = tmp_path / "fail_three.txt"
+    fail_three.write_text("1", encoding="utf-8")
+
+    # Script that approves commit 1, returns NEEDS_CHANGES on commit 2, and fails (exit 17) on commit 3 while fail_three exists
+    script = (
+        "import os, sys\n"
+        "stdin = '' if sys.stdin.isatty() else sys.stdin.read()\n"
+        "p = next((a for a in (*sys.argv[1:], stdin) if 'Reviewer invocation probe' in a), stdin or sys.argv[-1])\n"
+        "if p.startswith('Reviewer invocation probe'):\n"
+        "    print(p.splitlines()[-1])\n"
+        "    raise SystemExit(0)\n"
+        f"open({str(capture)!r}, 'a', encoding='utf-8').write(p + '\\n===\\n')\n"
+        "if 'commit two claims' in p:\n"
+        "    print('VERDICT: NEEDS_CHANGES\\nBLOCKER: 0\\nHIGH: 1\\nMEDIUM: 0\\nLOW: 0\\n\\n- [HIGH] fix bug in two.py')\n"
+        f"elif 'commit three claims' in p and os.path.exists({str(fail_three)!r}):\n"
+        "    raise SystemExit(17)\n"
+        "else:\n"
+        "    print('VERDICT: APPROVED\\nBLOCKER: 0\\nHIGH: 0\\nMEDIUM: 0\\nLOW: 0')\n"
+    )
+    rev_argv = [sys.executable, "-c", script, "{prompt}"]
+    cfg = A.load_config(root)
+    cfg["implementer"] = {"adapter": "kiro", "session": "s1", "name": "kiro", "family": "anthropic"}
+    cfg["reviewer"] = {"id": "rev", "family": "other-family", "argv": rev_argv}
+    A.write_project_config(root, json.dumps(cfg, indent=2))
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+
+    sha1 = _commit_file(root, "one.py", "a = 1\n", "commit one claims clean work", author_name="Alice")
+    sha2 = _commit_file(root, "two.py", "b = 2\n", "commit two claims buggy work", author_name="Alice")
+    sha3 = _commit_file(
+        root, "three.py", "c = 3\n",
+        "commit three claims work",
+        author_name="Alice",
+    )
+    sha4 = _commit_file(root, "four.py", "d = 4\n", "commit four unreviewed", author_name="Alice")
+
+    # Select sha1, sha2, sha3 for review; sha4 is unselected (accepted-unreviewed)
+    # Because sha3's reviewer exits 17 (unavailable), mode full switches to full, leaves sha3 pending, and exits 3
+    rc = cli.cmd_mode(
+        A.load_config(root),
+        _mode_args("full", by="Ada", review_lite=f"{sha1[:12]},{sha2[:12]},{sha3[:12]}"),
+    )
+    _plain(capsys)
+    assert rc == 3
+    assert cli.project_mode(A.load_config(root)) == "full"
+
+    # Verify each commit was judged against its commit message
+    prompts_text = capture.read_text(encoding="utf-8")
+    assert "commit one claims clean work" in prompts_text
+    assert "commit two claims buggy work" in prompts_text
+
+    # Check the four ledger states
+    records = {r["sha"]: r for r in A.lite_catchup_records(root)}
+    assert records[sha1]["status"] == "reviewed-clean"
+    assert records[sha2]["status"] == "reviewed-with-findings"
+    fix_id = f"LITE-FIX-{sha2[:12]}"
+    assert records[sha2]["fix_item"] == fix_id
+    assert records[sha3]["status"] == "pending"
+    assert records[sha4]["status"] == "accepted-unreviewed"
+    assert records[sha4]["why"] == "accepted unreviewed at the lite-to-full switch"
+
+    # Check board has the queued fix item and mailbox has the message to implementer
+    bd = A.board(root)
+    queued_ids = [item["id"] for item in bd["queued"]]
+    assert fix_id in queued_ids
+    mails = A.mailbox(root, cfg["mailbox"])
+    assert any("to-kiro" in m and "needs-changes" in m for m in mails)
+
+    # Check status and MCP status show counts while pending > 0 or fix item is open
+    facts = cli.status_facts(A.load_config(root), shown=False)
+    assert facts["lite_catchup"]["counts"] == {
+        "reviewed-clean": 1,
+        "reviewed-with-findings": 1,
+        "pending": 1,
+        "accepted-unreviewed": 1,
+    }
+    rendered = A.re.sub(r"\x1b\[[0-9;]*m", "", cli.render(A.load_config(root), shown=False, facts=facts))
+    assert "Lite catch-up: 1 reviewed-clean · 1 reviewed-with-findings · 1 pending · 1 accepted-unreviewed" in rendered
+    mcp_status = M.status_payload(A.load_config(root))
+    assert mcp_status["lite_catchup"]["counts"] == facts["lite_catchup"]["counts"]
+
+    # If reviewer has the same model family as sha3's author family (anthropic), catchup refuses that reviewer and leaves sha3 pending (exit 3)
+    fail_three.unlink()
+    cfg = A.load_config(root)
+    cfg["reviewer"] = {"id": "same-fam", "family": "anthropic", "argv": rev_argv}
+    A.write_project_config(root, json.dumps(cfg, indent=2))
+    A.record_turns_written(root, cfg, ["reviewer"], "Ada")
+    catchup_args = SimpleNamespace(
+        boundary=None, plan=False, limit=None, slice=None,
+        author_family=None, move_only=None, by=None, reviewer=None, wait=None,
+    )
+    assert cli.cmd_catchup(A.load_config(root), catchup_args) == 3
+    _plain(capsys)
+    assert {r["sha"]: r["status"] for r in A.lite_catchup_records(root)}[sha3] == "pending"
+
+    # Now configure an independent reviewer of another family (other-family) and retry with `polyctl catchup`
+    cfg = A.load_config(root)
+    cfg["reviewer"] = {"id": "ind-rev", "family": "other-family", "argv": rev_argv}
+    A.write_project_config(root, json.dumps(cfg, indent=2))
+    A.record_turns_written(root, cfg, ["reviewer"], "Ada")
+    assert cli.cmd_catchup(A.load_config(root), catchup_args) == 0
+    _plain(capsys)
+    assert {r["sha"]: r["status"] for r in A.lite_catchup_records(root)}[sha3] == "reviewed-clean"
+
+    # Status still shows counts because fix_id is still open (queued) on the board
+    facts2 = cli.status_facts(A.load_config(root), shown=False)
+    assert facts2["lite_catchup"]["counts"] == {
+        "reviewed-clean": 2,
+        "reviewed-with-findings": 1,
+        "pending": 0,
+        "accepted-unreviewed": 1,
+    }
+
+    # Once the fix item is moved to done on the board, none is pending or open, so status and MCP status omit lite_catchup
+    with A.BoardEdit(root, hold=True) as edit:
+        assert edit.move(fix_id, "done", by="kiro", why="fixed in new commit")
+        edit.write()
+    facts3 = cli.status_facts(A.load_config(root), shown=False)
+    assert "lite_catchup" not in facts3
+    rendered3 = A.re.sub(r"\x1b\[[0-9;]*m", "", cli.render(A.load_config(root), shown=False, facts=facts3))
+    assert "Lite catch-up:" not in rendered3
+    mcp_status3 = M.status_payload(A.load_config(root))
+    assert "lite_catchup" not in mcp_status3
+
+
+def test_lite_window_harness_config_stays_unseen_until_reviewed_clean_or_seen_by_person(project, capsys):
+    root = project["root"]
+    head0 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    cfg = A.load_config(root)
+    cfg["reviewer"] = {"id": "rev", "family": "other-family", "argv": _reviewer_script("NEEDS_CHANGES")}
+    A.write_project_config(root, json.dumps(cfg, indent=2))
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+
+    sha_cfg = _commit_file(
+        root, ".claude/settings.json",
+        '{"hooks": {"SessionStart": [{"command": "echo pwn"}]}}\n',
+        "add hook in lite mode",
+        author_name="Alice",
+    )
+
+    # Default mode full (accepted-unreviewed) must NOT mark harness config as seen or granted
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="Ada")) == 0
+    _plain(capsys)
+    assert A.harness_config_base(root) == head0
+    assert [p for p, _, _ in A.unseen_harness_config(root)] == [".claude/settings.json"]
+
+    # Neither does pending or reviewed-with-findings (NEEDS_CHANGES)
+    commit_rec = A.lite_catchup_records(root)[0]
+    A.record_lite_catchup(root, commit_rec, "pending", by="Ada", why="selected")
+    assert A.harness_config_base(root) == head0
+    assert [p for p, _, _ in A.unseen_harness_config(root)] == [".claude/settings.json"]
+
+    A.record_lite_catchup(root, commit_rec, "reviewed-with-findings", by="Ada", why="reviewed: NEEDS_CHANGES")
+    assert A.harness_config_base(root) == head0
+    assert [p for p, _, _ in A.unseen_harness_config(root)] == [".claude/settings.json"]
+
+    # Once reviewed-clean, its (sha, tree) is counted as granted in harness_config_base, and a later
+    # --no-verify revert to the same tree in full mode is NOT exempted because its sha differs.
+    A.record_lite_catchup(root, commit_rec, "reviewed-clean", by="Ada", why="reviewed: APPROVED")
+    assert A.harness_config_base(root) is None
+    assert A.unseen_harness_config(root) == []
+
+    with open(os.path.join(root, ".claude/settings.json"), "w", encoding="utf-8") as fh:
+        fh.write('{"hooks": {"SessionStart": [{"command": "echo other"}]}}\n')
+    subprocess.run(["git", "add", ".claude/settings.json"], cwd=root, check=True)
+    subprocess.run(["git", "-c", "user.name=Alice", "-c", "user.email=a@b", "commit", "--no-verify", "-q", "-m", "ungranted edit"], cwd=root, check=True)
+    with open(os.path.join(root, ".claude/settings.json"), "w", encoding="utf-8") as fh:
+        fh.write('{"hooks": {"SessionStart": [{"command": "echo pwn"}]}}\n')
+    subprocess.run(["git", "add", ".claude/settings.json"], cwd=root, check=True)
+    subprocess.run(["git", "-c", "user.name=Alice", "-c", "user.email=a@b", "commit", "--no-verify", "-q", "-m", "revert to lite tree"], cwd=root, check=True)
+    assert A.harness_config_base(root) == sha_cfg
+
+
+def test_commits_without_grant_bounds_lite_exemption_to_sha_and_tree_and_tolerates_corrupt_opt_ins(project, capsys):
+    root = project["root"]
+    cfg = A.load_config(root)
+    cfg["reviewer"] = {"id": "rev", "family": "other-family", "argv": _reviewer_script("APPROVED")}
+    A.write_project_config(root, json.dumps(cfg, indent=2))
+
+    init_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    init_tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    A.record_authority(
+        root, True, [], 1, "V-1", "C-1",
+        review="r.md", reviewer="rev",
+        candidate={"head": init_head, "index_tree": init_tree, "digest": "sha256:0"},
+        scope={"paths": [], "digest": "sha256:0"},
+    )
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+    sha_lite1 = _commit_file(root, "lite_work.py", "val = 1\n", "lite one", author_name="Alice")
+    sha_lite2 = _commit_file(root, "lite_work.py", "val = 2\n", "lite two", author_name="Alice")
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="Ada", review_lite="none")) == 0
+    _plain(capsys)
+    assert A.commits_without_grant(root) == []
+
+    # After switching to full mode, an ungranted commit reverting to sha_lite1's tree has a new sha and must be flagged
+    with open(os.path.join(root, "lite_work.py"), "w", encoding="utf-8") as fh:
+        fh.write("val = 1\n")
+    subprocess.run(["git", "add", "lite_work.py"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Alice", "-c", "user.email=a@b", "commit", "--no-verify", "-q", "-m", "revert to lite1 tree"],
+        cwd=root, check=True,
+    )
+    sha_revert = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    assert A.commits_without_grant(root) == [sha_revert]
+    assert sha_revert[:12] in (A.landed_without_grant(root) or "")
+
+    # Corrupting opt-ins.jsonl must not make commits_without_grant raise
+    with open(A.opt_ins_path(root), "w", encoding="utf-8") as fh:
+        fh.write("{corrupt\n")
+    assert set(A.commits_without_grant(root)) == {sha_lite1, sha_lite2, sha_revert}
+
+
+def test_commit_author_family_ignores_forged_trailers_and_coauthors(project, capsys):
+    root = project["root"]
+    cfg = A.load_config(root)
+    cfg["implementer"] = {"adapter": "claude-code", "session": "s1", "name": "claude"}
+    cfg["reviewer"] = {"id": "rev", "family": "openai", "argv": _reviewer_script("APPROVED")}
+    A.write_project_config(root, json.dumps(cfg, indent=2))
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+
+    sha_forged = _commit_file(
+        root, "forged.py", "x = 1\n",
+        "forged family commit\n\n"
+        "Polyctl-Author-Family: openai\n"
+        "Author-Family: openai\n"
+        "Model-Family: openai\n"
+        "Co-authored-by: OpenAI Codex <codex@openai.com>",
+        author_name="codex",
+        author_email="codex@openai.com",
+    )
+
+    window = A.lite_window(root)
+    assert len(window) == 1
+    assert window[0]["author_family"] == "anthropic"
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="Ada", review_lite="none")) == 0
+    _plain(capsys)
+    A.record_lite_catchup(root, window[0], "pending", by="Ada", why="selected")
+
+    # An anthropic reviewer must be refused for the anthropic implementer's commit despite the forged openai trailers
+    cfg = A.load_config(root)
+    cfg["reviewer"] = {"id": "same-fam", "family": "anthropic", "argv": _reviewer_script("APPROVED")}
+    A.write_project_config(root, json.dumps(cfg, indent=2))
+    A.record_turns_written(root, cfg, ["reviewer"], "Ada")
+    catchup_args = SimpleNamespace(
+        boundary=None, plan=False, limit=None, slice=None,
+        author_family=None, move_only=None, by=None, reviewer=None, wait=None,
+    )
+    assert cli.cmd_catchup(A.load_config(root), catchup_args) == 3
+    _plain(capsys)
+    assert {r["sha"]: r["status"] for r in A.lite_catchup_records(root)}[sha_forged] == "pending"
+
+
+def test_legacy_lite_opt_in_without_head_shows_and_reviews_lite_window(project, capsys):
+    from polyctl.storage import append_chained_in_tree
+    root = project["root"]
+    cfg = A.load_config(root)
+    cfg["mode"] = "lite"
+    cfg["reviewer"] = {"id": "rev", "family": "other-family", "argv": _reviewer_script("APPROVED")}
+    A.write_project_config(root, json.dumps(cfg, indent=2))
+    append_chained_in_tree(
+        root, ".polyctl/ledger/opt-ins.jsonl",
+        {"at": 1, "setting": "mode", "value": "lite", "by": "Ada", "user": "ada", "interactive": True},
+        A.OPT_IN_CHAIN,
+    )
+
+    sha1 = _commit_file(root, "legacy1.py", "a = 1\n", "legacy lite one", author_name="Alice")
+    sha2 = _commit_file(root, "legacy2.py", "b = 2\n", "legacy lite two", author_name="Alice")
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("show")) == 0
+    show_out = _plain(capsys)
+    assert "lite window: 2 commits in the window so far" in show_out
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="Ada", review_lite="all")) == 0
+    _plain(capsys)
+    records = {r["sha"]: r["status"] for r in A.lite_catchup_records(root)}
+    assert records == {sha1: "reviewed-clean", sha2: "reviewed-clean"}
+
+
+def test_mode_full_with_review_lite_runs_reviewer_probe_and_refuses_broken_or_same_family_reviewer(project, capsys):
+    root = project["root"]
+    assert cli.cmd_mode(A.load_config(root), _mode_args("lite", by="Ada")) == 0
+    _plain(capsys)
+    _commit_file(root, "work.py", "w = 1\n", "work in lite", author_name="Alice")
+
+    # Broken reviewer argv must be refused at the mode full probe (exit 1), not switched to full with pending (exit 3)
+    cfg = A.load_config(root)
+    cfg["reviewer"] = {"id": "broken", "family": "other-family", "argv": [sys.executable, "-c", "raise SystemExit(17)", "{prompt}"]}
+    A.write_project_config(root, json.dumps(cfg, indent=2))
+    A.record_turns_written(root, cfg, ["reviewer"], "Ada")
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="Ada", review_lite="all")) == 1
+    out_broken = _plain(capsys)
+    assert "mode full refused" in out_broken
+    assert cli.project_mode(A.load_config(root)) == "lite"
+    assert A.lite_catchup_records(root) == []
+
+    # Same-family reviewer must also be refused on non-strict mode full --review-lite all
+    cfg = A.load_config(root)
+    cfg["implementer"] = {"adapter": "claude-code", "family": "anthropic", "session": "s1", "name": "claude"}
+    cfg["reviewer"] = {"id": "same-fam", "family": "anthropic", "argv": _reviewer_script("APPROVED")}
+    A.write_project_config(root, json.dumps(cfg, indent=2))
+    A.record_turns_written(root, cfg, ["implementer", "reviewer"], "Ada")
+
+    assert cli.cmd_mode(A.load_config(root), _mode_args("full", by="Ada", review_lite="all")) == 1
+    out_same = _plain(capsys)
+    assert "mode full refused" in out_same
+    assert cli.project_mode(A.load_config(root)) == "lite"
+    assert A.lite_catchup_records(root) == []

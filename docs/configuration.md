@@ -228,7 +228,20 @@ polyctl did not install: the push guard is off"` with how to move it aside and r
 and an eligible `pre-push` that could not be installed is reported in yellow with why; shared, external or
 global hook directories still require `--allow-shared-hooks`) - records `full` before writing the config, and
 refuses, naming what is missing, rather than half-switching; `polyctl mode show` prints the mode and what
-each mode does and does not protect ([safety.md](safety.md)).
+each mode does and does not protect ([safety.md](safety.md)). When `polyctl mode lite --by <name>` is
+recorded, it also records the `HEAD` it was set at; while in `lite` mode `polyctl mode show` reports how
+many commits are in the lite window so far (from that `HEAD` exclusive to the current `HEAD` inclusive,
+first-parent order). When returning to `full`, `polyctl mode full --by <name>` accepts `--review-lite all`,
+`--review-lite <sha>` (comma-separated commits from the window), or `--review-lite none` (with none of
+them, it prints the window and how to choose and switches with nothing reviewed, as `none` does, and
+`polyctl mode full --plan` previews the window and choices without writing). Each selected commit is
+reviewed against its commit message (by another model family than the one that wrote it when known, else
+the project's reviewer table), queueing one fix item per commit with findings on `.polyctl/board.md` and
+mailing the implementer, or leaving the commit `pending` (exit 3) for `polyctl catchup` when the reviewer
+cannot review; unselected window commits are recorded as `accepted-unreviewed` by the person who ran the
+switch (`"accepted unreviewed at the lite-to-full switch"`), and `polyctl status` and the MCP status show
+the counts (`reviewed-clean`, `reviewed-with-findings`, `pending`, `accepted-unreviewed`) until none is
+pending or open.
 
 An implementer whose tool grant admits `polyctl config set` or `polyctl config unset` could lengthen or shorten what
 governs its own review, and `polyctl doctor` names such a grant even when it fixes a value or includes

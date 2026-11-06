@@ -483,6 +483,7 @@ def status_payload(cfg):
         **({"push_guard": push_guard}
            if mode != "lite" and (push_guard := cli._push_guard_status_line(cli._polyctl_hook_inventory(root))) is not None
            else {}),
+        **({"lite_catchup": lite_cu} if (lite_cu := A.lite_catchup_status(root)) is not None else {}),
     )
 
 

@@ -171,6 +171,9 @@ def status_facts(cfg, msg_count=8, window_hours=24.0, shown=False):
         waivers = [f"waiver ledger is unreadable: {exc}"]
     if waivers:
         facts["waivers"] = waivers
+    lite_catchup = A.lite_catchup_status(root, bd)
+    if lite_catchup is not None:
+        facts["lite_catchup"] = lite_catchup
     facts["messages"] = [{"time": hh, "role": kind, "text": text}
                          for hh, kind, text in (A.messages(recs, msg_count, adapter) if impl else [])]
     return facts
@@ -379,6 +382,11 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
                   else f"       {C['dim']}{A.shown_text(ln)}{C['reset']}")
     for line in facts.get("waivers") or ():
         a(f"   {C['b']}Waiver:{C['reset']}  {A.shown_text(line)}")
+    lite_cu = facts.get("lite_catchup")
+    if lite_cu:
+        c_map = lite_cu.get("counts") or {}
+        summary = " · ".join(f"{c_map.get(k, 0)} {k}" for k in A.LITE_CATCHUP_STATES)
+        a(f"   {C['b']}Lite catch-up:{C['reset']} {A.shown_text(summary)}")
 
     # The message log is elastic and goes last, so a short window drops history
     # rather than the state you actually steer by.

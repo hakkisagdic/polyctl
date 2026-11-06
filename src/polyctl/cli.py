@@ -743,11 +743,19 @@ def build_parser(root=None, prog=None):
     adp.set_defaults(fn=cmd_adapters)
     md = sub.add_parser("mode", help="the project's mode: full (enforced) or lite (basic setup without enforcement)")
     md.add_argument("action", choices=["show", "lite", "full"], nargs="?", default="show")
-    md.add_argument("--by", help="lite: the person who switches enforcement off, on the record; required")
+    md.add_argument("--by", help="the person who switches between lite and full mode, on the record")
     md.add_argument(
         "--allow-shared-hooks", action="store_true",
         help="authorize hook install or uninstall where Git routes hooks through shared, external, "
              "or global/system configuration",
+    )
+    md.add_argument(
+        "--review-lite", action="append", default=None, metavar="CHOICE",
+        help="full: which lite-window commits to review (all, none, or <sha>[,<sha>...])",
+    )
+    md.add_argument(
+        "--plan", action="store_true",
+        help="full: print the lite window and what each --review-lite choice would do, writing nothing",
     )
     md.set_defaults(fn=cmd_mode)
     dr = sub.add_parser("doctor", help="check this workspace's wiring")

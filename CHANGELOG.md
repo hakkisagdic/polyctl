@@ -16,6 +16,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 - `polyctl mail send` now accepts `--from` and `--to` (`implementer`, `architect`, `reviewer`, `admin` or `person`), keeping the default `architect`-to-`implementer` address when omitted, and `polyctl mail list` shows `from → to` beside each pending file (ADMIN-FINDINGS-1).
 
+### Behaviour changes
+
+- `polyctl mode lite --by <name>` now records the `HEAD` it started at so `polyctl mode show` counts the commits in the lite window and `polyctl mode full --by <name>` can preview (`--plan`), review (`--review-lite all|<sha>[,<sha>...]|none`), queue board and mail fix items for findings, retry pending reviews in `polyctl catchup`, and record unselected window commits as accepted unreviewed on the ledger (LITE-CATCHUP-1).
+
 ### Fixes
 
 - `polyctl doctor` and `polyctl doctor --check` now name project records under `~/.polyctl` that a linked worktree created by mistake, together with the main checkout they belong to, without deleting them (ADMIN-FINDINGS-1).

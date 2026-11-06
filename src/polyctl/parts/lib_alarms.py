@@ -1473,6 +1473,7 @@ def fail_waiver(root, wid, detail):
 # ---- opt-ins: a person weakens a guarantee, on the record (REVIEW-TIERS) -----------------
 
 OPT_IN_CHAIN = "polyctl-opt-in-row-v1"
+LITE_CATCHUP_STATES = ("reviewed-clean", "reviewed-with-findings", "pending", "accepted-unreviewed")
 
 
 def opt_ins_path(root):
@@ -1490,6 +1491,9 @@ def record_opt_in(root, setting, value, by):
     user, interactive = _login_and_terminal()
     row = {"at": int(time.time()), "setting": setting, "value": value, "by": by,
            "user": user, "interactive": interactive}
+    if setting == "mode" and value == "lite":
+        head = (_git_text(root, "rev-parse", "--verify", "--quiet", "HEAD") or "").strip()
+        row["head"] = head if _OBJECT_ID.fullmatch(head) else ""
     return append_chained_in_tree(root, ".polyctl/ledger/opt-ins.jsonl", row, OPT_IN_CHAIN)
 
 
@@ -1499,6 +1503,282 @@ def recorded_opt_in(root, setting):
     rows = [row for row in read_chained_in_tree(root, ".polyctl/ledger/opt-ins.jsonl", OPT_IN_CHAIN)
             if isinstance(row, dict) and row.get("setting") == setting]
     return rows[-1] if rows else None
+
+
+def commit_author_family(root, cfg, commit, grants=None):
+    """The model family that wrote a commit when polyctl can establish it from a grant or the project's
+    implementer configuration, else None; commit-message trailers and author strings an implementer
+    writes itself are never trusted to name the family a reviewer must differ from (LITE-CATCHUP-1)."""
+    if grants is None and root:
+        try:
+            grants, _ = ledger_grants(root)
+        except Exception:
+            grants = None
+    tree = commit.get("tree")
+    trailers = commit.get("trailers") or ()
+    for key, val in trailers:
+        k_low = str(key or "").strip().lower()
+        v_clean = str(val or "").strip()
+        if k_low == "polyctl-grant" and grants and v_clean in grants:
+            g = grants[v_clean]
+            if isinstance(g, dict) and (not tree or (g.get("candidate") or {}).get("index_tree") == tree):
+                fam = ((g.get("author") or {}).get("family")
+                       or (g.get("implementer_identity") or {}).get("family"))
+                if fam:
+                    return str(fam).strip().lower()
+    if grants and tree:
+        for g in grants.values():
+            if isinstance(g, dict) and (g.get("candidate") or {}).get("index_tree") == tree:
+                fam = ((g.get("author") or {}).get("family")
+                       or (g.get("implementer_identity") or {}).get("family"))
+                if fam:
+                    return str(fam).strip().lower()
+    if isinstance(cfg, dict):
+        if "capability_matrix" in cfg:
+            cm = cfg.get("capability_matrix")
+            impl = cfg.get("implementer")
+            if isinstance(cm, dict) and isinstance(impl, dict):
+                bindings = cm.get("bindings") if isinstance(cm.get("bindings"), dict) else {}
+                models = cm.get("models") if isinstance(cm.get("models"), dict) else {}
+                brec = bindings.get(impl.get("binding"))
+                mrec = models.get(brec.get("model")) if isinstance(brec, dict) else None
+                if isinstance(mrec, dict) and str(mrec.get("family") or "").strip():
+                    return str(mrec["family"]).strip().lower()
+            return None
+        block = cfg.get("implementer")
+        if isinstance(block, dict):
+            fam = declared_family(block)[0]
+            if fam:
+                return fam
+    return None
+
+
+def _legacy_lite_start_head(root, row):
+    """Infer the pre-lite HEAD for an opt-in row recorded before `head` was stored (LITE-CATCHUP-1)."""
+    try:
+        out = _git_output(
+            root, "log", "--no-show-signature", "--first-parent", "--reverse", "-z",
+            "--format=%H%n%T%n%P%n%ct%n%(trailers:only,unfold)", "HEAD", "--",
+        )
+    except RuntimeError:
+        return None
+    try:
+        granted_trees, _, _ = _granted_trees(root)
+    except Exception:
+        granted_trees = set()
+    try:
+        recorded_lite = {(rec.get("sha"), rec.get("tree")) for rec in lite_catchup_records(root)}
+    except Exception:
+        recorded_lite = set()
+    baseline = harness_baseline(root)
+    opt_at = row.get("at") if isinstance(row, dict) and isinstance(row.get("at"), (int, float)) else None
+    entries = []
+    for raw in out.split(b"\0"):
+        if not raw.strip():
+            continue
+        lines = raw.decode(UTF8, "replace").rstrip("\n").split("\n")
+        if len(lines) < 4:
+            continue
+        sha, tree, parents, at_str = lines[:4]
+        trailers = []
+        for line in lines[4:]:
+            if _TRAILER_LINE.match(line):
+                key, _, val = line.partition(":")
+                trailers.append((key.strip(), val.strip()))
+        at = int(at_str) if at_str.lstrip("-").isdigit() else 0
+        entries.append((sha, tree, parents.split(), at, trailers))
+    if not entries:
+        return ""
+    last_pre_lite = None
+    for sha, tree, _, at, trailers in entries:
+        if (tree in granted_trees or _polyctl_trailers(trailers) or (sha, tree) in recorded_lite
+                or (baseline and sha == baseline) or (opt_at is not None and at < opt_at)):
+            last_pre_lite = sha
+    if last_pre_lite is not None:
+        return last_pre_lite
+    return entries[0][0]
+
+
+def lite_window(root, start_head=None, cfg=None):
+    """First-parent commits from the recorded lite-mode HEAD (exclusive) to current HEAD (inclusive) (LITE-CATCHUP-1)."""
+    if start_head is None:
+        try:
+            row = recorded_opt_in(root, "mode")
+        except Exception:
+            return []
+        if not isinstance(row, dict) or row.get("value") != "lite":
+            return []
+        start_head = str(row.get("head") or "") if "head" in row else _legacy_lite_start_head(root, row)
+        if start_head is None:
+            return []
+    current = (_git_text(root, "rev-parse", "--verify", "--quiet", "HEAD") or "").strip()
+    if not _OBJECT_ID.fullmatch(current):
+        return []
+    if start_head == "":
+        rev_spec = current
+    elif _OBJECT_ID.fullmatch(str(start_head)):
+        if start_head == current:
+            return []
+        rev_spec = f"{start_head}..{current}"
+    else:
+        return []
+    try:
+        out = _git_output(
+            root, "log", "--no-show-signature", "--first-parent", "--reverse", "-z",
+            "--format=%H%n%T%n%P%n%ct%n%an%n%ae%n%s%n%(trailers:only,unfold)", rev_spec, "--",
+        )
+    except RuntimeError:
+        return []
+    if cfg is None:
+        try:
+            cfg = load_config(root)
+        except Exception:
+            cfg = {}
+    try:
+        grants, _ = ledger_grants(root)
+    except Exception:
+        grants = None
+    commits = []
+    for raw in out.split(b"\0"):
+        if not raw.strip():
+            continue
+        lines = raw.decode(UTF8, "replace").rstrip("\n").split("\n")
+        if len(lines) < 7:
+            continue
+        sha, tree, parents, at, author, email, subject = lines[:7]
+        trailers = []
+        for line in lines[7:]:
+            if _TRAILER_LINE.match(line):
+                key, _, val = line.partition(":")
+                trailers.append((key.strip(), val.strip()))
+        parent_list = parents.split()
+        item = {
+            "sha": sha,
+            "short": sha[:12],
+            "tree": tree,
+            "parents": parent_list,
+            "parent": parent_list[0] if parent_list else "",
+            "at": int(at) if at.lstrip("-").isdigit() else 0,
+            "author": author,
+            "author_email": email,
+            "subject": subject,
+            "trailers": trailers,
+        }
+        item["author_family"] = commit_author_family(root, cfg, item, grants)
+        commits.append(item)
+    return commits
+
+
+def record_lite_catchup(root, commit, status, by, why=None, review=None, fix_item=None, mail=None):
+    """Append a lite-window commit record to `.polyctl/ledger/opt-ins.jsonl` (LITE-CATCHUP-1)."""
+    if status not in LITE_CATCHUP_STATES:
+        raise ValueError(f"invalid lite catch-up status: {status}")
+    from .storage import append_chained_in_tree
+    user, interactive = _login_and_terminal()
+    sha = str(commit.get("sha") or "")
+    row = {
+        "at": int(time.time()),
+        "setting": "lite-catchup",
+        "sha": sha,
+        "short": str(commit.get("short") or sha[:12]),
+        "tree": str(commit.get("tree") or ""),
+        "parent": str(commit.get("parent") or (commit.get("parents") or [""])[0]),
+        "subject": str(commit.get("subject") or ""),
+        "author": str(commit.get("author") or ""),
+        "author_family": commit.get("author_family"),
+        "status": status,
+        "by": str(by or ""),
+        "user": user,
+        "interactive": interactive,
+    }
+    if why:
+        row["why"] = str(why)
+    if review:
+        row["review"] = str(review)
+    if fix_item:
+        row["fix_item"] = str(fix_item)
+    if mail:
+        row["mail"] = str(mail)
+    return append_chained_in_tree(root, ".polyctl/ledger/opt-ins.jsonl", row, OPT_IN_CHAIN)
+
+
+def lite_catchup_records(root):
+    """The recorded lite-window commits and their current states, in window order (LITE-CATCHUP-1)."""
+    from .storage import read_chained_in_tree
+    try:
+        rows = read_chained_in_tree(root, ".polyctl/ledger/opt-ins.jsonl", OPT_IN_CHAIN)
+    except FileNotFoundError:
+        return []
+    by_sha = {}
+    order = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("setting") != "lite-catchup":
+            continue
+        sha = str(row.get("sha") or "")
+        status = row.get("status")
+        if not _OBJECT_ID.fullmatch(sha) or status not in LITE_CATCHUP_STATES:
+            continue
+        if sha not in by_sha:
+            order.append(sha)
+            by_sha[sha] = dict(row)
+        else:
+            merged = dict(by_sha[sha])
+            for key, value in row.items():
+                if value is not None:
+                    merged[key] = value
+            by_sha[sha] = merged
+    return [by_sha[sha] for sha in order]
+
+
+def lite_catchup_status(root, b=None):
+    """Counts of lite-window commit states while any is pending or has an open fix item, else None (LITE-CATCHUP-1)."""
+    try:
+        records = lite_catchup_records(root)
+    except Exception:
+        return None
+    if not records:
+        return None
+    bd = b if b is not None else board(root)
+    done_ids = {item["id"] for item in bd.get("done", [])}
+    try:
+        for sid, moves in slice_moves(root).items():
+            if moves and moves[-1].get("to") in ("done", "rejected"):
+                done_ids.add(sid)
+    except Exception:
+        pass
+    counts = {state: 0 for state in LITE_CATCHUP_STATES}
+    open_items = []
+    for rec in records:
+        st = rec.get("status")
+        if st in counts:
+            counts[st] += 1
+        if st == "reviewed-with-findings":
+            fix_id = rec.get("fix_item")
+            if fix_id and fix_id not in done_ids:
+                open_items.append(fix_id)
+    if counts["pending"] == 0 and not open_items:
+        return None
+    return {
+        "counts": counts,
+        "reviewed-clean": counts["reviewed-clean"],
+        "reviewed-with-findings": counts["reviewed-with-findings"],
+        "pending": counts["pending"],
+        "accepted-unreviewed": counts["accepted-unreviewed"],
+        "open_fix_items": open_items,
+        "commits": [
+            {
+                "sha": rec["sha"],
+                "short": rec["short"],
+                "subject": rec.get("subject", ""),
+                "status": rec["status"],
+                **({"fix_item": rec["fix_item"]} if rec.get("fix_item") else {}),
+                **({"review": rec["review"]} if rec.get("review") else {}),
+                **({"by": rec["by"]} if rec.get("by") else {}),
+                **({"why": rec["why"]} if rec.get("why") else {}),
+            }
+            for rec in records
+        ],
+    }
 
 
 def open_waivers(root, gate=None, slice_id=None):

@@ -1021,6 +1021,14 @@ def harness_config_base(root, key=None):
         trees.discard(None)
         base = next(((row.get("candidate") or {}).get("head") for row in product
                      if (row.get("candidate") or {}).get("head")), None)
+    try:
+        lite_recs = lite_catchup_records(root)
+    except Exception:
+        lite_recs = []
+    lite_clean = {(rec["sha"], rec["tree"]) for rec in lite_recs
+                  if rec.get("status") == "reviewed-clean" and rec.get("sha") and rec.get("tree")}
+    if base is None and lite_recs:
+        base = next((rec.get("parent") for rec in lite_recs if rec.get("parent")), None)
     lower = _nearest_ancestor(root, [base, (harness_seen_record(root, key=key) or {}).get("head"),
                                      harness_baseline(root, key=key)])
     if lower is None and rows:
@@ -1034,7 +1042,8 @@ def harness_config_base(root, key=None):
     except (RuntimeError, UnicodeError):
         return None
     commits = [line.split() for line in log.splitlines() if line.strip()]
-    ungranted = [index for index, (_, tree) in enumerate(commits) if tree not in trees]
+    ungranted = [index for index, (sha, tree) in enumerate(commits)
+                 if tree not in trees and (sha, tree) not in lite_clean]
     if not ungranted:
         return None
     oldest = ungranted[-1]

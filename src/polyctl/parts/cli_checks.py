@@ -227,6 +227,165 @@ def _mode_full_missing(cfg, allow_shared_hooks=False):
     return missing
 
 
+def _parse_review_lite(raw, window):
+    """(choice, None) or (None, refusal): parse `--review-lite` against the lite window (LITE-CATCHUP-1)."""
+    if isinstance(raw, (list, tuple)):
+        if len(raw) > 1:
+            return None, "--review-lite choices are mutually exclusive: give one of all, none, or <sha>[,<sha>...]"
+        raw = raw[0] if raw else None
+    if raw is None:
+        return {"mode": "unspecified", "selected": [], "accepted": list(window)}, None
+    text = str(raw).strip()
+    if not text:
+        return None, "--review-lite takes all, none, or comma-separated commit SHAs from the lite window"
+    parts = [part.strip() for part in text.split(",")]
+    if any(not part for part in parts):
+        return None, "--review-lite takes all, none, or comma-separated commit SHAs from the lite window"
+    lowered = [part.lower() for part in parts]
+    if len(parts) > 1 and any(item in ("all", "none") for item in lowered):
+        return None, "--review-lite all, --review-lite none, and --review-lite <sha>[,<sha>...] are mutually exclusive"
+    if lowered == ["all"]:
+        return {"mode": "all", "selected": list(window), "accepted": []}, None
+    if lowered == ["none"]:
+        return {"mode": "none", "selected": [], "accepted": list(window)}, None
+    wanted = set()
+    for tok in lowered:
+        if not A.re.fullmatch(r"[0-9a-f]{4,64}", tok):
+            return None, f"--review-lite: commit {tok} is not in the lite window"
+        matches = [c for c in window if c["sha"].startswith(tok)]
+        if not matches:
+            return None, f"--review-lite: commit {tok} is not in the lite window"
+        if len(matches) > 1:
+            return None, f"--review-lite: commit prefix {tok} is ambiguous in the lite window"
+        wanted.add(matches[0]["sha"])
+    selected = [c for c in window if c["sha"] in wanted]
+    accepted = [c for c in window if c["sha"] not in wanted]
+    return {"mode": "shas", "selected": selected, "accepted": accepted}, None
+
+
+def _print_lite_window(window, choice=None, plan=False):
+    """Print the lite window (short sha, subject, author) and how to choose or what each choice would do (LITE-CATCHUP-1)."""
+    count = len(window)
+    noun = "commit" if count == 1 else "commits"
+    print(f"lite window: {count} {noun}")
+    for c in window:
+        fam = f", family: {c['author_family']}" if c.get("author_family") else ""
+        print(f"  {c['short']}  {A.shown_text(c.get('subject') or '')}  ({A.shown_text(c.get('author') or '')}{fam})")
+    if plan:
+        print("choices for `polyctl mode full --by <name>`:")
+        print(f"  --review-lite all: review all {count} {noun} in the lite window; accept 0 unreviewed")
+        print("  --review-lite <sha>[,<sha>...]: review only the listed window commits; record the rest as accepted-unreviewed")
+        print(f"  --review-lite none (or omitted): review 0 commits; record all {count} {noun} as accepted-unreviewed")
+        if choice and choice["mode"] != "unspecified":
+            sel = ", ".join(c["short"] for c in choice["selected"]) or "none"
+            acc = ", ".join(c["short"] for c in choice["accepted"]) or "none"
+            print(f"with --review-lite {choice['mode']}: review {len(choice['selected'])} ({sel}); "
+                  f"accept unreviewed {len(choice['accepted'])} ({acc})")
+    else:
+        print("choose which lite-window commits to review with `polyctl mode full --by <name>`:")
+        print("  --review-lite all               review every commit in the lite window")
+        print("  --review-lite <sha>[,<sha>...]  review only the listed window commits")
+        print("  --review-lite none              review none and accept the window unreviewed")
+
+
+def _lite_fix_item(root, cfg, commit, artefact, by):
+    """Queue one fix item per commit on `.polyctl/board.md` and mail the implementer (LITE-CATCHUP-1)."""
+    fix_id = f"LITE-FIX-{commit['short']}"
+    subject = " ".join(str(commit.get("subject") or "").replace("·", "-").split()) or f"commit {commit['short']}"
+    findings = A.review_header_value(f"{cfg['reviews']}/{artefact or ''}")
+    title = f"Fix review findings for lite commit {commit['short']} ({subject[:60]})"
+    acceptance = f"fix every finding in {findings} for commit {commit['short']} in a new commit without rewriting history"
+    with A.BoardEdit(root, hold=True) as edit:
+        held = {item["id"] for state in A.BOARD_STATES for item in edit.board.get(state, [])}
+        if fix_id not in held:
+            if not any(A._board_heading(line) == "queued" for line in edit.lines):
+                edit.lines.extend(["", "## queued", ""])
+            edit.append(
+                "queued",
+                f"- [{fix_id}] {title} · acceptance: {acceptance}",
+                by=by or "polyctl",
+                why=f"lite catch-up findings for {commit['short']}",
+            )
+            edit.write()
+    implementer, architect = A.mail_names(cfg)
+    sender = {"implementer": implementer, "architect": architect}.get(A.invoking_role(), "human")
+    mail_name = (
+        f"{time.strftime('%Y%m%d-%H%M')}-{sender}-to-{implementer}-REVIEW-"
+        f"{A.safe_slug(fix_id.lower(), 'slice')}-needs-changes.md"
+    )
+    body = (
+        f"# Lite-mode commit {commit['short']} needs fixes ({fix_id})\n\n"
+        f"The retrospective review of commit `{commit['sha']}` ({subject}) returned NEEDS_CHANGES.\n"
+        f"The findings are in `{findings}`.\n\n"
+        f"Board item `{fix_id}` is queued on `.polyctl/board.md`. Fix the findings in a new commit; "
+        "do not rewrite history.\n"
+    )
+    A.write_mail(
+        root, cfg, mail_name, body,
+        {"kind": "review", "class": "needs-changes", "from": sender, "to": implementer,
+         "slice": fix_id, "commit": commit["sha"]},
+    )
+    return fix_id, mail_name
+
+
+def _review_lite_commit(cfg, root, commit, by, boundary=None, statement=None):
+    """Review one commit from the lite window and record its ledger outcome (LITE-CATCHUP-1)."""
+    from types import SimpleNamespace
+    parent = commit.get("parent") or (commit.get("parents") or [""])[0]
+    empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    base = parent or empty_tree
+    rng = f"{base}..{commit['sha']}"
+    if parent and A.range_unchanged(root, parent, commit["sha"]) is True:
+        A.record_lite_catchup(root, commit, "reviewed-clean", by=by, why="commit has no net tree change")
+        return "reviewed-clean"
+    established = commit.get("author_family") or A.commit_author_family(root, cfg, commit)
+    stated = (
+        {key: statement[key] for key in ("family", "by", "user", "interactive")}
+        if statement and statement.get("family")
+        else None
+    )
+    if established or stated:
+        author = {
+            "role": None, "actor": commit.get("author"), "adapter": None,
+            "family": str(established).strip().lower() if established else None,
+            "grant": None, "stated": stated,
+        }
+    else:
+        author = None
+    ns = SimpleNamespace(
+        boundary=boundary or f"lite-mode commit {commit['short']}: what its commit message says it does",
+        paths=None,
+        commits=rng,
+        author=author,
+        claims=not bool(boundary),
+        range_slice=f"LITE-{commit['short']}",
+        boundary_by={key: statement[key] for key in ("by", "user", "interactive")} if boundary and statement else None,
+    )
+    try:
+        code = cmd_review(cfg, ns)
+    except Exception as exc:
+        print(f"  {C['red']}review could not be recorded{C['reset']}: {exc}; commit {commit['short']} stays pending")
+        return "pending"
+    recorded = getattr(ns, "recorded", None) or {}
+    verdict = recorded.get("verdict")
+    if verdict == "APPROVED":
+        A.record_lite_catchup(
+            root, commit, "reviewed-clean", by=by,
+            why="reviewed: APPROVED", review=recorded.get("artefact"),
+        )
+        return "reviewed-clean"
+    if verdict == "NEEDS_CHANGES":
+        fix_id, mail_name = _lite_fix_item(root, cfg, commit, recorded.get("artefact"), by)
+        A.record_lite_catchup(
+            root, commit, "reviewed-with-findings", by=by,
+            why="reviewed: NEEDS_CHANGES", review=recorded.get("artefact"),
+            fix_item=fix_id, mail=mail_name,
+        )
+        return "reviewed-with-findings"
+    print(f"  commit {commit['short']} could not be reviewed (exit {code}); stays pending for `polyctl catchup`")
+    return "pending"
+
+
 def _uninstall_lite_hooks(root, allow_shared_hooks=False):
     """Remove untracked polyctl hooks when switching to `lite` mode; tracked hooks stay in the tree and stand aside in `polyctl commit-check` and `polyctl push check`."""
     inv = _polyctl_hook_inventory(root)
@@ -249,14 +408,19 @@ def _uninstall_lite_hooks(root, allow_shared_hooks=False):
 
 
 def cmd_mode(cfg, args):
-    """Show or switch the project mode: `lite`, `full`, or `show` (MODES)."""
+    """Show or switch the project mode: `lite`, `full`, or `show` (MODES, LITE-CATCHUP-1)."""
     from .storage import ReplacedNotDurable
     root = cfg["root"]
     action = getattr(args, "action", "show") or "show"
     by = (getattr(args, "by", None) or "").strip()
+    raw_review_lite = getattr(args, "review_lite", None)
+    plan = bool(getattr(args, "plan", False))
+    if action != "full" and (raw_review_lite is not None or plan):
+        print("--review-lite and --plan are only used with `polyctl mode full`")
+        return 2
     if action == "show":
         if by:
-            print("--by is only used with `polyctl mode lite --by <name>`")
+            print("--by is only used with `polyctl mode lite --by <name>` or `polyctl mode full --by <name>`")
             return 2
         where = unrecorded_lite(cfg)
         if where:
@@ -269,6 +433,16 @@ def cmd_mode(cfg, args):
             opt_in = _lite_mode_opt_in(cfg)
             who = f" (set by {_person_line(opt_in)})" if opt_in else ""
             print(f"mode: lite — {ENFORCEMENT_OFF_LITE_LINE}{who}")
+            start_head = (
+                opt_in["head"]
+                if opt_in and "head" in opt_in
+                else (A._legacy_lite_start_head(root, opt_in) if opt_in else None)
+            )
+            window = A.lite_window(root, start_head, cfg=cfg) if opt_in and start_head is not None else []
+            count = len(window)
+            noun = "commit" if count == 1 else "commits"
+            since = f" (since {start_head[:12]})" if start_head else ""
+            print(f"lite window: {count} {noun} in the window so far{since}")
         else:
             print("mode: full — enforcement: on")
         print("\nfull mode:")
@@ -331,10 +505,40 @@ def cmd_mode(cfg, args):
         except Exception as exc:
             print(f"{C['red']}not recorded{C['reset']}: {exc}; lite mode is not in force until it is")
             return 1
+        A.record_harness_baseline(root, "polyctl mode lite")
         _uninstall_lite_hooks(root, allow_shared_hooks=bool(getattr(args, "allow_shared_hooks", False)))
         print(f"mode = 'lite' (recorded as set by {by}) — {ENFORCEMENT_OFF_LITE_LINE}")
         return 0
     if action == "full":
+        was_lite = project_mode(cfg) == "lite"
+        opt_in = _lite_mode_opt_in(cfg) if was_lite else None
+        start_head = (
+            opt_in["head"]
+            if opt_in and "head" in opt_in
+            else (A._legacy_lite_start_head(root, opt_in) if opt_in else None)
+        )
+        window = A.lite_window(root, start_head, cfg=cfg) if opt_in and start_head is not None else []
+        choice, choice_problem = _parse_review_lite(raw_review_lite, window)
+        if choice_problem:
+            print(f"{C['red']}refused{C['reset']}: {choice_problem}")
+            return 2
+        if plan:
+            _print_lite_window(window, choice=choice, plan=True)
+            return 0
+        refusal = A.agent_harness_refusal()
+        if refusal:
+            print(refusal)
+            return 2
+        if by or raw_review_lite is not None or window:
+            if not by or not by.isprintable() or len(by) > 80:
+                print(
+                    "--by is required: switching from lite to full mode records which lite-window commits are "
+                    "reviewed or accepted unreviewed, and a person does it on the record, in one line of at most 80 characters"
+                )
+                return 2
+            if by.lower() in _agent_names(cfg):
+                print(f"--by names an agent or a role ({by}); switching to full mode is a person's act")
+                return 2
         document = A.project_config_document(root)
         if document["problem"]:
             print(f"{C['red']}not changed{C['reset']}: {document['problem']}")
@@ -349,7 +553,6 @@ def cmd_mode(cfg, args):
             for item in missing:
                 print(f"  - {item}")
             return 1
-        was_lite = project_mode(cfg) == "lite"
         rc, install_problems = _hooks_install(dict(cfg, mode="full"), allow_shared_hooks=allow)
         after_inv = _polyctl_hook_inventory(root)
         pre_commit_ok = (
@@ -378,6 +581,16 @@ def cmd_mode(cfg, args):
         planned_text = json.dumps(S.assign(document["config"], "mode", "full"), indent=2, ensure_ascii=False)
         try:
             A.record_opt_in(root, "mode", "full", by or "human")
+            for c in choice["accepted"]:
+                A.record_lite_catchup(
+                    root, c, "accepted-unreviewed", by=by or "human",
+                    why="accepted unreviewed at the lite-to-full switch",
+                )
+            for c in choice["selected"]:
+                A.record_lite_catchup(
+                    root, c, "pending", by=by or "human",
+                    why="selected for review at the lite-to-full switch",
+                )
         except Exception as exc:
             if was_lite:
                 _uninstall_lite_hooks(root, allow_shared_hooks=allow)
@@ -391,6 +604,8 @@ def cmd_mode(cfg, args):
         except (OSError, ValueError) as exc:
             print(f"{C['red']}not changed{C['reset']}: {exc}")
             return 1
+        if choice["mode"] == "unspecified" and (was_lite or window):
+            _print_lite_window(window, choice=choice, plan=False)
         push_target = _own_pre_push_target(after_inv)
         if push_target is not None:
             print(f"  {C['dim']}push guard{C['reset']}  {_own_pre_push_line(push_target)}")
@@ -410,7 +625,13 @@ def cmd_mode(cfg, args):
                         f"run `polyctl hooks install`{C['reset']}"
                     )
         print("mode = 'full' — enforcement: on (independent reviewer probe and commit hooks active)")
-        return 0
+        full_cfg = dict(cfg, mode="full")
+        pending_any = False
+        for c in choice["selected"]:
+            outcome = _review_lite_commit(full_cfg, root, c, by=by or "human")
+            if outcome == "pending":
+                pending_any = True
+        return 3 if pending_any else 0
     return 2
 
 
@@ -2179,6 +2400,42 @@ def cmd_catchup(cfg, args):
             print(f"  reviewer configuration invalid, or the range cannot be reviewed; {w['id']} stays open")
         else:
             print(f"  no review was recorded (exit {code}); {w['id']} stays open")
+    try:
+        pending_lite = [r for r in A.lite_catchup_records(root) if r.get("status") == "pending"]
+    except Exception as exc:
+        print(f"  {C['red']}lite catch-up ledger cannot be read{C['reset']}: {exc}")
+        pending_lite = []
+        failed.append("lite-catchup")
+    if only:
+        pending_lite = [r for r in pending_lite
+                        if only in (r.get("sha"), r.get("short"), f"LITE-{r.get('short')}")]
+    lite_pending_stayed = False
+    for r in pending_lite:
+        if unavailable:
+            held += 1
+            continue
+        if limit is not None and (started + reruns) >= limit:
+            waiting += 1
+            continue
+        started += 1
+        totals["commits"] += 1
+        parent = r.get("parent") or ""
+        lines = A.range_changed_lines(root, parent, r["sha"]) if parent else None
+        totals["lines"] += lines or 0
+        if plan:
+            print(f"  lite commit {r['short']} ({A.shown_text(r.get('subject') or '')}): "
+                  "review against its commit message")
+            continue
+        print(f"  lite commit {r['short']}: reviewing against its commit message")
+        outcome = _review_lite_commit(
+            cfg, root, r, by=(statement or {}).get("by") or r.get("by") or "polyctl catchup",
+            boundary=args.boundary, statement=statement,
+        )
+        if outcome in ("reviewed-clean", "reviewed-with-findings"):
+            decided += 1
+            did += 1
+        else:
+            lite_pending_stayed = True
     if held:
         print(f"  the reviewer was unavailable for {unavailable}: this run started no other review, and "
               f"{held} waiver(s) wait for a run in which it answers")
@@ -2219,8 +2476,10 @@ def cmd_catchup(cfg, args):
         print(f"  deferred {r['kind']} ({r.get('reason', '')}) since {time.strftime('%d %b %H:%M', time.localtime(r['at']))}"
               + ("; stays open: its cycle could not do it yet" if ran else "; stays open: no cycle ran"))
     code = _catchup_exit(failed, started, decided)
+    if code == 0 and lite_pending_stayed:
+        code = 3
     print(f"{C['green']}catchup{C['reset']} handled {did} item(s)"
-          + (f"; none of the {started} review(s) it started decided anything" if code == 3 else ""))
+          + (f"; none of the {started} review(s) it started decided anything" if code == 3 and not decided else ""))
     return code
 
 
