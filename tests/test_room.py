@@ -23,7 +23,7 @@ def _make_governed(tmp_path, name, arch="architect", impl="implementer"):
     return str(root), cfg
 
 
-def test_room_search_covers_pending_and_consumed_mail_across_registered_projects(tmp_path, capsys):
+def test_room_search_covers_pending_and_consumed_mail_across_registered_projects(tmp_path, monkeypatch, capsys):
     alpha_root, alpha_cfg = _make_governed(tmp_path, "alpha")
     beta_root, beta_cfg = _make_governed(tmp_path, "beta")
 
@@ -37,6 +37,7 @@ def test_room_search_covers_pending_and_consumed_mail_across_registered_projects
             mail_class=None,
             mail_from=None,
             mail_to=None,
+            allow_empty=False,
         ),
     )
     capsys.readouterr()
@@ -52,7 +53,9 @@ def test_room_search_covers_pending_and_consumed_mail_across_registered_projects
         "# Capacity reservation quota aligned\n\nCapacity reservation quota is settled.\n",
         {"kind": "decision", "from": "architect", "to": "implementer", "slice": "S1"},
     )
+    monkeypatch.setenv("POLYCTL_ROLE", "implementer")
     assert cli.cmd_mail(beta_cfg, SimpleNamespace(action="ack", type=consumed_name, body="done")) in (0, None)
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     capsys.readouterr()
 
     hits = A.room_search("capacity reservation", root=alpha_root)
@@ -68,7 +71,7 @@ def test_room_search_covers_pending_and_consumed_mail_across_registered_projects
     assert "beta" in out and "consumed" in out
 
 
-def test_room_search_bounds_pending_mail_reads(tmp_path):
+def test_room_search_streams_pending_mail_past_64_kib(tmp_path):
     alpha_root, _ = _make_governed(tmp_path, "alpha")
     pending = os.path.join(
         alpha_root, "agent-mail", "20261019-1300-architect-to-implementer-NOTE-huge.md"
@@ -82,4 +85,6 @@ def test_room_search_bounds_pending_mail_reads(tmp_path):
     head_hits = A.room_search("head-token", root=alpha_root)
     assert len(head_hits) == 1
     assert head_hits[0]["summary"] == "Oversized pending note"
-    assert A.room_search("tail-beyond-bound", root=alpha_root) == []
+    tail_hits = A.room_search("tail-beyond-bound", root=alpha_root)
+    assert len(tail_hits) == 1
+    assert tail_hits[0]["id"] == "20261019-1300-architect-to-implementer-NOTE-huge.md"

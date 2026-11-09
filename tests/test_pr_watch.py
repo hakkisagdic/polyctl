@@ -442,6 +442,7 @@ def test_a_fact_that_clears_and_returns_within_the_minute_is_mailed_again_under_
     root = _watching(project, store="append-only")
     _watch(root, capsys)
     [first] = _mails(root)
+    monkeypatch.setenv("POLYCTL_ROLE", "implementer")
     assert cli.main(["-C", root, "mail", "ack", first]) == 0      # handled: its view goes, its id stays in the store
     capsys.readouterr()
 

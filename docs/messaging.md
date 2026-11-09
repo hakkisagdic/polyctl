@@ -99,12 +99,12 @@ pages anyone (notification belongs to the scheduled watcher), and a resolution i
 than the raise. Escalation by age belongs to `needs-decision` alone.
 
 What exists today, before the store below: a message declares its class in its envelope
-(`polyctl mail send --class needs-decision`), or it is read from its kind and headings. Unseen-message classification reads up to
+(`polyctl mail send --class needs-decision`), or it is read from its kind and headings (`URGENT` / `ACIL`, `--class urgent`, and `## URGENT` hold only their addressee's gates; one that also asks for a decision classifies as `needs-decision` so it still climbs the unseen ladder, and a purely urgent message classifies as `urgent`). Unseen-message classification reads up to
 1,000,000 characters of the body, so a decision heading after a long introduction still
 escalates; beyond that bound, declare the class explicitly in the envelope. When a
 reader's own command puts a message in front of it - `polyctl mail list` or `read`, `polyctl_inbox`,
-the urgent banner - `.polyctl/ledger/mail.jsonl` records `seen` once, apart from deletion, so
-"nobody has been shown this" is no longer the same as "someone is working on it". An
+the urgent banner - `.polyctl/ledger/mail.jsonl` records `seen` per reader (`by`), apart from deletion, so
+"nobody has been shown this" is no longer the same as "someone is working on it" and another role listing mail never marks the addressee's mail seen. Every role (`implementer`, `architect`, `reviewer`, `admin`, `person`) has its own inbox and acknowledges only its own mail (repeated `ack` is idempotent and exits 0); `"anyone"` (handoff) mail is visible to every role and consumed per reader. `polyctl init` adds `.polyctl/ledger/mail.jsonl`, `.polyctl/decisions/*.json`, `.polyctl/decisions.lock`, and `.polyctl/mail/` to `.gitignore` so mail summaries, decision records, and locks never enter the product repository's history (migration for existing projects: re-run `polyctl init` to append the missing `.gitignore` lines, then `git rm --cached` any tracked `.polyctl/ledger/mail.jsonl`, `.polyctl/decisions/*.json`, `.polyctl/decisions.lock`, or `.polyctl/mail/` files). An
 unseen `needs-decision` message climbs the ladder by age: past `mail.unseen_yellow_minutes`
 the architect is told, past `mail.unseen_orange_minutes` a person's desktop and phone, past
 `mail.unseen_red_minutes` e-mail, unless an alarm to a person already tells it, whose ladder it

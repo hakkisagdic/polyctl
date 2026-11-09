@@ -233,11 +233,18 @@ def person_items(cfg):
                              f"{len(dead) - REQUEST_LIMIT} further superseded requests are kept in "
                              "~/.polyctl/review-requests; none of them can be collected"))
     for message in urgent_messages(root, cfg, role=None):
-        if message.get("to") == "reviewer":
+        to = message.get("to")
+        if to in ("reviewer", "implementer"):
             continue
-        out.append(next_item(PERSON, "mail-urgent",
-                             f"urgent and unacknowledged: {message['id']} — {message['title']}",
-                             f"polyctl mail ack {message['id']}"))
+        if to in ("architect", "admin"):
+            out.append(next_item(PERSON, "mail-urgent",
+                                 f"urgent for the {to}, waiting on the {to} to acknowledge: "
+                                 f"{message['id']} — {message['title']}",
+                                 None))
+        else:
+            out.append(next_item(PERSON, "mail-urgent",
+                                 f"urgent and unacknowledged: {message['id']} — {message['title']}",
+                                 f"polyctl mail ack {message['id']}"))
     try:
         rows = [row for row in proposals(root) if row.get("state") in ("open", "missing")]
     except Exception as exc:

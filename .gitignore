@@ -16,6 +16,10 @@ agent-mail/*.md
 .polyctl/hold
 .polyctl/sessions.json
 .polyctl/lanes/
+.polyctl/ledger/mail.jsonl
+.polyctl/decisions/*.json
+.polyctl/decisions.lock
+.polyctl/mail/
 
 # This repository is public, and its own .polyctl/ state is per-checkout development
 # state: .polyctl/config.json carries absolute home paths, a session id and reviewer

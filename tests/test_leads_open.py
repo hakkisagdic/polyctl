@@ -101,8 +101,11 @@ def test_mail_ack_refuses_a_glob_with_another_readers_mail(project, monkeypatch,
     if role in ("implementer", "architect"):
         args.type = names[0 if role == "implementer" else 1]
         assert cli.cmd_mail(cfg, args) in (None, 0)
-    monkeypatch.delenv("POLYCTL_ROLE")
-    args.type = "*.md"
+    monkeypatch.setenv("POLYCTL_ROLE", "implementer")
+    args.type = names[0]
+    assert cli.cmd_mail(cfg, args) in (None, 0)
+    monkeypatch.setenv("POLYCTL_ROLE", "architect")
+    args.type = names[1]
     assert cli.cmd_mail(cfg, args) in (None, 0)
     assert A.mailbox(root, cfg["mailbox"]) == []
 

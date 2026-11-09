@@ -724,19 +724,47 @@ LEGACY_ARCHITECT_NAMES = ("fable",)
 def architect_mail_names(cfg):
     """Every name a message may address the architect by: its own, the role's, and - where no project or machine
     names one - the name the default used to be (#72)."""
-    impl, arch = mail_names(cfg)
+    arch = safe_slug(settings.get(cfg, "architect.name").strip(), "architect")
     names = {arch, "architect"}
     if settings.resolve(cfg, "architect.name")[1] == "default":
         # never the implementer's own name: its mail stays its own
+        impl = mail_names(cfg)[0] if (cfg or {}).get("implementer") else ""
         names.update(legacy for legacy in LEGACY_ARCHITECT_NAMES if legacy != impl.lower())
     return names
 
 
 def reviewer_mail_names(cfg):
     """Raw and note-normalized reviewer addresses: model ids may contain slashes or exceed 40 chars (TRIAGE-3-LOW)."""
-    reviewer = cfg.get("reviewer") or {}
-    names = {str(reviewer[key]).strip() for key in ("actor", "name", "id") if reviewer.get(key)}
-    return {"reviewer"} | names | {safe_slug(name) for name in names}
+    reviewer = (cfg or {}).get("reviewer") or {}
+    routes = [reviewer, *(reviewer.get("fallbacks") or [])] if isinstance(reviewer, dict) else []
+    names = set()
+    for route in routes:
+        if not isinstance(route, dict):
+            continue
+        for key in ("actor", "name", "id", "adapter"):
+            if route.get(key):
+                names.add(str(route[key]).strip())
+        adapter = str(route.get("adapter") or "").strip()
+        model = str(route.get("model") or "").strip()
+        if adapter and model:
+            names.add(f"{adapter}/{model}")
+            names.add(f"{adapter}-reviewer-{model}")
+        elif adapter:
+            names.add(f"{adapter}-reviewer")
+    return {"reviewer"} | names | {safe_slug(name) for name in names if name}
+
+
+def implementer_mail_names(cfg):
+    """Raw and note-normalized implementer addresses (MSG-FIX-1)."""
+    impl = (cfg or {}).get("implementer") or {}
+    names = {str(impl[key]).strip() for key in ("actor", "name", "id", "adapter")
+             if isinstance(impl, dict) and str(impl.get(key) or "").strip()}
+    names.add(mail_names(cfg)[0])
+    return {"implementer"} | names | {safe_slug(name) for name in names if name}
+
+
+def to_implementer(name, cfg):
+    return any(f"-to-{impl.lower()}-" in name.lower() for impl in implementer_mail_names(cfg))
 
 
 def to_reviewer(name, cfg):
@@ -946,6 +974,7 @@ def mail_meta(path):
 MAIL_CLASSES = ("fyi", "needs-read", "needs-decision", "urgent")
 _DECISION_KINDS = language.words("decision-kinds")        # in every language, whichever the project writes
 _FYI_KINDS = language.words("fyi-kinds")
+_URGENT_KINDS = tuple(word.lower() for word in language.forms("urgent-kind"))
 
 
 def mail_class(name, meta=None, body=""):
@@ -965,43 +994,181 @@ def mail_class(name, meta=None, body=""):
     low = language.folded(body or "")
     if kind in _DECISION_KINDS or any(mark in low for mark in language.lowered("decision")):
         return "needs-decision"
+    if kind in _URGENT_KINDS or any(k.upper() in (body or "").upper() for k in URGENT_MARKERS):
+        return "urgent"
     return "fyi" if kind in _FYI_KINDS else "needs-read"
 
 
-def addressed_to(name, cfg, role):
-    """Whether a message is for a role: the architect's inbox, or the implementer's; a person reads both."""
-    if role == "architect":
-        return to_architect(name, cfg)
-    if role == "implementer":
-        return not to_architect(name, cfg) and not to_reviewer(name, cfg) and not from_watchdog(name)
-    return True
+def is_urgent_mail(name, meta=None, body=""):
+    """Whether a message carries an urgent class, kind or heading, even when it also asks for a decision (MSG-FIX-1)."""
+    meta = meta or {}
+    declared = str(meta.get("class") or "").strip().lower()
+    if declared == "urgent":
+        return True
+    if declared in ("fyi", "needs-read"):
+        return False
+    kind = str(meta.get("kind") or "").strip().lower()
+    if not kind:
+        found = re.match(r"^\d{8}-\d{4}-.+?-to-.+?-([a-z]+)-", name, re.I)
+        kind = found.group(1).lower() if found else ""
+    return kind in _URGENT_KINDS or any(k.upper() in (body or "").upper() for k in URGENT_MARKERS)
+
+
+def mail_recipient_role(name, cfg, meta=None, root=None):
+    """The normalized recipient role for a mail message, or None when unknown (MSG-FIX-1)."""
+    cfg = cfg or {}
+    if meta is None and root:
+        box = cfg.get("mailbox", "agent-mail")
+        path = os.path.join(root, box, name)
+        if os.path.exists(path):
+            meta = mail_meta(path)
+    meta = meta or {}
+    for field in ("to_role", "to"):
+        val = meta.get(field)
+        if val:
+            resolved = normalise_mail_party(val, cfg)
+            if resolved:
+                return resolved
+    low = name.lower()
+    if "-to-anyone-" in low:
+        return "anyone"
+    if "-to-admin-" in low:
+        return "admin"
+    if "-to-person-" in low or "-to-human-" in low or "-to-owner-" in low:
+        return "person"
+    if to_architect(name, cfg):
+        return "architect"
+    if to_reviewer(name, cfg):
+        return "reviewer"
+    if to_implementer(name, cfg):
+        return "implementer"
+    matched = re.match(r"^(?:\d{8}-\d{4}-)?.+?-to-(.+?)-[A-Za-z]+(?:-|\.)", name)
+    if matched:
+        resolved = normalise_mail_party(matched.group(1), cfg)
+        if resolved:
+            return resolved
+    if from_watchdog(name):
+        return "architect"
+    return None
+
+
+def _handled_by_reader(root, name, reader):
+    """Whether `reader` has already consumed/handled `name` (for per-reader handoff/'anyone' mail)."""
+    if not root or not reader:
+        return False
+    norm_reader = normalise_mail_party(reader, None) or str(reader).strip().lower()
+    for row in mail_log(root, 5000):
+        if row.get("event") == "consumed" and row.get("id") == name:
+            by = normalise_mail_party(row.get("by"), None) or str(row.get("by") or "").strip().lower()
+            if by == norm_reader:
+                return True
+    for row in mail_store_rows(root):
+        if row.get("event") == "handled" and row.get("id") == name:
+            by = normalise_mail_party(row.get("by"), None) or str(row.get("by") or "").strip().lower()
+            if by == norm_reader:
+                return True
+    return False
+
+
+def _already_acknowledged(root, cfg, mid, reader):
+    """Whether literal message `mid` belonged to `reader` (or 'anyone') and was consumed by `reader` (MSG-FIX-1)."""
+    if not root or not mid or not reader:
+        return False
+    norm_reader = normalise_mail_party(reader, cfg) or str(reader).strip().lower()
+    log_rows = [r for r in mail_log(root, None) if isinstance(r, dict) and r.get("id") == mid]
+    store_rows = [r for r in mail_store_rows(root) if isinstance(r, dict) and r.get("id") == mid]
+    meta = {}
+    for r in reversed(log_rows):
+        if r.get("event") == "written" and r.get("to"):
+            meta = {"to": r.get("to")}
+            break
+    if not meta:
+        for r in reversed(store_rows):
+            if r.get("event") == "message" and r.get("to"):
+                meta = {"to": r.get("to")}
+                break
+    if not meta and os.path.exists(_store_path(root, mid)):
+        meta = mail_meta(_store_path(root, mid))
+    target = mail_recipient_role(mid, cfg, meta=meta or None, root=root)
+    if target not in (norm_reader, "anyone"):
+        return False
+    for r in log_rows:
+        if r.get("event") == "consumed":
+            by = normalise_mail_party(r.get("by"), cfg) or str(r.get("by") or "").strip().lower()
+            if by == norm_reader or (not by and target == norm_reader):
+                return True
+    for r in store_rows:
+        if r.get("event") == "handled":
+            by = normalise_mail_party(r.get("by"), cfg) or str(r.get("by") or "").strip().lower()
+            if by == norm_reader or (not by and target == norm_reader):
+                return True
+    return False
+
+
+def addressed_to(name, cfg, role=None, root=None):
+    """Whether a message is for `role` (or 'person' when `role` is None).
+
+    A mail is read and consumed only by its addressee; 'anyone'/handoff mail is
+    visible to every role and consumed per reader (MSG-FIX-1).
+    """
+    reader = normalise_mail_party(role, cfg) if role else "person"
+    if role and (reader is None or reader == "anyone"):
+        return False
+    r_root = root or (cfg or {}).get("root")
+    target = mail_recipient_role(name, cfg, root=r_root)
+    if target is None or target == "watchdog":
+        return False
+    if target == "anyone":
+        if r_root and _handled_by_reader(r_root, name, reader):
+            return False
+        return True
+    return target == reader
 
 
 def mail_seen(root, names, by):
-    """Record, once each, that messages were put in front of their reader (#30).
+    """Record, once each per reader, that messages were put in front of their reader (#30, MSG-FIX-1).
 
     Seeing is not handling: handling stays deletion, and a message seen and not
     yet handled is still in the mailbox. What this separates is "nobody has been
     shown it" from "someone is working on it".
     """
-    already = {row.get("id") for row in mail_log(root, 5000) if row.get("event") == "seen"}
-    fresh = [name for name in names if name not in already]
+    if not names:
+        return []
+    reader = normalise_mail_party(by, None) or str(by or "person").strip().lower()
+    already = {
+        (row.get("id"), normalise_mail_party(row.get("by"), None) or str(row.get("by") or "person").strip().lower())
+        for row in mail_log(root, 5000)
+        if row.get("event") == "seen"
+    }
+    fresh = [name for name in names if (name, reader) not in already]
     for name in fresh:
-        mail_ledger_append(root, {"event": "seen", "id": name, "by": by})
+        mail_ledger_append(root, {"event": "seen", "id": name, "by": reader})
     return fresh
 
 
 def unseen_messages(root, cfg):
-    """Messages in the mailbox nobody has been shown, oldest first, with their class and age (#30)."""
+    """Messages in the mailbox neither their addressee nor a person has been shown, oldest first (#30)."""
     box = cfg.get("mailbox", "agent-mail")
     rows = mail_log(root, 5000)
-    seen = {row.get("id") for row in rows if row.get("event") == "seen"}
+    seen_pairs = {
+        (row.get("id"), normalise_mail_party(row.get("by"), cfg) or str(row.get("by") or "person").strip().lower())
+        for row in rows
+        if row.get("event") == "seen"
+    }
+    seen_any = {row.get("id") for row in rows if row.get("event") == "seen"}
     written = {row.get("id"): row.get("at") for row in rows if row.get("event") == "written"}
     out = []
     for name in mailbox(root, box):
-        if name in seen or from_watchdog(name):
+        if from_watchdog(name):
             continue
         path = os.path.join(root, box, name)
+        meta = mail_meta(path)
+        target = mail_recipient_role(name, cfg, meta=meta, root=root)
+        if target in ("anyone", None):
+            if name in seen_any:
+                continue
+        elif (name, target) in seen_pairs or (name, "person") in seen_pairs:
+            continue
         # A message whose body cannot be read, or whose written time in the ledger is no number, is still one
         # nobody has been shown: it was dropped, and a decision request so read never climbed the ladder. It is
         # classed by its name and envelope, and aged by its file (UNREAD-AGE-2).
@@ -1017,7 +1184,7 @@ def unseen_messages(root, cfg):
                 at = os.path.getmtime(path)
             except OSError:
                 continue                                   # gone since the listing
-        out.append({"id": name, "class": mail_class(name, mail_meta(path), body), "at": at,
+        out.append({"id": name, "class": mail_class(name, meta, body), "at": at,
                     "age": max(0.0, time.time() - at)})
     return sorted(out, key=lambda message: message["at"])
 
@@ -1198,15 +1365,33 @@ def _mail_body_summary(text):
     )
 
 
-def _room_search_hit(project, mid, state, at_val, text, needle, primary, fallback):
+def _file_contains_folded(path, needle):
+    """Stream `path` in chunks so searches beyond 64 KiB match without loading unbounded memory (MSG-FIX-1)."""
+    overlap = max(256, len(needle) * 4)
+    tail = ""
+    try:
+        with open(path, errors="replace", encoding=UTF8) as fh:
+            while True:
+                chunk = fh.read(ROOM_SEARCH_MAX_BYTES)
+                if not chunk:
+                    break
+                if needle in language.folded(tail + chunk):
+                    return True
+                tail = (tail + chunk)[-overlap:]
+    except OSError:
+        return False
+    return False
+
+
+def _room_search_hit(project, mid, state, at_val, text, needle, primary, fallback, body_matched=False):
     """One room_search row when `needle` matches the message's id, text, summary or envelope fields."""
     summary = primary.get("summary") or fallback.get("summary") or _mail_body_summary(text)
     sender = primary.get("from") or fallback.get("from")
     recipient = primary.get("to") or fallback.get("to")
     kind = primary.get("kind") or fallback.get("kind")
     slice_id = primary.get("slice") or fallback.get("slice")
-    hay = " ".join(str(x or "") for x in (mid, text, summary, sender, recipient, kind, slice_id)).lower()
-    if needle not in hay:
+    hay = language.folded(" ".join(str(x or "") for x in (mid, text, summary, sender, recipient, kind, slice_id)))
+    if not body_matched and needle not in hay:
         return None
     return {
         "id": mid,
@@ -1223,7 +1408,10 @@ def _room_search_hit(project, mid, state, at_val, text, needle, primary, fallbac
 
 def room_search(text, root=None, limit=20):
     """Pending and consumed messages in every registered project that mention `text` (#80, ADMIN-FINDINGS-1)."""
-    needle = str(text or "").lower()
+    raw_query = str(text or "").strip()
+    if not raw_query:
+        raise ValueError("room search requires a non-empty query")
+    needle = language.folded(raw_query)
     found = []
     for project, path in recall_roots(root):
         box_name = "agent-mail"
@@ -1265,12 +1453,14 @@ def room_search(text, root=None, limit=20):
                     raw_text = fh.read(ROOM_SEARCH_MAX_BYTES).decode(UTF8, "replace")
             except OSError:
                 raw_text = ""
+            body_matched = _file_contains_folded(fpath, needle)
             wrow = written_by_id.get(fname) or store_rows.get(fname) or {}
             try:
                 at_val = float(wrow.get("at") or os.path.getmtime(fpath))
             except (OSError, TypeError, ValueError):
                 at_val = 0.0
-            hit = _room_search_hit(project, fname, "pending", at_val, raw_text, needle, meta, wrow)
+            hit = _room_search_hit(project, fname, "pending", at_val, raw_text, needle, meta, wrow,
+                                   body_matched=body_matched)
             if hit:
                 found.append(hit)
             seen_ids.add(fname)
@@ -1287,7 +1477,7 @@ def room_search(text, root=None, limit=20):
             if hit:
                 found.append(hit)
     found.sort(key=lambda row: (-float(row.get("at") or 0), row.get("project") or "", row.get("id") or ""))
-    return found[:limit]
+    return found if limit is None else found[:limit]
 
 
 # ---- the message store syncs to one private repository, never the product's remote (#83) --
@@ -1619,12 +1809,12 @@ def reconcile_mail_ledger(root, cfg):
 
 def mail_search(root, text, limit=50):
     """Ledger rows and live files whose id, summary or body mention `text`."""
-    t = text.lower()
+    t = language.folded(text)
     out, seen = [], set()
     for r in reversed(mail_log(root, 5000)):
         if r.get("event") != "written":
             continue
-        hay = " ".join(str(r.get(k) or "") for k in ("id", "summary", "kind", "slice")).lower()
+        hay = language.folded(" ".join(str(r.get(k) or "") for k in ("id", "summary", "kind", "slice")))
         if t in hay and r["id"] not in seen:
             seen.add(r["id"])
             out.append(r)

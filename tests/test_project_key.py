@@ -229,6 +229,9 @@ def test_a_governed_worktree_verifies_grants_and_commits_its_own_tree_under_the_
     (wt_dir / "feature.txt").write_text("lane work\n", encoding="utf-8")
     sp.run(["git", "add", "feature.txt"], cwd=str(wt_dir), check=True)
 
+    assert A.find_root(str(wt_dir)) == os.path.abspath(str(wt_dir))
+    assert A.load_config(str(wt_dir), record=False)["root"] == os.path.abspath(str(wt_dir))
+
     monkeypatch.chdir(wt_dir)
     assert cli.main(["verify", "-p", "quick"]) == 0
     assert A.latest_verification(str(wt_dir)) is not None
@@ -242,4 +245,46 @@ def test_a_governed_worktree_verifies_grants_and_commits_its_own_tree_under_the_
     wt_head = sp.run(["git", "rev-parse", "HEAD"], cwd=str(wt_dir), check=True, capture_output=True, text=True).stdout.strip()
     assert wt_head != main_head
     assert sp.run(["git", "rev-parse", "HEAD"], cwd=str(main_dir), check=True, capture_output=True, text=True).stdout.strip() == main_head
+    assert set(A.project_registry()) == {"repo"}
+
+
+def test_a_linked_worktree_directs_status_mail_ask_decisions_and_mcp_to_main_checkout(
+    tmp_path, home, monkeypatch, capsys
+):
+    import json
+    import subprocess as sp
+
+    main_dir = tmp_path / "repo"
+    (main_dir / ".polyctl" / "ledger").mkdir(parents=True)
+    (main_dir / "agent-mail").mkdir()
+    (main_dir / ".polyctl" / "config.json").write_text(json.dumps({
+        "architect": {"id": "claude-code", "name": "architect", "cmd": "claude"},
+        "implementer": {"id": "kiro-cli", "name": "implementer", "cmd": "kiro-cli"},
+    }), encoding="utf-8")
+    (main_dir / ".polyctl" / "board.md").write_text("# Board\n\n## running\n- [S1] Slice one\n", encoding="utf-8")
+    for argv in (
+        ["init", "-q"],
+        ["config", "user.email", "t@e"],
+        ["config", "user.name", "t"],
+        ["add", ".polyctl/config.json", ".polyctl/board.md"],
+        ["commit", "-q", "-m", "init"],
+    ):
+        sp.run(["git", *argv], cwd=str(main_dir), check=True)
+
+    wt_dir = tmp_path / "wt-lane-1"
+    sp.run(["git", "worktree", "add", "-q", "-b", "lane/s1", str(wt_dir)], cwd=str(main_dir), check=True)
+    (wt_dir / "agent-mail").mkdir(exist_ok=True)
+    (wt_dir / "agent-mail" / "20261019-1200-architect-to-implementer-NOTE-orphan.md").write_text(
+        "# Orphan in worktree\n", encoding="utf-8"
+    )
+
+    monkeypatch.chdir(wt_dir)
+    assert cli.main(["ask", "Which mode?", "Fast", "Safe"]) == 0
+    did = capsys.readouterr().out.strip()
+    assert did.startswith("D-")
+    assert len(A.decisions(str(main_dir))) == 1
+    assert not (wt_dir / ".polyctl" / "decisions").exists()
+
+    assert cli.main(["decisions"]) == 0
+    assert "Which mode?" in capsys.readouterr().out
     assert set(A.project_registry()) == {"repo"}

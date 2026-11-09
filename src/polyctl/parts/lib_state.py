@@ -1412,7 +1412,7 @@ def credit_usage(adapter_id, monthly_budget=None):
 URGENT_MARKERS = language.forms("urgent", "stop")
 
 
-ROLES = ("implementer", "architect")
+ROLES = ("implementer", "architect", "reviewer", "admin")
 
 
 def invoking_role():
@@ -1468,16 +1468,21 @@ def urgent_messages(root, cfg, role="implementer"):
     """
     box = cfg.get("mailbox", "agent-mail")
     out = []
+    wanted = (normalise_mail_party(role, cfg) or role) if role else None
     for m in mailbox(root, box):
-        addressed = "architect" if to_architect(m, cfg) else "reviewer" if to_reviewer(m, cfg) else "implementer"
-        if role and (addressed != role or not addressed_to(m, cfg, role)):
+        path = os.path.join(root, box, m)
+        meta = mail_meta(path)
+        addressed = mail_recipient_role(m, cfg, meta=meta, root=root)
+        if addressed is None or addressed == "watchdog":
+            continue
+        if wanted and ((addressed != wanted and addressed != "anyone")
+                       or not addressed_to(m, cfg, wanted, root=root)):
             continue
         try:
-            body = open(os.path.join(root, box, m), errors="replace", encoding=UTF8).read(8000)
+            body = open(path, errors="replace", encoding=UTF8).read(8000)
         except OSError:
             continue
-        upper = body.upper()
-        if any(k.upper() in upper for k in URGENT_MARKERS):
+        if is_urgent_mail(m, meta, body):
             title = next((l for l in body.split("\n") if l.strip().startswith("# ")), m)
             out.append({"id": m, "title": title.lstrip("# ").strip()[:120], "body": body,
                         "to": addressed})
@@ -1812,7 +1817,8 @@ def decisions(root, state=None):
     return out
 
 
-def ask(root, question, options, context=None, slice_id=None, cfg=None, proposal=False, after=0):
+def ask(root, question, options, context=None, slice_id=None, cfg=None, proposal=False, after=0,
+        asked_by=None, addressee=None):
     """Record a question. Free text is always the last option.
 
     Options are a convenience, never a cage: the answer that matters is often the
@@ -1832,10 +1838,27 @@ def ask(root, question, options, context=None, slice_id=None, cfg=None, proposal
     The number also exceeds `after`: a number stays taken where a ledger names it after its
     question's file is gone, as a rule proposal's does.
     """
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError("question must not be empty")
+    if (not isinstance(options, (list, tuple)) or len(options) < 2 or len(options) > 8
+            or any(not isinstance(o, str) or not o.strip() for o in options)):
+        raise ValueError("ask requires between 2 and 8 non-empty options")
+    written = cfg if cfg is not None else project_config_document(root)["config"]
+    if asked_by is not None:
+        sender = normalise_mail_party(asked_by, written)
+        if sender is None or sender == "anyone":
+            raise ValueError(f"unknown decision sender {asked_by!r}")
+    else:
+        sender = invoking_role() or "implementer"
+    if addressee is not None:
+        recipient = normalise_mail_party(addressee, written)
+        if recipient is None:
+            raise ValueError(f"unknown decision addressee {addressee!r}")
+    else:
+        recipient = "person"
     d = os.path.join(root, DECISION_DIR)
     os.makedirs(d, exist_ok=True)
-    opts = [{"key": chr(ord('a') + i), "label": o} for i, o in enumerate(options[:8])]
-    written = cfg if cfg is not None else project_config_document(root)["config"]
+    opts = [{"key": chr(ord('a') + i), "label": o} for i, o in enumerate(options)]
     opts.append({"key": "x", "label": language.marker(written, "free-text"), "free_text": True})
     # The same question answered before, here or in another project, travels with it (#43).
     try:
@@ -1844,7 +1867,8 @@ def ask(root, question, options, context=None, slice_id=None, cfg=None, proposal
     except Exception:
         precedents = []
     rec = scan_record({"asked_at": int(time.time()), "question": question, "context": context,
-                       "slice": slice_id, "options": opts, "state": PROPOSED if proposal else "open",
+                       "slice": slice_id, "asked_by": sender, "addressee": recipient,
+                       "options": opts, "state": PROPOSED if proposal else "open",
                        "answer": None, "answered_at": None, "answered_by": None,
                        "precedents": precedents})
     number = max(rec["asked_at"], int(after) + 1)
@@ -1901,10 +1925,12 @@ def answer(root, did, key_or_text, by="human", change=False, user=None, interact
     with _exclusive_lock(os.path.join(root, ".polyctl", "decisions.lock")):
         rec = json.load(open(p, encoding=UTF8))
         if rec.get("proposal"):
-            agent = invoking_role() or ("architect" if by == "architect" else None)
+            agent = invoking_role() or ("architect" if by == "architect" else ("agent harness" if agent_harness_refusal() else None))
             if agent:
                 raise AnswerRefused(f"{did} asks about rule proposal {rec['proposal']}, which a person decides, not the "
                                     f"{agent}: polyctl answer {did} <key> in a person's terminal, or a tap on the phone")
+        if rec.get("state") == "closed" and not change:
+            raise AnswerRefused(f"{did} is closed; pass --change to reopen and answer it")
         given = str(key_or_text).split(None, 1)
         key, words = (given[0].lower() if given else ""), (given[1].strip() if len(given) > 1 else "")
         options = [o for o in rec.get("options") or [] if isinstance(o, dict)]
@@ -1921,16 +1947,52 @@ def answer(root, did, key_or_text, by="human", change=False, user=None, interact
         if rec.get("state") == "answered" and not change:
             raise AnswerRefused(f"{did} is already answered: {rec.get('answer')}; "
                                 f"polyctl answer {did} <key> --change replaces it, and both stay on the record")
+        agent_role = invoking_role() or ("architect" if by == "architect" else ("agent" if agent_harness_refusal() else None))
         row = {"answer": words if free_text_option(chosen) else chosen.get("label"), "answer_key": chosen.get("key"),
                "answered_at": int(time.time()), "answered_by": by}
-        if user is not None or interactive is not None:
+        if user is not None or interactive is not None or agent_role is not None:
             # The login and the terminal, as every other act polyctl attributes to a person keeps them (RULE-PROPOSALS-2).
-            row.update(answered_user=user, answered_interactive=bool(interactive))
+            row.update(answered_user=user, answered_interactive=bool(interactive) and not bool(agent_role))
+        if agent_role:
+            row["answered_role"] = agent_role
         rows = rec.get("answers")
         if not isinstance(rows, list):
             # Answered before each answer was a row: that answer becomes the first, so a change keeps it.
             rows = [{name: rec.get(name) for name in row}] if rec.get("state") == "answered" else []
         rec.update(row, state="answered", answers=rows + [row])
+        rec = scan_record(rec)
+        replace_file_durably(p, json.dumps(rec, ensure_ascii=False, indent=2).encode(UTF8))
+    rec["id"] = did
+    return rec
+
+
+def close_decision(root, did, by=None, why=None):
+    """Close or withdraw an open decision as a person so it no longer parks a slice (MSG-FIX-1)."""
+    raw_role = (os.environ.get("POLYCTL_ROLE") or "").strip().lower()
+    if raw_role and raw_role != "person":
+        role_label = invoking_role() or raw_role
+        raise AnswerRefused(f"closing a decision is a person's act, not the {role_label}'s: "
+                            f"run polyctl decisions --close {did} in a person's terminal")
+    refusal = agent_harness_refusal()
+    if refusal:
+        raise AnswerRefused(refusal)
+    if by is not None:
+        norm_by = normalise_mail_party(by, None) or str(by).strip().lower()
+        if norm_by in ROLES or norm_by in ("agent", "anyone", "watchdog"):
+            raise AnswerRefused(f"closing a decision is a person's act, not {by}'s")
+    p = os.path.join(root, DECISION_DIR, did + ".json")
+    if not os.path.exists(p):
+        return None
+    from .storage import _exclusive_lock, replace_file_durably
+    with _exclusive_lock(os.path.join(root, ".polyctl", "decisions.lock")):
+        rec = json.load(open(p, encoding=UTF8))
+        if rec.get("proposal"):
+            raise AnswerRefused(f"{did} asks about rule proposal {rec['proposal']}, which a person decides with "
+                                f"polyctl answer {did} <key>; a proposal's question cannot be closed")
+        if rec.get("state") == "answered":
+            raise AnswerRefused(f"{did} is already answered: {rec.get('answer')}; an answered decision cannot be closed")
+        closer = normalise_mail_party(by, None) or str(by or "person").strip()
+        rec.update(state="closed", closed_at=int(time.time()), closed_by=closer, closed_why=why)
         rec = scan_record(rec)
         replace_file_durably(p, json.dumps(rec, ensure_ascii=False, indent=2).encode(UTF8))
     rec["id"] = did

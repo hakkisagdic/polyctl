@@ -129,10 +129,12 @@ def build_parser(root=None, prog=None):
     m.add_argument("type", nargs="?", default="INFO")
     m.add_argument("topic", nargs="?")
     m.add_argument("--body")
-    m.add_argument("--from", dest="mail_from", choices=A.MAIL_PARTIES,
+    m.add_argument("--allow-empty", action="store_true",
+                   help="send: allow an empty message body")
+    m.add_argument("--from", dest="mail_from",
                    help="who sends the message: a role from the role table, admin or person (default: architect)")
-    m.add_argument("--to", dest="mail_to", choices=A.MAIL_PARTIES,
-                   help="who receives the message: a role from the role table, admin or person (default: implementer)")
+    m.add_argument("--to", dest="mail_to",
+                   help="who receives the message: a role from the role table, admin, person or anyone (default: implementer)")
     m.add_argument("--class", dest="mail_class", choices=A.MAIL_CLASSES,
                    help="what the message asks of its reader; needs-decision escalates while unseen")
     m.set_defaults(fn=cmd_mail)
@@ -197,18 +199,25 @@ def build_parser(root=None, prog=None):
     ak.add_argument("options", nargs="*")
     ak.add_argument("--context")
     ak.add_argument("--slice")
+    ak.add_argument("--from", dest="asked_by", help="who asks the decision (default: the invoking role or implementer)")
+    ak.add_argument("--to", dest="addressee", help="who the decision is addressed to (default: person)")
     ak.add_argument("--codebase", action="store_true",
                     help="ask the code, through codebase.provider run in a copy of the working tree; the answer must "
                          "cite files and lines")
     ak.set_defaults(fn=cmd_ask)
     an = sub.add_parser("answer", help="answer a pending decision")
     an.add_argument("id")
-    an.add_argument("value", nargs="+", help="an option's key; after the free-text key, your own words")
+    an.add_argument("value", nargs="*", help="an option's key; after the free-text key, your own words")
     an.add_argument("--change", action="store_true",
                     help="replace an answer already given; both stay in the decision's record")
+    an.add_argument("--close", action="store_true",
+                    help="close or withdraw an unanswered decision")
+    an.add_argument("--why", help="with --close: why the decision is closed or withdrawn")
     an.set_defaults(fn=cmd_answer)
     dc = sub.add_parser("decisions", help="open and answered questions")
     dc.add_argument("-n", type=int, default=10)
+    dc.add_argument("--close", metavar="ID", help="close or withdraw an unanswered decision")
+    dc.add_argument("--why", help="with --close: why the decision is closed or withdrawn")
     dc.set_defaults(fn=cmd_decisions)
     po = sub.add_parser("propose", help="propose a change to a rule you work under, for a person to accept or "
                                         "reject, instead of editing it")
@@ -782,6 +791,20 @@ def build_parser(root=None, prog=None):
     cp.add_argument("shell", choices=list(COMPLETION_SHELLS), help="the shell the script is for")
     cp.set_defaults(fn=cmd_completion)
     return p
+
+
+def _coordination_cfg(cfg, args, record=True):
+    """Use the governed main checkout for project-wide coordination when `-C` was not given (ADMIN-FINDINGS-1, MSG-FIX-1).
+
+    Gate and commit commands run against the linked worktree's own tree and ledgers so a lane can
+    verify, grant and commit its own files; status, mail, notes, decisions and MCP serve the shared
+    main checkout unless `-C` explicitly names a checkout.
+    """
+    if not getattr(args, "root", None):
+        main_root = A.linked_worktree_main(cfg["root"])
+        if main_root and os.path.realpath(main_root) != os.path.realpath(cfg["root"]):
+            return A.load_config(main_root, record=record)
+    return cfg
 
 
 def main(argv=None, prog=None):

@@ -88,18 +88,32 @@ def assignment_problem(actors, roles, repository="tool", hotfix=False):
 
 
 def role_of(name, cfg):
-    """The role a mail name stands for, including the reviewer actor (TRIAGE-3-LOW)."""
-    implementer, _ = mail_names(cfg)
+    """The role a mail name stands for, including the reviewer and admin actors (TRIAGE-3-LOW, MSG-FIX-1)."""
     lowered = str(name or "").strip().lower()
+    if not lowered:
+        return None
+    if lowered in ("architect", "implementer", "reviewer", "admin", "anyone", "watchdog"):
+        return lowered
+    if lowered in ("human", "person", "owner"):
+        return "human"
+    cfg = cfg or {}
     if lowered in {arch.lower() for arch in architect_mail_names(cfg)}:
         return "architect"
-    if lowered in (implementer.lower(), "implementer"):
+    if lowered in {impl.lower() for impl in implementer_mail_names(cfg)}:
         return "implementer"
-    if lowered in {name.lower() for name in reviewer_mail_names(cfg)}:
+    if lowered in {rev.lower() for rev in reviewer_mail_names(cfg)}:
         return "reviewer"
-    if lowered == "watchdog":
-        return "watchdog"
-    return "human" if lowered in ("human", "person", "owner") else None
+    return None
+
+
+def normalise_mail_party(name, cfg=None):
+    """Canonical mail party role ('implementer', 'architect', 'reviewer', 'admin', 'person', 'anyone') or None."""
+    role = role_of(name, cfg)
+    if role == "human":
+        return "person"
+    if role == "watchdog":
+        return None
+    return role
 
 
 def block_adapter(block):
@@ -158,8 +172,15 @@ def grant_author(cfg, matrix_identity=None):
         return author
     block = cfg.get(role) if isinstance(cfg.get(role), dict) else {}
     implementer, architect = mail_names(cfg)
-    author["actor"] = str(block.get("actor") or block.get("name")
-                          or (implementer if role == "implementer" else architect))
+    if role == "implementer":
+        default_actor = implementer
+    elif role == "architect":
+        default_actor = architect
+    elif role == "reviewer":
+        default_actor = str(block.get("id") or "reviewer")
+    else:
+        default_actor = role
+    author["actor"] = str(block.get("actor") or block.get("name") or default_actor)
     author["adapter"] = block_adapter(block)
     if matrix_identity is None:
         author["family"] = declared_family(block)[0]

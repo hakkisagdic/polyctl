@@ -308,7 +308,9 @@ def _lite_fix_item(root, cfg, commit, artefact, by):
             )
             edit.write()
     implementer, architect = A.mail_names(cfg)
-    sender = {"implementer": implementer, "architect": architect}.get(A.invoking_role(), "human")
+    sender = {"implementer": implementer, "architect": architect, "reviewer": "reviewer", "admin": "admin"}.get(
+        A.invoking_role(), "human"
+    )
     mail_name = (
         f"{time.strftime('%Y%m%d-%H%M')}-{sender}-to-{implementer}-REVIEW-"
         f"{A.safe_slug(fix_id.lower(), 'slice')}-needs-changes.md"
@@ -1847,14 +1849,15 @@ def _agent_names(cfg):
     adapter's id, name, actor_name and family count too, so an agent's name is refused
     even when another adapter holds the role in this project (COORDINATION-COMMIT).
     """
-    names = {"architect", "implementer", "reviewer", "watchdog", "polyctl", "agent", "human"}
+    names = {"architect", "implementer", "reviewer", "admin", "watchdog", "polyctl", "agent", "human"}
     for ident, spec in A.package_adapters().items():
         names.add(str(ident))
         if isinstance(spec, dict):
             names.update(str(spec.get(key) or "") for key in ("id", "name", "actor_name", "family"))
-    for role in ("implementer", "architect"):
+    for role in ("implementer", "architect", "reviewer"):
         block = cfg.get(role) or {}
-        names.update(str(block.get(key) or "") for key in ("name", "adapter", "session"))
+        if isinstance(block, dict):
+            names.update(str(block.get(key) or "") for key in ("name", "adapter", "session"))
     primary = cfg.get("reviewer") or {}
     names.update(str(route.get("id") or "") for route in [primary] + list(primary.get("fallbacks") or [])
                  if isinstance(route, dict))
@@ -2030,7 +2033,9 @@ def _catchup_mail(root, cfg, waiver, rng, artefact):
     role, from the role this command runs for, or from a person when polyctl did not start it.
     """
     implementer, architect = A.mail_names(cfg)
-    sender = {"implementer": implementer, "architect": architect}.get(A.invoking_role(), "human")
+    sender = {"implementer": implementer, "architect": architect, "reviewer": "reviewer", "admin": "admin"}.get(
+        A.invoking_role(), "human"
+    )
     # The waiver's fields come from a ledger anyone on the machine can edit: one line each (#55).
     slice_id, wid, by, why = (A.review_header_value(waiver.get(key) or "") for key in ("slice", "id", "by", "why"))
     name = (f"{time.strftime('%Y%m%d-%H%M')}-{sender}-to-{architect}-REVIEW-"

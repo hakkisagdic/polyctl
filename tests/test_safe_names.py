@@ -2,6 +2,8 @@ import os
 import re
 from types import SimpleNamespace
 
+import pytest
+
 from polyctl import cli, lib as A
 
 HOSTILE = 'a/b\\c:d*e?f"g<h>i|j k\tl'
@@ -19,14 +21,18 @@ def test_a_topic_with_every_forbidden_character_lands_in_the_mailbox(project, ca
 
 def test_the_slug_keeps_only_safe_characters_and_never_comes_back_empty():
     assert A.safe_slug(HOSTILE) == "a-b-c-d-e-f-g-h-i-j-k-l"
-    assert A.safe_slug("kuyruk boş, karar gerekli") == "kuyruk-bo-karar-gerekli"
+    assert A.safe_slug("kuyruk boş, karar gerekli") == "kuyruk-bos-karar-gerekli"
     assert A.safe_slug("../../etc") == "etc"
     assert A.safe_slug("///", "mesaj") == "mesaj"
     assert len(A.safe_slug("x" * 200)) == 40
 
 
 def test_a_note_to_an_unsafe_name_stays_in_the_mailbox(project):
-    name = A.note(project["root"], project, "kiro/../../x", "title: with/slash", "body")
+    with pytest.raises(ValueError, match="unknown mail recipient"):
+        A.note(project["root"], project, "kiro/../../x", "title: with/slash", "body")
+    assert os.listdir(os.path.join(project["root"], project["mailbox"])) == []
+
+    name = A.note(project["root"], project, "kiro", "title: with/slash", "body")
 
     assert os.path.exists(os.path.join(project["root"], project["mailbox"], name))
     assert "/" not in name

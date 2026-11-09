@@ -112,7 +112,8 @@ def _registry_names(root):
 
 
 POLYCTL_GITIGNORE = ("agent-mail/*.md", "!agent-mail/README.md", ".polyctl/inbox/", ".polyctl/hold", ".polyctl/sessions.json",
-                ".polyctl/lanes/")
+                     ".polyctl/lanes/", ".polyctl/ledger/mail.jsonl", ".polyctl/decisions/*.json",
+                     ".polyctl/decisions.lock", ".polyctl/mail/")
 # What the comment `polyctl init` writes above the lines it adds to .gitignore says (cmd_init), and the comment itself.
 POLYCTL_GITIGNORE_MARK = "polyctl: mail is transient"
 POLYCTL_GITIGNORE_COMMENT = "# polyctl: mail is transient; the ledger and reviews are not"

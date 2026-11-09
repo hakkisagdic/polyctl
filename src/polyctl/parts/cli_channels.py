@@ -36,6 +36,7 @@ NO_POLYCTL_PROGRAM = ("no polyctl program to name in the config: none is on PATH
 
 def cmd_mcp(cfg, args):
     """Serve this project's state to any MCP client, over stdio."""
+    cfg = _coordination_cfg(cfg, args)
     # The role and project scope are the server's own arguments, so the config printed for a client carries them too (MCP-ROLES, MCP-RES).
     role = ["--role", args.role] if args.role is not None else []
     project = ["--project", args.project] if getattr(args, "project", None) is not None else []
@@ -992,14 +993,20 @@ def cmd_content(cfg, args):
 def cmd_room(cfg, args):
     """Pending and consumed messages in every registered project that mention the words (#80, ADMIN-FINDINGS-1)."""
     query = args.text if isinstance(args.text, str) else " ".join(args.text or [])
-    found = A.room_search(query, cfg["root"])
-    for row in found:
+    if not str(query or "").strip():
+        print(f"{C['red']}refused{C['reset']}: room search requires a non-empty query")
+        return 2
+    found = A.room_search(query, cfg["root"], limit=None)
+    shown = found[:20]
+    for row in shown:
         when = time.strftime("%Y-%m-%d", time.localtime(float(row.get("at") or 0)))
         state = row.get("state") or "consumed"
         summary = f"  {A.shown_text(row['summary'])}" if row.get("summary") else ""
         print(f"{C['b']}{A.shown_text(row['project'])}{C['reset']}  {state}  {when}  {A.shown_text(row['id'])}  "
               f"{C['dim']}{A.shown_text(row.get('from') or '?')} → {A.shown_text(row.get('to') or '?')}{C['reset']}"
               f"{summary}")
+    if len(found) > len(shown):
+        print(f"{C['dim']}... and {len(found) - len(shown)} more{C['reset']}")
     if not found:
         print(f"{C['dim']}no stored message mentions that{C['reset']}")
     return 0 if found else 1
@@ -1040,11 +1047,19 @@ def cmd_ask(cfg, args):
         for item in found["citations"]:
             print(f"  {C['dim']}{item['file']}{':' + str(item['lines']) if item.get('lines') else ''}{C['reset']}")
         return 0
-    if not args.question:
+    cfg = _coordination_cfg(cfg, args)
+    root = cfg["root"]
+    if args.question is None:
         print(f"usage: {C['b']}polyctl ask \"question\" \"option a\" \"option b\" …{C['reset']}")
         return 0
-    rec = A.ask(root, args.question, args.options or [], context=args.context,
-                slice_id=args.slice, cfg=cfg)
+    try:
+        rec = A.ask(root, args.question, args.options or [], context=args.context,
+                    slice_id=args.slice, cfg=cfg,
+                    asked_by=getattr(args, "asked_by", None),
+                    addressee=getattr(args, "addressee", None))
+    except ValueError as exc:
+        print(f"{C['red']}not asked{C['reset']}: {exc}")
+        return 2
     print(f"{C['b']}{rec['id']}{C['reset']}  {rec['question']}")
     for o in rec["options"]:
         print(f"   {C['b']}{o['key']}){C['reset']} {o['label']}")
@@ -1067,6 +1082,22 @@ def cmd_answer(cfg, args):
     Only an option the question offers is taken, and a question answered once keeps its
     answer unless --change replaces it; the replaced answer stays in the record (CLI-ROBUST).
     """
+    cfg = _coordination_cfg(cfg, args)
+    if getattr(args, "close", False):
+        try:
+            rec = A.close_decision(cfg["root"], args.id, by=A.invoking_role() or "person",
+                                   why=getattr(args, "why", None) or (" ".join(args.value) if getattr(args, "value", None) else None))
+        except A.AnswerRefused as exc:
+            print(f"{C['red']}not closed{C['reset']}: {exc}")
+            return 2
+        if not rec:
+            print(f"{C['red']}no such decision{C['reset']} {args.id}")
+            return 1
+        print(f"{C['green']}closed{C['reset']} {rec['id']}")
+        return 0
+    if not getattr(args, "value", None):
+        print(f"usage: {C['b']}polyctl answer <ID> <key> [text] [--change] | polyctl answer <ID> --close [--why <text>]{C['reset']}")
+        return 2
     user, interactive = A._login_and_terminal()
     try:
         rec = A.answer(cfg["root"], args.id, " ".join(args.value), by="terminal",
@@ -1091,26 +1122,52 @@ def cmd_answer(cfg, args):
 
 def cmd_decisions(cfg, args):
     """Open and recently answered questions."""
+    cfg = _coordination_cfg(cfg, args)
+    if getattr(args, "close", None):
+        try:
+            rec = A.close_decision(cfg["root"], args.close, by=A.invoking_role() or "person",
+                                   why=getattr(args, "why", None))
+        except A.AnswerRefused as exc:
+            print(f"{C['red']}not closed{C['reset']}: {exc}")
+            return 2
+        if not rec:
+            print(f"{C['red']}no such decision{C['reset']} {args.close}")
+            return 1
+        print(f"{C['green']}closed{C['reset']} {rec['id']}")
+        return 0
     rows = A.decisions(cfg["root"])
     if not rows:
         print(f"{C['dim']}No decisions recorded.{C['reset']}")
         return 0
     for r in sorted(rows, key=lambda x: x["asked_at"], reverse=True)[:args.n]:
         age = int((time.time() - r["asked_at"]) / 60)
+        route = ""
+        if r.get("asked_by") or r.get("addressee"):
+            route = f" {A.shown_text(r.get('asked_by') or '?')} → {A.shown_text(r.get('addressee') or '?')}"
         if r["state"] in ("open", A.PROPOSED):
             # A rule proposal's question waits for a person, and parks no slice (RULE-PROPOSALS).
             label = "OPEN" if r["state"] == "open" else "PROPOSED"
             whose = f", rule proposal {A.shown_text(r['proposal'])}: a person's to decide" if r.get("proposal") else ""
             print(f"{C['yellow']}{label}{C['reset']}{' ' * (9 - len(label))}{C['b']}{A.shown_text(r['id'])}{C['reset']}  "
-                  f"{A.shown_text(r['question'])}  {C['dim']}{age}m{whose}{C['reset']}")
+                  f"{A.shown_text(r['question'])}  {C['dim']}{age}m{route}{whose}{C['reset']}")
             for o in r["options"]:
                 print(f"           {C['dim']}{A.shown_text(o['key'])}){C['reset']} {A.shown_text(o['label'])}")
+        elif r["state"] == "closed":
+            why = f": {A.shown_text(r['closed_why'])}" if r.get("closed_why") else ""
+            by = A.shown_text(r.get("closed_by") or "person")
+            print(f"{C['dim']}closed   {C['reset']}{C['b']}{A.shown_text(r['id'])}{C['reset']}  "
+                  f"{A.shown_text(r['question'])}  {C['dim']}({by}{why}){route}{C['reset']}")
         else:
-            rows = r.get("answers") or []
-            was = f"; was {A.shown_text(rows[-2].get('answer'))}" if len(rows) > 1 else ""
+            ans_rows = r.get("answers") or []
+            was = f"; was {A.shown_text(ans_rows[-2].get('answer'))}" if len(ans_rows) > 1 else ""
+            who = r.get("answered_role") or r.get("answered_by") or "unknown"
+            if "answered_interactive" in r:
+                mode_tag = ", interactive" if r.get("answered_interactive") else ", non-interactive"
+            else:
+                mode_tag = ""
             print(f"{C['green']}answered{C['reset']} {C['b']}{A.shown_text(r['id'])}{C['reset']}  "
                   f"{A.shown_text(r['question'])}  {C['dim']}→ {A.shown_text(r['answer'])} "
-                  f"({A.shown_text(r.get('answered_by'))}{was}){C['reset']}")
+                  f"({A.shown_text(who)}{mode_tag}{was}){route}{C['reset']}")
     return 0
 
 
@@ -1152,6 +1209,7 @@ def cmd_propose(cfg, args):
     does the answer. Exit 2 when it is refused; 0 when it is recorded, or when the same change
     stands open already and nothing new is recorded.
     """
+    cfg = _coordination_cfg(cfg, args)
     if not (args.why or "").strip():
         print("--why is required: what went wrong under the rule as it stands; a proposal without a reason "
               "cannot be judged")
@@ -1187,6 +1245,7 @@ def cmd_proposals(cfg, args):
     One whose question's file is gone is shown with them: nobody can answer it any more, and
     dropping it from the list would lose it silently.
     """
+    cfg = _coordination_cfg(cfg, args)
     root = cfg["root"]
     rows = A.proposals(root)
     shown = rows if args.all else [p for p in rows if p["state"] in ("open", "missing")]

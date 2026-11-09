@@ -100,14 +100,14 @@ def test_a_grant_is_one_line_and_a_refusal_writes_none(project):
 
 def test_mail_polyctl_sends_is_one_line_naming_the_message_and_never_quoting_it(project, capsys):
     args = SimpleNamespace(action="send", type="DECISION", topic="events", body="the body stays in the mailbox",
-                           mail_class=None)
+                           mail_class=None, allow_empty=False)
 
     assert cli.cmd_mail(project, args) is None
     name = capsys.readouterr().out.strip()
 
     (event,) = A.read_events()
     assert event["kind"] == "mail-sent"
-    assert event["data"] == {"message": name, "kind": "decision", "from": "fable", "to": "kiro"}
+    assert event["data"] == {"message": name, "kind": "decision", "from": "fable", "to": "implementer"}
     assert "stays in the mailbox" not in open(A.events_path(), encoding="utf-8").read()
 
 

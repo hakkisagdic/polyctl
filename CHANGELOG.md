@@ -23,12 +23,31 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- Make repeated `mail ack` and `polyctl_ack` calls idempotent (`exit 0`, `"already handled"`) and stop `polyctl next` from telling the person to acknowledge the implementer's urgent mail (MSG-FIX-1).
+- Normalise mail sender and recipient names to canonical role names even when the project's role table is empty (MSG-FIX-1).
+- Set `isError: true` on MCP `tools/call` responses whenever the tool returns an `{"error": ...}` payload (MSG-FIX-1).
+- Validate `polyctl ask` and `polyctl_ask` so empty questions, fewer than 2 options, or more than 8 options are refused instead of silently accepted or truncated (MSG-FIX-1).
+- Validate `polyctl note --to` against known roles/aliases and derive the default note kind (`URGENT`, `DECISION`, or `NOTE`) from the note context instead of hard-coding `DECISION` (MSG-FIX-1).
+- Transliterate Turkish and accented Latin letters (`ş→s`, `ğ→g`, `ı→i`, `ü→u`, `ö→o`, `ç→c`) in `safe_slug()` instead of stripping them from mail filenames (MSG-FIX-1).
+- Distinguish `--body ""` from an omitted `--body` in `mail send` and refuse empty message bodies unless `--allow-empty` is passed (MSG-FIX-1).
+- Deduplicate linked worktrees against their main checkout in `recall_roots()` so `room search` from a worktree does not label worktree paths as a second project (MSG-FIX-1).
+- Stream pending mail files beyond 64 KiB in `room search`, print `... and N more` when more than 20 hits match, and refuse empty search queries (MSG-FIX-1).
+- Fold Turkish `İ`/`I` and `ı`/`i` before `casefold()` so `room search` and `mail search` match Turkish text case-insensitively (MSG-FIX-1).
+- Ignore `.polyctl/ledger/mail.jsonl`, `.polyctl/decisions/*.json`, `.polyctl/decisions.lock`, and `.polyctl/mail/` in `polyctl init`'s `.gitignore` block and document migration for existing repositories (MSG-FIX-1).
+- Record `asked_by`, `addressee`, and `answered_role` on decisions, show role and interactivity in `polyctl decisions`, and add `--close ID [--why TEXT]` to withdraw open decisions (MSG-FIX-1).
+- Classify `mail send URGENT`, `--class urgent`, and `## URGENT` body headings uniformly as urgent across the banner, `polyctl next`, and `commit-ok` (MSG-FIX-1).
+- Record `mail.jsonl` `seen` events per reader and match them against the message's addressee so another role listing mail does not suppress the unanswered-mail escalation ladder (MSG-FIX-1).
+- Allow `reviewer` and `admin` to list, read, and acknowledge their own mail via `POLYCTL_ROLE` (MSG-FIX-1).
+- Use the MCP server's configured `--role` in `polyctl_inbox`, `polyctl_ack`, `polyctl_ask`, and urgent ride-along notices instead of hard-coding `"implementer"` (MSG-FIX-1).
+- Resolve linked git worktrees to their main checkout across `find_root`, `load_config`, `recall_roots`, CLI commands, and `polyctl mcp serve` so worktrees do not read or write orphaned mailboxes or decision dirs (MSG-FIX-1).
 - `polyctl doctor` and `polyctl doctor --check` now name project records under `~/.polyctl` that a linked worktree created by mistake, together with the main checkout they belong to, without deleting them (ADMIN-FINDINGS-1).
 - Commands and `polyctl mcp serve` (with no `-C`) run inside a linked git worktree of a governed repository now resolve to the main checkout's project (`.polyctl/`, ledgers, mailbox and project key) instead of creating a new project named after the worktree folder, and `docs/getting-started.md` shows the user-level MCP registration for Claude Code and Kiro beside the per-project one (ADMIN-FINDINGS-1).
 - `polyctl room search <text>` now searches every registered project's pending `agent-mail/` files as well as consumed messages in the mail ledger and append-only store, and prints which project and which state (`pending` or `consumed`) each hit comes from (ADMIN-FINDINGS-1).
 
 ### Security
 
+- Authenticate `polyctl mail send` and `polyctl mail ack` against `POLYCTL_ROLE` and refuse agent-harness attempts to send as `person`/`admin` or acknowledge mail as `person` (MSG-FIX-1).
+- Deliver mail only to its addressed role (`implementer`, `architect`, `reviewer`, `admin`, `person`), consume `"anyone"` handoff mail per reader, refuse unknown recipients at send time, and block `commit-ok` only on the addressee's urgent mail (MSG-FIX-1).
 - Every command that records a person's act (`--by` on `polyctl harness seen`, `polyctl waive`, `polyctl person-review`, `polyctl commit-ok`, `polyctl mode lite`, `polyctl config`, `polyctl features`, `polyctl init --review-tier same-family`, `polyctl collect-review`, `polyctl catchup` and `polyctl restore`) now refuses when the environment contains an agent-harness variable from `AGENT_HARNESS_ENV` (`TRAYCER_AGENT_ID`, `TRAYCER_EPIC_ID`, `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `AI_AGENT`, `GEMINI_CLI`, `CODEX_SANDBOX`, `KIRO_SESSION_ID`), even on a pseudo-terminal, naming the variable seen and requiring a person's own terminal with no override flag (ADMIN-FINDINGS-1).
 
 ## [0.7.0] - 2026-11-03

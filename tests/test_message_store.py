@@ -26,7 +26,16 @@ def _write(root, cfg, name, body=None):
 
 
 def _ack(cfg, name):
-    return cli.cmd_mail(cfg, SimpleNamespace(action="ack", type=name, topic=None, body="done"))
+    prev = os.environ.get("POLYCTL_ROLE")
+    role = A.mail_recipient_role(name, cfg, root=cfg["root"])
+    os.environ["POLYCTL_ROLE"] = role if role in A.ROLES else "implementer"
+    try:
+        return cli.cmd_mail(cfg, SimpleNamespace(action="ack", type=name, topic=None, body="done"))
+    finally:
+        if prev is None:
+            os.environ.pop("POLYCTL_ROLE", None)
+        else:
+            os.environ["POLYCTL_ROLE"] = prev
 
 
 @pytest.mark.parametrize("mode", ["deletion", "append-only"])

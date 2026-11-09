@@ -118,6 +118,7 @@ def cmd_note(cfg, args):
     time it had them, it used them on the orchestrator's own source and built a
     runaway. This is the only door to the mailbox an unattended architect gets.
     """
+    cfg = _coordination_cfg(cfg, args)
     # Read stdin only when asked. Defaulting to it made `polyctl note "title"` hang
     # waiting on a terminal that would never close, which is the wrong failure
     # for a command an unattended architect calls.
@@ -126,7 +127,11 @@ def cmd_note(cfg, args):
         print(f"usage: {C['b']}polyctl note \"title\" --body \"…\" [--to implementer] [--urgent]{C['reset']}")
         print(f"       {C['dim']}or pipe the body on stdin{C['reset']}")
         return 1
-    name = A.note(cfg["root"], cfg, args.to, args.title, body, urgent=args.urgent)
+    try:
+        name = A.note(cfg["root"], cfg, args.to, args.title, body, urgent=args.urgent)
+    except ValueError as exc:
+        print(f"{C['red']}refused{C['reset']}: {exc}")
+        return 2
     print(f"{C['green']}written{C['reset']} {cfg['mailbox']}/{name}")
     if args.urgent:
         print(f"{C['dim']}urgent: reaches the implementer via polyctl lock, polyctl verify and "
@@ -751,8 +756,7 @@ def cmd_init(cfg, args):
     lines = [] if raw is None else raw.decode(UTF8, "replace").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     # The sessions polyctl settles for this checkout's roles are this machine's, never the repository's (SESSION-IDENTITY),
     # and so are the lanes it starts from here: each names a directory on this machine (LANE-START).
-    add = [l for l in ("agent-mail/*.md", "!agent-mail/README.md", ".polyctl/inbox/", ".polyctl/hold", ".polyctl/sessions.json",
-                       ".polyctl/lanes/") if l not in lines]
+    add = [l for l in POLYCTL_GITIGNORE if l not in lines]
     # So is the MCP file init writes into the tree for a harness that reads one there, `.mcp.json` for Claude Code: its
     # entry names this machine's polyctl. Left untracked, it was the product file the first `polyctl verify` refused
     # (README-QUICKSTART-7); one the repository already tracks is the repository's, and stays so.

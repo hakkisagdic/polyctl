@@ -251,7 +251,7 @@ def test_an_urgent_note_written_in_turkish_still_holds_the_implementer_in_an_eng
 
     assert "2 URGENT message(s) from the architect" in printed and name in printed
     assert "URGENT for the implementer: stop S3" in lines and "URGENT for the implementer: stop S4" in lines
-    assert _class(project, name) == _class(project, english) == "needs-read"
+    assert _class(project, name) == _class(project, english) == "urgent"
     assert [m["id"] for m in mcp.call("polyctl_inbox", {}, project, False)["messages"]] == [name, english]
 
 

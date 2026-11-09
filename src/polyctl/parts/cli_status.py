@@ -459,6 +459,7 @@ def _mailbox_banner(cfg, shown=True):
 
 
 def cmd_status(cfg, args):
+    cfg = _coordination_cfg(cfg, args)
     window = getattr(args, "window", None) or 24.0
     if getattr(args, "json", False):
         # The facts alone, as one document: no colour, no banner, nothing else on stdout, and nothing
@@ -469,6 +470,7 @@ def cmd_status(cfg, args):
 
 
 def cmd_watch(cfg, args):
+    cfg = _coordination_cfg(cfg, args, record=not getattr(args, "web", False))
     if getattr(args, "web", False):
         return _watch_web(cfg, args)
     if getattr(args, "port", None) is not None:
@@ -706,22 +708,36 @@ def _shown_lines(text):
 
 
 def cmd_mail(cfg, args):
+    cfg = _coordination_cfg(cfg, args)
     root = cfg["root"]
-    if not getattr(args, "root", None):
-        root = A.linked_worktree_main(root) or root
-        cfg = dict(cfg, root=root)
     d = os.path.join(root, cfg["mailbox"])
     if args.action in ("list", "read"):
+        raw_role = (os.environ.get("POLYCTL_ROLE") or "").strip().lower()
+        if raw_role and raw_role not in A.ROLES and raw_role != "person":
+            print("POLYCTL_ROLE names no mail reader")
+            return 1
         for line in _mailbox_banner(cfg):
             print(line)
-    if args.action in ("list", "read"):
-        # What a reader's own command lists is seen by that reader, not yet handled (#30).
-        role = A.invoking_role()
-        shown = [f for f in A.mailbox(root, cfg["mailbox"]) if A.addressed_to(f, cfg, role)]
-        A.mail_seen(root, shown, role or "person")
+        # What a reader's own command lists is seen by that reader, not yet handled (#30, MSG-FIX-1).
+        role = A.invoking_role() or ("person" if raw_role == "person" else None)
+        reader = role or "person"
+        shown = [f for f in A.mailbox(root, cfg["mailbox"]) if A.addressed_to(f, cfg, reader, root=root)]
+        if not (reader in ("person", "admin") and A.agent_harness_refusal()):
+            A.mail_seen(root, shown, reader)
+        filter_to = getattr(args, "mail_to", None)
+        if filter_to is not None:
+            target_role = A.normalise_mail_party(filter_to, cfg)
+            if target_role is None:
+                print(f"unknown mail recipient {filter_to!r}")
+                return 2
+            visible = [f for f in A.mailbox(root, cfg["mailbox"]) if A.addressed_to(f, cfg, target_role, root=root)]
+        elif role is not None:
+            visible = shown
+        else:
+            visible = A.mailbox(root, cfg["mailbox"])
     # A message's name and body are its writer's, an agent's among them: shown escaped (LEADS-MCP).
     if args.action == "list":
-        for f in A.mailbox(root, cfg["mailbox"]):
+        for f in visible:
             meta = A.mail_meta(os.path.join(d, f))
             sender, recipient = meta.get("from"), meta.get("to")
             if not (sender and recipient):
@@ -734,18 +750,50 @@ def cmd_mail(cfg, args):
             else:
                 print(A.shown_text(f))
     elif args.action == "read":
-        for f in A.mailbox(root, cfg["mailbox"]):
+        for f in visible:
             print(f"===== {A.shown_text(f)} =====\n{_shown_lines(open(os.path.join(d, f), encoding=UTF8).read())}")
     elif args.action == "send":
         os.makedirs(d, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M")
         topic = A.safe_slug((args.topic or "note").lower())
         impl, arch = A.mail_names(cfg)
-        sender = getattr(args, "mail_from", None) or arch
-        recipient = getattr(args, "mail_to", None) or impl
+        raw_role = (os.environ.get("POLYCTL_ROLE") or "").strip().lower()
+        if raw_role and raw_role not in A.ROLES and raw_role != "person":
+            print("refused: POLYCTL_ROLE names no mail sender")
+            return 2
+        active_role = raw_role or None
+        harness_refusal = A.agent_harness_refusal()
+        raw_from = getattr(args, "mail_from", None)
+        if raw_from is not None:
+            sender_role = A.normalise_mail_party(raw_from, cfg)
+            if sender_role is None or sender_role == "anyone":
+                print(f"unknown mail sender {raw_from!r}")
+                return 2
+            if harness_refusal and sender_role in ("person", "admin"):
+                print(harness_refusal)
+                return 2
+            if active_role and sender_role != active_role:
+                print(f"refused: POLYCTL_ROLE={active_role} cannot send mail as {sender_role}")
+                return 2
+            sender = sender_role
+        elif active_role:
+            if harness_refusal and active_role in ("person", "admin"):
+                print(harness_refusal)
+                return 2
+            sender = active_role
+        else:
+            sender = arch
+        raw_to = getattr(args, "mail_to", None)
+        recipient = A.normalise_mail_party(raw_to, cfg) if raw_to is not None else "implementer"
+        if recipient is None:
+            print(f"unknown mail recipient {raw_to!r}")
+            return 2
+        body = args.body if args.body is not None else sys.stdin.read()
+        if not body.strip() and not getattr(args, "allow_empty", False):
+            print("refusing to send an empty message (pass --allow-empty to send one)")
+            return 2
         name = f"{stamp}-{sender}-to-{recipient}-{A.safe_slug(args.type.upper(), 'INFO')}-{topic}.md"
-        body = args.body if args.body else sys.stdin.read()
-        name = A.write_mail(root, cfg, name, body.rstrip() + "\n",
+        name = A.write_mail(root, cfg, name, (body.rstrip() + "\n") if body.strip() else "",
                      {"kind": args.type.lower(), "from": sender, "to": recipient,
                       "class": getattr(args, "mail_class", None)})
         print(name)
@@ -754,14 +802,31 @@ def cmd_mail(cfg, args):
         pattern = args.type if args.type and args.type != "INFO" else None
         if not pattern:
             print("usage: polyctl mail ack <file-or-glob>   e.g. polyctl mail ack 'watchdog-to-*-ANOMALY-*'"); return 2
+        raw_role = (os.environ.get("POLYCTL_ROLE") or "").strip().lower()
+        if raw_role and raw_role not in A.ROLES and raw_role != "person":
+            print("not acknowledged: POLYCTL_ROLE names no mail reader")
+            return 1
+        if not raw_role or raw_role in ("person", "admin"):
+            refusal = A.agent_harness_refusal()
+            if refusal:
+                print(refusal)
+                return 2
+            reader = raw_role or "person"
+        else:
+            reader = raw_role
         hits = [f for f in A.mailbox(root, cfg["mailbox"]) if f == pattern or fnmatch.fnmatch(f, pattern)]
         if not hits:
+            if not any(ch in pattern for ch in "*?[") and A._already_acknowledged(root, cfg, pattern, reader):
+                print(f"already handled: {A.shown_text(pattern)}")
+                return 0
             print(f"no message matches {pattern}"); return 1
+        if all(A.mail_recipient_role(f, cfg, root=root) == "anyone" and A._handled_by_reader(root, f, reader)
+               for f in hits):
+            print(f"already handled: {', '.join(A.shown_text(f) for f in hits)}")
+            return 0
         # An agent acknowledged another reader's mail, including its append-only handled record. Check the
         # whole glob before consuming any of it; an unknown role is no person's session (LEADS-OPEN).
-        role = (os.environ.get("POLYCTL_ROLE") or "").strip().lower()
-        refused = hits if role and role not in A.ROLES else [
-            f for f in hits if not A.addressed_to(f, cfg, role or None)]
+        refused = [f for f in hits if not A.addressed_to(f, cfg, reader, root=root)]
         if refused:
             print("not acknowledged: these messages belong to another reader, or POLYCTL_ROLE names no mail reader: "
                   + ", ".join(A.shown_text(f) for f in refused))
@@ -771,12 +836,17 @@ def cmd_mail(cfg, args):
         if store:
             A.ingest_mail(root, cfg)
         for f in hits:
-            if store:
-                # Handling is a record; the message stays in the store (#80).
-                A.handle_message(root, cfg, f, A.invoking_role() or "person", args.body or "processed")
+            if A.mail_recipient_role(f, cfg, root=root) == "anyone":
+                A.mail_ledger_append(root, {"event": "consumed", "id": f, "by": reader,
+                                            "outcome": args.body or "processed"})
             else:
-                os.remove(os.path.join(d, f))
-            A.mail_ledger_append(root, {"event": "consumed", "id": f, "outcome": args.body or "processed"})
+                if store:
+                    # Handling is a record; the message stays in the store (#80).
+                    A.handle_message(root, cfg, f, reader, args.body or "processed")
+                else:
+                    os.remove(os.path.join(d, f))
+                A.mail_ledger_append(root, {"event": "consumed", "id": f, "by": reader,
+                                            "outcome": args.body or "processed"})
             print(f"  {C['green']}acked{C['reset']} {A.shown_text(f)}")
     elif args.action == "sync":
         A.ingest_mail(root, cfg)

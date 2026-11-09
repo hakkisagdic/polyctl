@@ -930,14 +930,32 @@ def lowered(*keys):
 
 
 def folded(text):
-    """Text lowered as the readers of lowered() search it: the capital İ as a plain i first.
+    """Text lowered as the readers of lowered() search it: Turkish İ/ı/I folded to plain i first.
 
     `str.lower()` made `## ACİL` an i and a combining dot, which no plain-i form matches: a Turkish
     report marked urgent was neither a decision asked for in the watchdog's anomalies nor a reason
-    to stop nudging an implementer that waits on the architect (TR-MARKER-FOLD). An i already followed
-    by that combining dot - text another program lowered so - reads as a plain i too.
+    to stop nudging an implementer that waits on the architect (TR-MARKER-FOLD). Folding `İ`, `ı`
+    and `I` to `i` before `casefold()` also lets Turkish case-insensitive search match `ŞİMDİ` to
+    `Şimdi` and `istanbul` to `İstanbul` (MSG-FIX-1).
     """
-    return str(text).replace("İ", "I").lower().replace("i\u0307", "i")
+    return str(text or "").replace("İ", "i").replace("ı", "i").replace("I", "i").casefold().replace("i\u0307", "i")
+
+
+_SLUG_TRANSLIT = str.maketrans({
+    "ç": "c", "Ç": "C",
+    "ğ": "g", "Ğ": "G",
+    "ı": "i", "İ": "I",
+    "ö": "o", "Ö": "O",
+    "ş": "s", "Ş": "S",
+    "ü": "u", "Ü": "U",
+})
+
+
+def transliterate_ascii(text):
+    """Transliterate Turkish and accented Latin letters to ASCII before slugifying (MSG-FIX-1)."""
+    import unicodedata
+    mapped = str(text or "").translate(_SLUG_TRANSLIT)
+    return unicodedata.normalize("NFKD", mapped).encode("ascii", "ignore").decode("ascii")
 
 
 def words(key):

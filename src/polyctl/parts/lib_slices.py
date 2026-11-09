@@ -34,13 +34,16 @@ def recall_roots(root=None):
     """(project, root) for every project this machine has registered, the one asking first."""
     out, seen = [], set()
     if root:
-        out.append((project_key(root), root))
-        seen.add(os.path.realpath(root))
+        main_root = linked_worktree_main(root) or root
+        out.append((project_key(main_root), main_root))
+        seen.add(os.path.realpath(main_root))
     for name, row in sorted(project_registry().items()):
         path = row.get("root")
-        if path and os.path.isdir(path) and os.path.realpath(path) not in seen:
-            seen.add(os.path.realpath(path))
-            out.append((name, path))
+        if path and os.path.isdir(path):
+            main_path = linked_worktree_main(path) or path
+            if os.path.realpath(main_path) not in seen:
+                seen.add(os.path.realpath(main_path))
+                out.append((name, main_path))
     return out
 
 
@@ -1748,13 +1751,15 @@ def _run_codebase_provider(argv, cwd, timeout):
 
 
 def safe_slug(text, fallback="note", limit=40):
-    """A file-name part holding only [A-Za-z0-9._-] (#19).
+    """A file-name part holding only [A-Za-z0-9._-] (#19, MSG-FIX-1).
 
     `polyctl mail send note "polyctl: kiro/* dal …"` kept the "/" and wrote into a directory
-    that did not exist. Separators, wildcards, quotes, whitespace and letters
-    outside ASCII all become a dash; what is left is cut to `limit`.
+    that did not exist. Common non-ASCII letters (Turkish, accented Latin) are
+    transliterated to ASCII first; separators, wildcards, quotes, whitespace and
+    remaining non-ASCII characters become a dash; what is left is cut to `limit`.
     """
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(text or "")).strip("-.")[:limit].strip("-.")
+    ascii_text = language.transliterate_ascii(text)
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", ascii_text).strip("-.")[:limit].strip("-.")
     return slug or fallback
 
 
@@ -1769,13 +1774,27 @@ def note(root, cfg, to, title, body, urgent=False):
     box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
     os.makedirs(box, exist_ok=True)
     slug = safe_slug(title.lower(), language.text(cfg, "mail.untitled-note"))
-    # An urgent note is marked in the project's language; every reader knows both (LANGUAGE-FILES).
-    kind = language.marker(cfg, "urgent-kind") if urgent else "DECISION"
     impl, arch = mail_names(cfg)
-    to = safe_slug(to or impl, impl)          # the implementer's role by default, whoever holds it (#31)
-    name = f"{time.strftime('%Y%m%d-%H%M')}-{arch}-to-{to}-{kind}-{slug}.md"
+    if to is not None:
+        raw_to = str(to).strip()
+        if not raw_to or ".." in raw_to or "\\" in raw_to or normalise_mail_party(raw_to, cfg) is None:
+            raise ValueError(f"unknown mail recipient {to!r}")
+        to_name = safe_slug(raw_to, impl)
+    else:
+        to_name = impl                    # the implementer's role by default, whoever holds it (#31)
+    # An urgent note is marked in the project's language; every reader knows both (LANGUAGE-FILES).
+    combined = language.folded(f"{title or ''}\n{body or ''}")
+    if urgent or any(k.upper() in (body or "").upper() for k in URGENT_MARKERS):
+        kind = language.marker(cfg, "urgent-kind")
+    elif (any(mark in combined for mark in language.lowered("decision"))
+          or "_decision record:" in (body or "").lower()
+          or "_karar kayd" in combined):
+        kind = "DECISION"
+    else:
+        kind = "NOTE"
+    name = f"{time.strftime('%Y%m%d-%H%M')}-{arch}-to-{to_name}-{kind}-{slug}.md"
     text = f"# {title}\n\n" + (language.marker(cfg, "urgent") + "\n\n" if urgent else "") + body.rstrip() + "\n"
-    return write_mail(root, cfg, name, text, {"kind": kind.lower(), "from": arch, "to": to})
+    return write_mail(root, cfg, name, text, {"kind": kind.lower(), "from": arch, "to": to_name})
 
 
 def running_slice(root):

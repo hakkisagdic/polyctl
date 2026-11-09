@@ -79,7 +79,7 @@ def test_mail_send_accepts_from_and_to_and_mail_list_shows_them(project, capsys)
     root = project["root"]
     assert cli.main(["-C", root, "mail", "send", "INFO", "route", "--body", "Default route"]) == 0
     out = capsys.readouterr().out
-    assert "fable-to-kiro-INFO-route.md" in out
+    assert "fable-to-implementer-INFO-route.md" in out
 
     assert cli.main([
         "-C", root, "mail", "send", "DECISION", "directive",
@@ -96,6 +96,6 @@ def test_mail_send_accepts_from_and_to_and_mail_list_shows_them(project, capsys)
 
     assert cli.main(["-C", root, "mail", "list"]) == 0
     listed = capsys.readouterr().out
-    assert "fable" in listed and "kiro" in listed
+    assert "fable" in listed and "implementer" in listed
     assert "admin" in listed and "architect" in listed
     assert "person" in listed and "reviewer" in listed

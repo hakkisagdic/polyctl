@@ -957,45 +957,61 @@ def call(name, args, cfg, allow_verify, role=None, project_scope=None):
         # store beside the mailbox would be a second place for the same fact, and
         # every failure in this project's history has come from two records of one
         # thing drifting apart.
+        reader = role or A.invoking_role() or "implementer"
         box = cfg.get("mailbox", "agent-mail")
         out = []
         for m in A.mailbox(root, box):
-            if not A.addressed_to(m, cfg, "implementer"):
+            if not A.addressed_to(m, cfg, reader, root=root):
                 continue                     # our own outbound, or the watchdog's; not addressed to us
             try:
                 body = open(os.path.join(root, box, m), errors="replace", encoding=UTF8).read(20000)
             except OSError:
                 continue
             out.append({"id": m, "body": body})
-        A.mail_seen(root, [message["id"] for message in out], "implementer")   # shown, not handled (#30)
+        A.mail_seen(root, [message["id"] for message in out], reader)   # shown, not handled (#30)
         return _attach_project({"messages": out, "count": len(out),
                                 "note": "acknowledge each with polyctl_ack after applying or rejecting it"},
                                project_name, project_scope)
 
     if name == "polyctl_ack":
+        reader = role or A.invoking_role() or "implementer"
         box = cfg.get("mailbox", "agent-mail")
         mid = os.path.basename(args.get("id", ""))
         path = os.path.join(root, box, mid)
-        if not mid or mid == "README.md" or not os.path.exists(path):
+        if not mid or mid == "README.md":
             return {"error": f"no such message: {args.get('id')}"}
-        # Only what polyctl_inbox lists: mail addressed to the implementer. Any name in the mailbox was taken, so an
+        if not os.path.exists(path):
+            if A._already_acknowledged(root, cfg, mid, reader):
+                return _attach_project({"acknowledged": mid, "already_handled": True,
+                                        "outcome": args.get("outcome", "applied")},
+                                       project_name, project_scope)
+            return {"error": f"no such message: {args.get('id')}"}
+        if A.mail_recipient_role(mid, cfg, root=root) == "anyone" and A._handled_by_reader(root, mid, reader):
+            return _attach_project({"acknowledged": mid, "already_handled": True,
+                                    "outcome": args.get("outcome", "applied")},
+                                   project_name, project_scope)
+        # Only what polyctl_inbox lists: mail addressed to this server's role. Any name in the mailbox was taken, so an
         # implementer consumed the architect's reports, the hunter's leads and the watchdog's anomalies - deleted,
         # or with mail.store append-only recorded handled, which the store keeps from the actor deciding what was
-        # handled precisely so that it cannot erase the question (LEADS-MCP).
-        if not A.addressed_to(mid, cfg, "implementer"):
+        # handled precisely so that it cannot erase the question (LEADS-MCP, MSG-FIX-1).
+        if not A.addressed_to(mid, cfg, reader, root=root):
             mail_ack_cmd = render_suggested_command("mail-ack")
-            return {"error": f"{mid} is not addressed to the implementer, so polyctl_ack does not take it: it acknowledges "
+            return {"error": f"{mid} is not addressed to the {reader}, so polyctl_ack does not take it: it acknowledges "
                              "only what polyctl_inbox lists. Mail to the architect, and the watchdog's, is acknowledged by "
                              f"the one it is for, with `{mail_ack_cmd}`; leave it where it is."}
-        if A.mail_store_mode(root) == "append-only":
-            A.ingest_mail(root, cfg)
-            A.handle_message(root, cfg, mid, "implementer", args.get("outcome", "applied"))   # a record (#80)
+        if A.mail_recipient_role(mid, cfg, root=root) == "anyone":
+            A.mail_ledger_append(root, {"event": "consumed", "id": mid, "by": reader,
+                                        "outcome": args.get("outcome", "applied")})
         else:
-            os.remove(path)
+            if A.mail_store_mode(root) == "append-only":
+                A.ingest_mail(root, cfg)
+                A.handle_message(root, cfg, mid, reader, args.get("outcome", "applied"))   # a record (#80)
+            else:
+                os.remove(path)
+            A.mail_ledger_append(root, {"event": "consumed", "id": mid, "by": reader,
+                                        "outcome": args.get("outcome", "applied")})
         A.record_notice(root, "ack", f"{mid}: {args.get('outcome', 'applied')}",
                         sent=False, key="ack")
-        A.mail_ledger_append(root, {"event": "consumed", "id": mid,
-                                    "outcome": args.get("outcome", "applied")})
         return _attach_project({"acknowledged": mid, "outcome": args.get("outcome", "applied")},
                                project_name, project_scope)
 
@@ -1088,8 +1104,13 @@ def call(name, args, cfg, allow_verify, role=None, project_scope=None):
     if name == "polyctl_ask":
         if args.get("slice") is not None and not valid_caller_id("slice", args.get("slice")):
             return {"error": f"invalid slice id {args.get('slice')!r}"}
-        rec = A.ask(root, args["question"], args.get("options") or [],
-                    context=args.get("context"), slice_id=args.get("slice"), cfg=cfg)
+        try:
+            rec = A.ask(root, args.get("question"), args.get("options") or [],
+                        context=args.get("context"), slice_id=args.get("slice"), cfg=cfg,
+                        asked_by=role or A.invoking_role() or "implementer",
+                        addressee=args.get("to"))
+        except ValueError as exc:
+            return {"error": str(exc)}
         # Delivery is decided here, not by the caller. An implementer with its own
         # channel to a phone is a spam surface; an implementer that reports and
         # lets the centre route is not.
@@ -1318,7 +1339,10 @@ def main():
                             resolved, problem = _resolve_project(cfg, project_scope, args.get("project"))
                             if problem is None:
                                 _, target_root, target_cfg = resolved
-                                urgent = A.urgent_messages(target_root, target_cfg)
+                                active_role = role or A.invoking_role() or "implementer"
+                                urgent = (A.urgent_messages(target_root, target_cfg)
+                                          if active_role == "implementer"
+                                          else A.urgent_messages(target_root, target_cfg, role=active_role))
                                 if urgent:
                                     payload["URGENT_UNACKNOWLEDGED"] = [
                                         {"id": u["id"], "title": u["title"]} for u in urgent]
@@ -1328,6 +1352,8 @@ def main():
                         result = {"content": [{"type": "text",
                                                "text": json.dumps(payload, ensure_ascii=False,
                                                                   indent=2, default=str)}]}
+                        if isinstance(payload, dict) and "error" in payload:
+                            result["isError"] = True
                     elif method == "resources/list":
                         result, error = resources_list(cfg, project_scope, params)
                     elif method == "resources/templates/list":

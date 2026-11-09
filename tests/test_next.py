@@ -350,7 +350,7 @@ def test_urgent_unacknowledged_mail_is_named_with_the_command_that_reads_it(proj
     assert item["who"] == A.PERSON and item["command"] == "polyctl mail ack M-1"
 
 
-def test_urgent_mail_for_implementer_or_architect_is_named_and_acknowledged_with_mail_ack(project, capsys):
+def test_urgent_mail_for_implementer_or_architect_is_named_and_acknowledged_with_mail_ack(project, monkeypatch, capsys):
     root = project["root"]
     box = os.path.join(root, project["mailbox"])
     to_impl = "20261019-1000-fable-to-kiro-DECISION-stop.md"
@@ -366,17 +366,20 @@ def test_urgent_mail_for_implementer_or_architect_is_named_and_acknowledged_with
     _grant(project, candidate)
 
     urgent_items = [item for item in A.person_items(project) if item["kind"] == "mail-urgent"]
-    assert [item["command"] for item in urgent_items] == [f"polyctl mail ack {to_impl}", f"polyctl mail ack {to_arch}"]
+    assert len(urgent_items) == 1
+    assert urgent_items[0]["command"] is None
+    assert "urgent for the architect, waiting on the architect to acknowledge" in urgent_items[0]["why"]
     pipe_item = A.pipeline_items(project)[0]
     assert pipe_item["kind"] == "mail-urgent" and pipe_item["command"] == f"polyctl mail ack {to_impl}"
     assert cli.main(["-C", root, "commit-check"]) != 0
     assert pipe_item["why"] in capsys.readouterr().out
 
+    monkeypatch.setenv("POLYCTL_ROLE", "architect")
     assert cli.main(["-C", root, "mail", "ack", to_arch]) == 0
-    assert [item["command"] for item in A.person_items(project) if item["kind"] == "mail-urgent"] == [
-        f"polyctl mail ack {to_impl}"
-    ]
+    assert [item for item in A.person_items(project) if item["kind"] == "mail-urgent"] == []
+    monkeypatch.setenv("POLYCTL_ROLE", "implementer")
     assert cli.main(["-C", root, "mail", "ack", to_impl]) == 0
+    monkeypatch.delenv("POLYCTL_ROLE", raising=False)
     assert "mail-urgent" not in _kinds(project)
     assert A.pipeline_items(project)[0]["kind"] == "granted"
 
