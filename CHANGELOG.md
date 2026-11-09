@@ -14,6 +14,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### New commands
 
+- `polyctl spec check <slice>` checks required sections, named tests for acceptance criteria and external claim sources before feature/enterprise review, with configurable requirements and advisory findings for bugfix/poc ([specs](docs/specs.md)) (AIDLC-2)
 - `polyctl mail send` now accepts `--from` and `--to` (`implementer`, `architect`, `reviewer`, `admin` or `person`), keeping the default `architect`-to-`implementer` address when omitted, and `polyctl mail list` shows `from → to` beside each pending file (ADMIN-FINDINGS-1).
 
 ### Behaviour changes

@@ -22,6 +22,7 @@ from . import language
 from . import lib as A
 from . import matrix as M
 from . import settings as S
+from . import specs
 from .procs import TableUnreadable
 from .storage import LedgerLockTimeout
 from .verdicts import REVIEWER_VERDICTS
@@ -171,6 +172,10 @@ def build_parser(root=None, prog=None):
     bd.add_argument("--needs", help="add: the ids this item waits for, comma-separated")
     bd.add_argument("--role", help="add: the role that takes it, when that is not the implementer")
     bd.set_defaults(fn=cmd_board)
+    sp = sub.add_parser("spec", help="check a slice's sections, test traceability and external sources")
+    sp.add_argument("action", choices=["check"])
+    sp.add_argument("slice", help="the board item's id")
+    sp.set_defaults(fn=cmd_spec)
     sl = sub.add_parser("slice", help="start, block or abandon a slice, each move a line in the slice ledger; "
                                       "status: where one stands and how it got there")
     sl.add_argument("action", nargs="?", choices=["start", "block", "abandon", "status"], default="status")
@@ -816,7 +821,7 @@ def main(argv=None, prog=None):
             return 0
         command = f"{prog} {args.cmd}"
         root = A.find_root(args.root)
-        record = args.cmd != "export" and not (args.cmd == "watch" and getattr(args, "web", False))
+        record = args.cmd not in ("export", "spec") and not (args.cmd == "watch" and getattr(args, "web", False))
         return args.fn(A.load_config(root, record=record), args) or 0
     except KeyboardInterrupt:
         return 130

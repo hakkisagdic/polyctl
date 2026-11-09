@@ -67,7 +67,10 @@ Anything not forbidden there and inside the slice's scope is allowed.
    and records a verification bound to that isolated index candidate. A command
    outside the declared gates takes the lock as `polyctl lock -- <command>`, in a
    session a person runs: it runs any command, and no grant polyctl composes names it.
-6. `polyctl review --boundary "…"` — independent, on the same staged candidate and
+6. `polyctl spec check <slice>` checks a typed slice's required sections, each acceptance
+   criterion's named test and citations on declared external claims. Fix feature/enterprise
+   findings before review; bugfix/poc findings warn. See `docs/specs.md` for the format.
+   `polyctl review --boundary "…"` — independent, on the same staged candidate and
    boundary, never your own. Fix findings, restage, reverify and re-review. Over
    the round budget? The architect re-specifies; do not grind. Exit 3 means no
    reviewer could review (quota, login): not a round, not a verdict — park the
@@ -317,6 +320,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `polyctl proposals [--all]` | the rule proposals waiting for a person; `--all` adds the decided ones, their answers and whether the rule file changed since |
 | `polyctl lock -- <cmd>` | hold the writer lock, run a gate, record it |
 | `polyctl verify -p quick|full` | run the declared gates and record the measured result |
+| `polyctl spec check <slice>` | check the slice's required sections, test traces and external claim sources; feature/enterprise findings stop review, bugfix/poc findings warn; requirements are configurable per work type |
 | `polyctl merge-check <branch>` | gate the result of a merge before merging; the record names both parents |
 | `polyctl review --boundary "…" [--paths …]` | independent prospective review of the exact staged candidate; `--paths` narrows its staged scope |
 | `polyctl review --commits <range>` | retrospective review of landed work; never authorizes a candidate |

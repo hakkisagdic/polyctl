@@ -1461,6 +1461,32 @@ def _board_lines(cfg, facts=None):
 SLICE_OPEN = ("running", "blocked", "queued", "inbox", "verified")
 
 
+def _show_spec_check(result):
+    """Warnings for small work, a refusal before a feature's review spends anything (AIDLC-2)."""
+    label = "FAIL" if result["blocked"] else "WARN" if result["findings"] else "PASS"
+    print(A.shown_text(f"spec {result['slice']} ({result['work_type']}): {label}"))
+    for finding in result["findings"]:
+        print("  " + A.shown_text(finding))
+    if result["blocked"]:
+        print(A.shown_text(f"Fix the spec, then run polyctl spec check {result['slice']} before review."))
+    return 1 if result["blocked"] else 0
+
+
+def cmd_spec(cfg, args):
+    """Check exactly one board slice without running tests or fetching sources (AIDLC-2)."""
+    _, item, problem = _slice_item(A.board(cfg["root"]), args.slice)
+    if problem:
+        return _slice_refused(problem)
+    return _show_spec_check(specs.check(cfg, item))
+
+
+def _review_spec_check(cfg, item):
+    """Legacy untyped slices keep their existing boundary contract (AIDLC-2)."""
+    if not item or not any(key in (item.get("notes") or {}) for key in ("work-type", "spec")):
+        return 0
+    return _show_spec_check(specs.check(cfg, item))
+
+
 def _slice_refused(problem):
     print(f"{C['red']}REFUSED{C['reset']}  {A.shown_text(problem)}")
     return 2

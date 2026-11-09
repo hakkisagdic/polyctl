@@ -3848,6 +3848,8 @@ def cmd_review_submit(cfg, args):
                   f"{limit}; collect first: {', '.join(state['id'] for state in flying)}")
             return 2
         running = A.running_slice(root)
+        if _review_spec_check(cfg, running):
+            return 1
         if getattr(args, "boundary", None) and A.boundary_pointer(running):
             print(f"{C['red']}--boundary cannot replace the running slice's boundary file{C['reset']}; "
                   "review without --boundary so the file and its diff reach the reviewer")
@@ -4230,6 +4232,9 @@ def cmd_review(cfg, args):
     # A submitted review judges a pinned tree; the worktree beside it is the next slice's (#27).
     pinned = bool(getattr(args, "pinned", False))
     root = cfg["root"]
+    # Submit checked the slice before pinning it; its runner must not check the next slice's spec (AIDLC-2).
+    if not pinned and not getattr(args, "commits", None) and _review_spec_check(cfg, A.running_slice(root)):
+        return 1
     impl = cfg.get("implementer") or {}
     rv = cfg.get("reviewer") or {}
     strict = M.is_strict(cfg)

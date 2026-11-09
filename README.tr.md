@@ -88,6 +88,9 @@ pre-commit hook'u başka her commit'i reddeder; push asla yetkilendirilmez
   park edilir, kuyruk boşalınca onu doldurması için mimar uyandırılır.
 - **Telafi eder.** Atladığın bir gözden geçirme kaydedilir; `polyctl catchup` inen aralığı sonradan
   başka aileden bir gözden geçirene inceletir.
+- **Şartnameyi denetler.** `polyctl spec check <slice>` zorunlu bölümleri, test bağlantılarını
+  ve dış sistem iddialarının kaynaklarını feature veya enterprise gözden geçirmesinden önce
+  denetler; bugfix ve poc bulguları uyarıdır ([şartname biçimi](docs/specs.md)).
 - **Güvenle gözden geçirir.** Gözden geçiren yalnızca okuyan araçlarla çalışır ve polyctl bunu her
   harness için ölçer: kiro-cli, soracak kişi yokken güvenilmeyen araçları yine de çalıştırdığı
   için Kiro gözden geçireni, polyctl'in onun için yazdığı salt okur bir ajan olarak koşar.

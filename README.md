@@ -86,6 +86,9 @@ the pre-commit hook refuses every other commit; push is never granted
   reason, and when the queue runs dry the architect is woken to refill it.
 - **Catches up.** A review you waive is recorded, and `polyctl catchup` has a reviewer of another
   family review the landed range later.
+- **Checks specs.** `polyctl spec check <slice>` checks required sections, test traces and
+  external claim sources before feature or enterprise review; bugfix and poc findings warn
+  ([spec format](docs/specs.md)).
 - **Reviews safely.** A reviewer runs with tools that only read, and polyctl measures that per
   harness: kiro-cli ran untrusted tools all the same with no person to ask, so a Kiro reviewer
   runs as a read-only agent polyctl writes for it.
