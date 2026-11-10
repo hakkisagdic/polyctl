@@ -1808,6 +1808,100 @@ def running_slice(root):
     return items[0] if items else None
 
 
+WORK_TYPE_PROFILES = {
+    "bugfix": {"verify": "quick", "review": "diff", "size": False, "spec": False, "reviewer_families": 1},
+    "poc": {"verify": "quick", "review": "full", "size": False, "spec": False, "reviewer_families": 1},
+    "feature": {"verify": "default", "review": "full", "size": True, "spec": False, "reviewer_families": 1},
+    "enterprise": {"verify": "full", "review": "full", "size": True, "spec": True, "reviewer_families": 2},
+}
+
+
+def work_type_profile(cfg, item=None):
+    """Resolve a slice's weight independently of lite/full enforcement.
+
+    Missing rows keep feature's existing behaviour. Unknown or weakened profiles fail
+    closed: a misspelled type must never become a way around review (AIDLC-1).
+    """
+    kind = ((item or {}).get("notes") or {}).get("type", "feature")
+    table = cfg.get("work_types", {})
+    if kind not in WORK_TYPE_PROFILES or not isinstance(table, dict):
+        raise ValueError("unknown slice type or invalid work_types table; use bugfix, poc, feature or enterprise")
+    if set(table) - set(WORK_TYPE_PROFILES):
+        raise ValueError("unknown work_types entry; use bugfix, poc, feature or enterprise")
+    default = WORK_TYPE_PROFILES[kind]
+    override = table.get(kind, {})
+    if not isinstance(override, dict) or set(override) - set(default):
+        raise ValueError(f"invalid work_types.{kind}; use the fields documented in docs/slices.md")
+    weight = dict(default, **override)
+    if (not isinstance(weight["verify"], str) or not weight["verify"].strip()
+            or weight["review"] not in ("diff", "full")
+            or type(weight["size"]) is not bool or type(weight["spec"]) is not bool
+            or type(weight["reviewer_families"]) is not int
+            or weight["reviewer_families"] not in (1, 2)):
+        raise ValueError(f"invalid work_types.{kind}; repair its verification, review and gate weights")
+    ranks = {"diff": 1, "full": 2}
+    if (ranks[weight["review"]] < ranks[default["review"]]
+            or weight["reviewer_families"] < default["reviewer_families"]
+            or default["verify"] == "full" and weight["verify"] in ("default", "quick")
+            or default["size"] and not weight["size"] or default["spec"] and not weight["spec"]):
+        raise ValueError(f"work_types.{kind} weakens its minimum gates; restore the documented defaults")
+    return dict(weight, type=kind)
+
+
+def active_work_profile(cfg):
+    """Several running slices cannot silently select the lightest one (AIDLC-1)."""
+    items = board(cfg["root"])["running"]
+    profiles = [work_type_profile(cfg, item) for item in items]
+    if profiles and any(profile != profiles[0] for profile in profiles[1:]):
+        raise ValueError("running slices have different work types; park all but the candidate's slice")
+    return profiles[0] if profiles else work_type_profile(cfg)
+
+
+def work_profile_matches(record, profile):
+    """Old feature evidence remains usable; lighter evidence never satisfies a heavier type (AIDLC-1)."""
+    stored = (record or {}).get("work_profile")
+    return stored == profile or stored is None and profile == dict(WORK_TYPE_PROFILES["feature"], type="feature")
+
+
+def work_profile_problems(root, profile, verification=None):
+    """Live verification profile and spec requirements, shared by grant and hook (AIDLC-1)."""
+    problems = []
+    if verification is not None:
+        if not work_profile_matches(verification, profile):
+            problems.append("slice work type changed since verification; run polyctl verify again")
+        if profile["verify"] != "default" and verification.get("profile") != profile["verify"]:
+            problems.append(f"work type requires verification profile {profile['verify']}; run polyctl verify")
+        if profile["spec"] and not any(gate.get("name") == "spec" and gate.get("passed") is True
+                                      for gate in verification.get("gates", [])):
+            problems.append("enterprise/spec profile requires a passing spec gate; declare it in .polyctl/gates.json")
+    return problems
+
+
+def slice_type_setting(slice_id):
+    """Opt-in ledger key binding one slice's recorded work type (AIDLC-1)."""
+    return f"slice.type:{slice_id}"
+
+
+def slice_type_authority_problems(root):
+    """Verify running slice work types against checkpoint-attested opt-in records in full mode (AIDLC-1)."""
+    problems = []
+    for item in board(root)["running"]:
+        sid = item["id"]
+        item_type = (item.get("notes") or {}).get("type", "feature")
+        try:
+            row = recorded_opt_in(root, slice_type_setting(sid))
+        except Exception as exc:
+            problems.append(f"opt-in ledger cannot be read for slice {sid}: {exc}")
+            continue
+        recorded = row.get("value") if isinstance(row, dict) else None
+        if recorded in WORK_TYPE_PROFILES and recorded != item_type:
+            problems.append(
+                f"slice {sid} is recorded as type {recorded}, while .polyctl/board.md has {item_type}; "
+                f"restore type: {recorded} or re-type with polyctl slice edit {sid} --type {item_type}"
+            )
+    return problems
+
+
 def slice_boundary(item):
     """The declared review boundary for a parsed board item."""
     if not item:

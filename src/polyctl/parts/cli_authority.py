@@ -585,10 +585,22 @@ def cmd_verify(cfg, args):
         print(f"{C['red']}no usable .polyctl/gates.json{C['reset']}: {exc}")
         return 2
     declared = spec if isinstance(spec, dict) else {}
-    profile = args.profile or declared.get("default_profile", "quick")
+    try:
+        work_profile = A.active_work_profile(cfg)
+    except ValueError as exc:
+        print(f"verification refused: {exc}")
+        return 2
+    selected = work_profile["verify"]
+    profile = args.profile or (declared.get("default_profile", "quick") if selected == "default" else selected)
+    if selected != "default" and profile != selected:
+        print(f"work type {work_profile['type']} requires profile {selected}; run polyctl verify")
+        return 2
     names, problem = _profile_gates(spec, profile, cfg)
     if problem:
         print(f"{C['red']}no usable .polyctl/gates.json{C['reset']}: {problem}")
+        return 2
+    if work_profile["spec"] and "spec" not in names:
+        print("spec checks are required; add a spec gate to this verification profile in .polyctl/gates.json")
         return 2
     if not names:
         profiles = declared.get("profiles")
@@ -687,7 +699,7 @@ def cmd_verify(cfg, args):
 
     revs = A.reviews(root, cfg["reviews"], limit=1)
     rec = {"id": _verification_id(root), "at": datetime.now().isoformat(timespec="seconds"),
-           "schema": 2, "profile": profile, "gates_digest": gates_digest,
+           "schema": 2, "profile": profile, "gates_digest": gates_digest, "work_profile": work_profile,
            "by": "polyctl verify", "passed": ok,
            "gates": results, "plan_drift": drift,
            "candidate": candidate_before,
@@ -705,7 +717,7 @@ def cmd_verify(cfg, args):
            "review_verdict": revs[0][1] if revs else None,
            "head": A._git_text(root, "rev-parse", "--short", "HEAD"),
            # Size by kind, never one number (#34).
-           "candidate_size": _candidate_size_or_none(root, candidate_before),
+           "candidate_size": _candidate_size_or_none(root, candidate_before) if work_profile["size"] else None,
            # Which git measured the candidate, and that no shell or agent stood between (#51).
            "measured_by": A.measured_by(),
            # What a harness reads from the tree that changed and no person has seen (HARNESS-CONFIG).
@@ -1035,6 +1047,11 @@ def cmd_commit_ok(cfg, args):
         for reason in reasons:
             print(f"  {C['red']}·{C['reset']} {A.shown_text(reason)}")
         return 1
+    try:
+        work_profile = A.active_work_profile(cfg)
+    except ValueError as exc:
+        print(f"REFUSED: {exc}")
+        return 1
     strict = M.is_strict(cfg)
     matrix_resolution = None
     if strict:
@@ -1070,6 +1087,8 @@ def cmd_commit_ok(cfg, args):
                 and A.gate_definitions_digest(root, record.get("profile")) == record.get("gates_digest")
                 and not _verification_isolation_problem(root, record)):
             return False
+        if A.work_profile_problems(root, work_profile, record):
+            return False
         if record.get("passed"):
             return True
         waivable, _ = A.verification_waivable_gates(root, record)
@@ -1083,9 +1102,9 @@ def cmd_commit_ok(cfg, args):
 
     if getattr(args, "verify", False) and not verification_matches(ver):
         from types import SimpleNamespace
-        print(f"{C['dim']}verification stale or missing — running quick gates first{C['reset']}")
+        print(f"{C['dim']}verification stale or missing — running the work type's gates first{C['reset']}")
         cmd_verify(cfg, SimpleNamespace(
-            profile=getattr(args, "profile", None) or "quick", wait=900
+            profile=getattr(args, "profile", None), wait=900
         ))
         candidate = A.index_candidate(root)
         issues = A.candidate_worktree_issues(root, cfg, candidate)
@@ -1093,6 +1112,9 @@ def cmd_commit_ok(cfg, args):
         ver, ver_problem = _latest_verification_or_problem(root)
 
     reasons = []
+    reasons.extend(A.work_profile_problems(root, work_profile, ver))
+    if project_mode(cfg) == "full":
+        reasons.extend(A.slice_type_authority_problems(root))
     gates_waiver = None
     waivable_failed = None
     if not candidate["changed_paths"]:
@@ -1184,7 +1206,7 @@ def cmd_commit_ok(cfg, args):
         waiver, waiver_notes = A.review_waiver_for(root, running, candidate["digest"])
     except Exception as exc:
         waiver, waiver_notes = None, [f"waiver ledger is unreadable: {exc}"]
-    review_required = F.enabled(cfg, "review")
+    review_required = F.enabled(cfg, "review") or work_profile["reviewer_families"] == 2
     if "review" in F.unrecorded(cfg):
         # A config the implementer can write turned review off; it is off only on a person's record (FEATURE-RECORDED).
         reasons_note = ("review is off in .polyctl/config.json with no person's record, so it stays required: "
@@ -1211,6 +1233,7 @@ def cmd_commit_ok(cfg, args):
         why.extend(f"{name}: {reason}" for reason in _boundary_review_refusals(root, ev))
         # A boundary that lists criteria lands only when the review found every one met (CRITERIA-VERDICTS).
         why.extend(f"{name}: {reason}" for reason in A.criteria_refusals(ev))
+        why.extend(_work_review_refusals(cfg, work_profile, ev, matrix_resolution))
         fields["scope"] = reviewed_scope
         if strict:
             why.extend(f"{name}: {reason}" for reason in M.review_evidence_problems(matrix_resolution, ev))
@@ -1237,6 +1260,8 @@ def cmd_commit_ok(cfg, args):
             fields["rwho"] = who
         return fields, why
 
+    if work_profile["reviewer_families"] == 2:
+        waiver = None
     no_eligible = strict and not any(route["eligible"] for route in matrix_resolution["reviewers"])
     bound, bound_why = bound_review() if review_required and match and not no_eligible else (None, [])
     if not review_required:
@@ -1317,7 +1342,7 @@ def cmd_commit_ok(cfg, args):
             review=review_name, reviewer=rwho, candidate=candidate, scope=scope,
             waiver=primary_waiver, gates_waiver=extra_gates_waiver,
             waived_gates=waivable_failed if gates_waiver else None,
-            author=author, move_only=move_proof,
+            author=author, move_only=move_proof, work_profile=work_profile,
             **strict_authority,
         )
     except Exception as exc:
@@ -2399,6 +2424,15 @@ def _bound_commit_check(cfg, args):
     if grant and grant.get("granted") is True and grant.get("coordination"):
         return _coordination_commit_check(root, cfg, args, enrollment, candidate, grant, reasons)
 
+    try:
+        work_profile = A.active_work_profile(cfg)
+    except ValueError as exc:
+        print(f"COMMIT REFUSED: {exc}")
+        return 1
+    reasons.extend(A.slice_type_authority_problems(root))
+    if grant and not A.work_profile_matches(grant, work_profile):
+        reasons.append("slice work type changed since the grant; verify, review and request authority again")
+
     strict = M.is_strict(cfg)
     matrix_resolution = None
     if strict:
@@ -2510,6 +2544,8 @@ def _bound_commit_check(cfg, args):
         if isolation_problem:
             reasons.append(isolation_problem)
 
+    if verification:
+        reasons.extend(A.work_profile_problems(root, work_profile, verification))
     if grant and grant.get("granted") is True:
         review_name = grant.get("review")
         if review_name:
@@ -2533,6 +2569,7 @@ def _bound_commit_check(cfg, args):
                 reasons.extend(f"{match[0]}: {reason}" for reason in integrity_reasons)
                 reasons.extend(f"{match[0]}: {reason}" for reason in _boundary_review_refusals(root, match[3]))
                 reasons.extend(f"{match[0]}: {reason}" for reason in A.criteria_refusals(match[3]))
+                reasons.extend(_work_review_refusals(cfg, work_profile, match[3], matrix_resolution))
                 if match[3].get("scope") != grant.get("scope"):
                     reasons.append(
                         "granted review scope does not exactly match the persisted authority grant"
@@ -2562,6 +2599,8 @@ def _bound_commit_check(cfg, args):
             ):
                 reasons.append("review-bypassed strict grant unexpectedly names a reviewer")
             from . import features as F
+            if work_profile["reviewer_families"] == 2:
+                reasons.append("enterprise requires two reviewer families; a waiver cannot replace them")
             if F.enabled(cfg, "review"):
                 try:
                     running = [item["id"] for item in A.board(root)["running"]]

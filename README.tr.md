@@ -28,6 +28,7 @@ polyctl 0.7.0 macOS üzerinde geliştirilir ve desteklenir; Linux CI'da test pak
   yalnızca okuyan araçlarla çalışır.
 - **Araçlarını bırakmazsın.** `polyctl` her ajanın kendi oturum deposunu okur ve komut satırını sürer.
   Benimsemek, işini yeni bir şeyin içinde yeniden başlatmak demek değildir.
+- **Kontrolleri işin türüne uyarlar.** Dilim türleri kontrol kapsamını seçer: bugfix, poc, feature (varsayılan) veya enterprise; lite/full yaptırımı belirler ([dilimler](docs/slices.tr.md)).
 
 ## İlk gözden geçirilmiş commit'e beş dakika
 

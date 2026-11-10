@@ -1,7 +1,81 @@
 # Slices
 
+**English** | [Türkçe](slices.tr.md)
+
 A **slice** is one closed acceptance boundary, worked by one actor, in one lane. It is the
 unit everything else is counted against: rounds, cost, decisions, commits.
+
+## Work types
+
+A slice carries a work type in its board row, as `type: bugfix`, `type: poc`,
+`type: feature` or `type: enterprise`. A row without one is **feature**. The board
+shows the type, including that default.
+
+```bash
+polyctl slice add B8 "repair admission" --acceptance "duplicate claims are refused" --type bugfix
+polyctl slice edit B8 --type feature
+polyctl slice add P1 "spike cache" --acceptance "measure latency" --type poc
+```
+
+`slice add` uses the same acceptance and dependency checks as `board add`; it also
+accepts `--needs` and `--role`. `slice edit` changes the type while keeping the row's
+state, title and acceptance boundary. Adding or re-typing a slice is the
+architect's or a person's decision (refused to the implementer), recorded in the
+checkpoint-attested opt-in ledger so a hand-edited board row cannot lower a
+recorded type. After re-typing, verify and review again: verification, review and
+commit authority record the effective profile, and a different type or weight
+cannot reuse that evidence.
+
+**Mode decides enforcement; type decides weight.** Lite remains unenforced and
+full keeps the existing commit checks, including cross-family review and
+`commit-ok` for every slice type (including `poc`). Explicit verification and
+review use the type's weight in either mode. These are the defaults:
+
+| Type | Verification profile | Review | Size | Spec | Reviewer families |
+|---|---|---|---|---|---|
+| bugfix | quick | the staged diff and boundary, without surrounding source, a candidate checkout or section/lens passes | off | off | 1 |
+| poc | quick | existing full review | off | off | 1 |
+| feature | existing default (or explicit `-p`) | existing full review | existing tripwire | off | 1 |
+| enterprise | full | full review, then another family judges the whole boundary | existing tripwire | required | 2 |
+
+Verification still runs the declared commands: a diff-only bugfix review does
+not guess which tests to omit. Review's input byte limit and threat model still
+apply. `bugfix`, `poc` and `feature` preserve the existing review feature switch
+and recorded waiver rules; `enterprise` requires both model families and its
+passing spec gate even when review was switched off or a review waiver exists.
+
+The optional `work_types` table in `.polyctl/config.json` overrides these defaults;
+missing rows and fields inherit them:
+
+```json
+{
+  "work_types": {
+    "bugfix": {"verify": "quick", "review": "diff", "size": false, "spec": false, "reviewer_families": 1},
+    "poc": {"verify": "quick", "review": "full", "size": false, "spec": false, "reviewer_families": 1},
+    "feature": {"verify": "default", "review": "full", "size": true, "spec": false, "reviewer_families": 1},
+    "enterprise": {"verify": "full", "review": "full", "size": true, "spec": true, "reviewer_families": 2}
+  }
+}
+```
+
+`verify` names a profile in `.polyctl/gates.json`; `default` retains the existing
+profile selection. A named profile is required exactly, including when `-p` is
+supplied. Other fields can increase weight, but cannot remove a type's minimum
+gates. Unknown types, invalid values and mixed running types refuse with a repair
+message rather than choosing a lighter profile.
+
+Enterprise selects two distinct eligible model families from the existing
+reviewer chain (`reviewer.fallbacks`, or the capability matrix). Both answers
+are recorded in one review; either family's blocking findings refuse it.
+An unavailable or invalid second answer grants no new approval. A person's
+review cannot stand in for two model families. Non-default work profiles currently
+use configured reviewers rather than collected stand-in answers.
+
+The AIDLC-2 integration point is a gate named `spec` in the selected verification
+profile. It must run and pass; no spec implementation is supplied by AIDLC-1.
+Until the project declares that gate, enterprise verification refuses before
+running commands. This requirement also applies when another type enables
+`spec`.
 
 ## An acceptance boundary is mandatory
 

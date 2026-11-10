@@ -178,10 +178,15 @@ def build_parser(root=None, prog=None):
     sp.add_argument("action", choices=["check"])
     sp.add_argument("slice", help="the board item's id")
     sp.set_defaults(fn=cmd_spec)
-    sl = sub.add_parser("slice", help="start, block or abandon a slice, each move a line in the slice ledger; "
+    sl = sub.add_parser("slice", help="add or re-type, start, block or abandon a slice; moves enter the slice ledger; "
                                       "status: where one stands and how it got there")
-    sl.add_argument("action", nargs="?", choices=["start", "block", "abandon", "status"], default="status")
-    sl.add_argument("text", nargs="?", help="start, status, abandon: the item's id; block: what it waits on")
+    sl.add_argument("action", nargs="?", choices=["add", "edit", "start", "block", "abandon", "status"], default="status")
+    sl.add_argument("text", nargs="?", help="add, edit, start, status, abandon: the item's id; block: what it waits on")
+    sl.add_argument("title", nargs="?", help="add: the item's title")
+    sl.add_argument("--type", choices=sorted(A.WORK_TYPE_PROFILES), help="add/edit: work type (default feature)")
+    sl.add_argument("--acceptance", help="add: the acceptance boundary")
+    sl.add_argument("--needs", help="add: dependency ids, comma-separated")
+    sl.add_argument("--role", help="add: the role that takes the slice")
     sl.add_argument("--slice", help="block, abandon, status: the item (default: the running slice)")
     sl.add_argument("--why", help="abandon: why it is dropped, required; start: why, kept with the move")
     sl.add_argument("--waiting", help="block: who it waits on - human, architect, decision or external")

@@ -2334,6 +2334,10 @@ def _section_journal(root, evidence, boundary, sections, chain):
     # the key only through the claims it left room for (LANGUAGE-PROMPTS).
     keyed = [evidence.get("diff_digest"), boundary, [s["name"] for s in sections],
              [_route_key(route) for route in chain]]
+    if evidence.get("work_profile") and evidence["work_profile"] != dict(A.WORK_TYPE_PROFILES["feature"], type="feature"):
+        # Default feature keeps the legacy journal and its criterion verdicts; other weights must
+        # not relabel answers cached under lighter gates after re-typing (AIDLC-1).
+        keyed.append(evidence["work_profile"])
     if evidence.get("claims"):
         # A section answered against other claims, or none, is no answer about these.
         keyed.append(evidence["claims"].get("digest"))
@@ -3315,6 +3319,9 @@ def _person_read(evidence, boundary, criteria):
     """
     shown = {"diff": evidence.get("diff_digest"), "slice": evidence.get("slice"), "boundary": boundary,
              "criteria": [[criterion.get("id"), criterion.get("text")] for criterion in criteria or ()]}
+    if evidence.get("work_profile"):
+        # A person's digest also binds the gate weight they were shown (AIDLC-1).
+        shown["work_profile"] = evidence["work_profile"]
     return "sha256:" + A.hashlib.sha256(json.dumps(shown, sort_keys=True).encode(UTF8)).hexdigest()
 
 
@@ -3353,6 +3360,8 @@ def _show_person_review(person, diff, evidence, boundary, args, criteria=()):
         print(f"  {C['yellow']}the diff is not UTF-8{C['reset']}: it is shown escaped, whole - \\\\ is one backslash "
               "of the files and \\xNN one byte that is not UTF-8")
     print(f"  slice: {A.review_header_value(evidence.get('slice') or 'none running')}")
+    if evidence.get("work_profile"):
+        print(f"  work profile: {json.dumps(evidence['work_profile'], sort_keys=True)}")
     print(f"  boundary: {A.review_header_value(boundary)}")
     if criteria:
         print(f"  {C['dim']}it lists {len(criteria)} criteria; answer each in the findings file, on a line of its own: "
@@ -3832,6 +3841,11 @@ def cmd_review_submit(cfg, args):
     """
     root = cfg["root"]
     try:
+        work_profile = A.active_work_profile(cfg)
+    except ValueError as exc:
+        print(f"review refused: {exc}")
+        return 2
+    try:
         candidate = A.index_candidate(root)
     except RuntimeError as exc:
         print(f"{C['red']}{exc}{C['reset']}")
@@ -4183,6 +4197,89 @@ def cmd_reviews(cfg, args):
     return 0
 
 
+def _work_reviewer_family(route, strict=False):
+    """Only a declared family counts as an enterprise perspective (AIDLC-1)."""
+    family = (route.get("identity") or {}).get("family") if strict else _stated_family(route)
+    return str(family or "").strip().lower()
+
+
+def _work_review_refusals(cfg, profile, evidence, resolution=None):
+    """Validate the weight and both identities again at grant and commit time (AIDLC-1)."""
+    reasons = []
+    if not A.work_profile_matches(evidence, profile):
+        reasons.append("review used another work type; run polyctl review again")
+    if profile["reviewer_families"] < 2:
+        return reasons
+    extra = evidence.get("additional_review")
+    if not isinstance(extra, dict) or extra.get("verdict") != "APPROVED":
+        return reasons + ["enterprise requires approval by a second reviewer family; run polyctl review"]
+    if extra.get("diff_digest") != evidence.get("diff_digest"):
+        reasons.append("second reviewer did not judge this candidate diff; run polyctl review again")
+    strict = M.is_strict(cfg)
+    if strict:
+        identities = [evidence.get("reviewer_identity"), extra.get("reviewer_identity")]
+        routes = [next((route for route in (resolution or {}).get("reviewers", [])
+                        if route["eligible"] and route["identity"] == identity), {}) for identity in identities]
+    else:
+        identities = [evidence.get("reviewer") or {}, extra.get("reviewer") or {}]
+        routes = [_configured_reviewer(cfg, identity.get("id")) or {} for identity in identities]
+        for item, identity in zip((evidence, extra), identities):
+            tier, refusal = _recorded_review_tier(cfg, item, identity.get("id"))
+            if refusal:
+                reasons.append(f"enterprise reviewer is no longer eligible: {refusal}")
+    families = [_work_reviewer_family(route, strict) for route in routes]
+    from . import tiers as T
+    if not all(families) or len(set(families)) != 2 or T.PERSON_FAMILY in families:
+        reasons.append("enterprise needs two distinct configured model reviewer families")
+    if strict and not all(routes):
+        reasons.append("enterprise reviewer identity is no longer independently eligible")
+    counts = extra.get("counts") if isinstance(extra.get("counts"), dict) else {}
+    if (any(type(counts.get(key)) is not int or counts[key] < 0 for key in ("BLOCKER", "HIGH", "MEDIUM", "LOW"))
+            or counts.get("BLOCKER") or counts.get("HIGH")):
+        reasons.append("enterprise second review has no valid passing counts")
+    reasons.extend(A.criteria_refusals(extra))
+    return reasons
+
+
+def _second_work_review(cfg, chain, first, prompt, diff_bytes, tree, treeless, strict, criteria):
+    """Ask another eligible family the whole boundary and retain its own evidence (AIDLC-1)."""
+    family = _work_reviewer_family(first["used"], strict)
+    other = [route for route in chain if _work_reviewer_family(route, strict)
+             and _work_reviewer_family(route, strict) != family]
+    if not family or not other:
+        return None, None, "configure another eligible reviewer family in reviewer.fallbacks or the capability matrix"
+    invocation = _invoke_reviewer_chain(
+        cfg["root"], other, prompt, _review_timeout(cfg), strict,
+        primary=cfg.get("reviewer") if not strict else None, candidate=diff_bytes, tree=tree,
+        treeless=treeless, transport=S.get(cfg, "review.transport"))
+    invocation = _reask_once(
+        cfg, cfg["root"], invocation, prompt, _review_timeout(cfg), strict,
+        primary=cfg.get("reviewer") if not strict else None, candidate=diff_bytes, tree=tree,
+        treeless=treeless, transport=S.get(cfg, "review.transport"))
+    used = invocation["used"]
+    if used is None:
+        return None, None, "second reviewer family unavailable; retry polyctl review when it can answer"
+    out = invocation["attempt"]["out"]
+    values = {key: A.re.findall(rf"^{key}:[ \t]*([0-9]{{1,9}})[ \t]*\r?$", out, A.re.M)
+              for key in ("BLOCKER", "HIGH", "MEDIUM", "LOW")}
+    if A._review_verdict(out) not in ("APPROVED", "NEEDS_CHANGES") or any(len(v) != 1 for v in values.values()):
+        return None, None, "second reviewer returned an invalid verdict/count schema; retry polyctl review"
+    counts, raised = _decided_counts({key: int(value[0]) for key, value in values.items()}, _listed_findings(out))
+    extra = {"counts": counts, "verdict": "NEEDS_CHANGES" if counts["BLOCKER"] or counts["HIGH"] else "APPROVED",
+             "diff_digest": "sha256:" + A.hashlib.sha256(diff_bytes).hexdigest()}
+    if strict:
+        extra["reviewer_identity"] = used["identity"]
+    else:
+        extra["reviewer"] = {"id": used.get("id"), "family": used.get("family")}
+        extra["review_tier"] = _review_tier(cfg, used)[0]
+        problem = _tool_review_evidence(extra, used, invocation["attempt"])
+        if problem:
+            return None, None, problem
+    if criteria:
+        extra["criteria"] = A.criterion_verdicts(criteria, [out])
+    return extra, out, None
+
+
 def cmd_review(cfg, args):
     """Review the working tree with an actor that did not write it.
 
@@ -4238,10 +4335,27 @@ def cmd_review(cfg, args):
     impl = cfg.get("implementer") or {}
     rv = cfg.get("reviewer") or {}
     strict = M.is_strict(cfg)
+    commits = getattr(args, "commits", None)
+    try:
+        work_profile = (dict(A.WORK_TYPE_PROFILES["feature"], type="feature") if commits
+                        else A.active_work_profile(cfg))
+        if hasattr(args, "pinned_slice"):
+            item = next((item for items in A.board(root).values() for item in items
+                         if item["id"] == args.pinned_slice), None)
+            work_profile = A.work_type_profile(cfg, item)
+    except ValueError as exc:
+        print(f"review refused: {exc}")
+        return 2
     # An answer a person carried from a stand-in session; set only by collect-review (#75).
     carried = getattr(args, "carried", None)
     # A person reading the diff and recording the verdict; set only by person-review (REVIEW-TIERS).
     person = getattr(args, "person", None)
+    if not commits and carried and work_profile != dict(A.WORK_TYPE_PROFILES["feature"], type="feature"):
+        print("typed slices require a fresh configured review; re-type as feature to collect a stand-in answer")
+        return 2
+    if not commits and person and work_profile["reviewer_families"] == 2:
+        print("enterprise requires two model reviewer families; configure them and run polyctl review")
+        return 2
     # Who wrote a waived range under retrospective review; set only by catchup (#65).
     author = getattr(args, "author", None)
     if author is not None and not _author_families(author):
@@ -4374,7 +4488,7 @@ def cmd_review(cfg, args):
               "\\\\ and each byte that is not UTF-8 as \\xNN")
     # Size is a tripwire that asks a question, not a gate that reshapes the work (#34).
     size = trip = None
-    if candidate is not None:
+    if candidate is not None and work_profile["size"]:
         size = A.candidate_size(root, candidate)
         trip = A.size_tripwire(cfg, size)
         evidence["size"] = size
@@ -4420,6 +4534,8 @@ def cmd_review(cfg, args):
     # review the same bytes. Persist the board item ID and the reviewed boundary
     # in every structured artifact so round accounting has an explicit owner.
     evidence["slice"] = (running or {}).get("id")
+    if candidate is not None:
+        evidence["work_profile"] = work_profile
     evidence["boundary"] = boundary
     # Catch-up names the person who replaced its commit claims (TRIAGE-4-REST).
     if args.commits and getattr(args, "boundary_by", None):
@@ -4441,7 +4557,7 @@ def cmd_review(cfg, args):
         # And judged against what they were shown: the slice, the boundary and its criteria are read from the board
         # again here, which the implementer writes (REVIEW-PATH-HIGHS).
         if not _digest_read(person.get("digest"), _person_read(evidence, boundary, criteria)):
-            print(f"{C['red']}refused{C['reset']}: the diff, or the slice, boundary or criteria it is judged against, "
+            print(f"{C['red']}refused{C['reset']}: the diff, or the slice, boundary, criteria or work profile it is judged against, "
                   f"is not the one you read - the diff is {evidence['diff_digest']} and the slice "
                   f"{A.review_header_value(evidence.get('slice') or 'none running')} now; read it again with "
                   "polyctl person-review --by <name>")
@@ -4485,7 +4601,8 @@ def cmd_review(cfg, args):
                 print(f"{C['dim']}fallback {fallback.get('id') or 'reviewer'} not run: {refused}{C['reset']}")
                 continue
             chain.append(fallback)
-    sections, lenses = review_sections(cfg, running, statement, diff)
+    sections, lenses = (([], None) if candidate is not None and work_profile["review"] == "diff"
+                        else review_sections(cfg, running, statement, diff))
     # Claims and context share what the chain can carry beside the diff, built to the least a
     # route that may run can carry, each section measured with its question (REVIEW-BUDGET). The
     # prompt and its markers are in the project's language, and a Turkish one measures as it always
@@ -4535,7 +4652,7 @@ def cmd_review(cfg, args):
     prompt = language.text(cfg, "prompt.review", boundary=statement) \
         + threat_note + size_note + escape_note + f"\n\n{candidate_marker}\n" + diff
     budget = _review_context_budget(prompt, bound, share)
-    if person:
+    if person or candidate is not None and work_profile["review"] == "diff":
         context = None                          # a person reads the candidate, and what else they choose
     elif candidate is not None:
         limits = [path.rstrip("/") for path in (scope.get("paths") or [])]
@@ -4555,6 +4672,8 @@ def cmd_review(cfg, args):
     # was empty, and a finding about code the diff did not show was a guess (REVIEW-RANGE-TREE).
     review_tree = (candidate or {}).get("index_tree") or (A.range_end_tree(root, args.commits)
                                                           if args.commits and not person else None)
+    if candidate is not None and work_profile["review"] == "diff":
+        review_tree = None
     if review_tree:
         prompt += f"\n\n{_tree_note(cfg, candidate)}\n"
     # Every route is asked the criteria, a tool and a stand-in session too: their answers are read
@@ -4670,8 +4789,8 @@ def cmd_review(cfg, args):
             unavailable_body + "\nNo review took place. This file is not a round.\n",
             evidence=evidence, verdict="UNAVAILABLE",
         )
-        if candidate is not None:
-            # A person can carry the review to a session polyctl cannot reach (#75).
+        if candidate is not None and work_profile == dict(A.WORK_TYPE_PROFILES["feature"], type="feature"):
+            # Stand-in requests do not bind a type, so only the legacy feature profile may make one (AIDLC-1).
             try:
                 request = A.write_review_request(
                     root, cfg, candidate, scope, evidence.get("diff_digest"), boundary,
@@ -4686,6 +4805,8 @@ def cmd_review(cfg, args):
                       f"{request['path']}; a person carries it to another "
                       f"session and runs `polyctl collect-review {request['nonce']} --response <file> "
                       f"--model <model> --by <name>` on the answer.{C['reset']}")
+        if candidate is not None and work_profile != dict(A.WORK_TYPE_PROFILES["feature"], type="feature"):
+            print("this work profile requires configured reviewers; retry polyctl review when they are available")
         A.set_reviewer_state(
             root, pending_review=True, boundary=boundary[:200],
             until=None, reason=why[:200], at=int(time.time()),
@@ -4696,6 +4817,14 @@ def cmd_review(cfg, args):
               "reported immediately; only structurally transient routes were "
               f"retried once. Park the review and request human help.{C['reset']}")
         return 3
+    second_out = None
+    if candidate is not None and work_profile["reviewer_families"] == 2:
+        extra, second_out, problem = _second_work_review(
+            cfg, chain, invocation, prompt, diff_bytes, review_tree, treeless, strict, criteria)
+        if problem:
+            print(f"enterprise not reviewed: {problem}")
+            return 3
+        evidence["additional_review"] = extra
     out = invocation["attempt"]["out"]
     reviewer_executable = invocation["attempt"].get("binary") or "reviewer"
     # An answer that came through ACP says so wherever this review is recorded, valid or not (ACP-REVIEWER).
@@ -4809,6 +4938,10 @@ def cmd_review(cfg, args):
         # section's. The verdict below is still the counts'; `polyctl commit-ok` is where a criterion that is
         # not met, or was never judged, refuses (CRITERIA-VERDICTS).
         evidence["criteria"] = A.criterion_verdicts(criteria, invocation.get("answers") or [out])
+    if second_out is not None:
+        for key in sev:
+            sev[key] += evidence["additional_review"]["counts"][key]
+        out += "\n\n## Second reviewer family\n" + "\n".join("    " + line for line in second_out.splitlines())
     # Finding counts are the decision input; reviewer prose cannot quietly
     # override the published rule. MEDIUM and LOW remain non-blocking notes.
     # The artefact carries this adjudicated verdict, a line saying why it
@@ -4944,7 +5077,7 @@ def cmd_review(cfg, args):
     elif review_tier is None and not carried and not strict:
         print(f"{C['yellow']}tier{C['reset']}  not established: no implementer is configured, so the reviewer "
               "was compared with nobody — polyctl doctor")
-    unmet = A.criteria_refusals(evidence)
+    unmet = A.criteria_refusals(evidence) + A.criteria_refusals(evidence.get("additional_review") or {})
     if unmet:
         # Said here, where the implementer reads the verdict, rather than first at the refusal.
         print(f"{C['yellow']}criteria{C['reset']}  {len(unmet)} of {len(evidence['criteria'])} not met or not "

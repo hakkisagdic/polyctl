@@ -1335,8 +1335,17 @@ def _board_add(cfg, args, edit):
         return 2
     notes = [("acceptance", acceptance)] + ([("needs", ", ".join(needs))] if needs else []) \
         + ([("role", role)] if role else [])
+    if getattr(args, "type", None):
+        notes.append(("type", args.type))
     edit.append("queued", f"- [{iid}] {title}" + "".join(f" · {key}: {value}" for key, value in notes))
     edit.write()
+    if not getattr(args, "type", None):
+        try:
+            if A.recorded_opt_in(root, A.slice_type_setting(iid)) is not None:
+                A.record_opt_in(root, A.slice_type_setting(iid), "feature", A.invoking_role() or "polyctl")
+        except Exception as exc:
+            print(f"{C['red']}not recorded{C['reset']}: {exc}; slice type feature is not in force until it is")
+            return 1
     digest = A.plan_digest(root, iid)
     if digest:
         A.record_plan(root, iid, digest)       # the plan as admitted: later edits are measured against it
@@ -1437,15 +1446,17 @@ def _board_lines(cfg, facts=None):
                      f"dependencies satisfied{C['reset']}")
         for it in rd:
             role = f"  {C['cyan']}role:{shown(it['role'])}{C['reset']}" if it.get("role") else ""
-            lines.append(f"   {C['b']}{shown(it['id'])}{C['reset']}  {shown(it['title'])}{role}")
+            lines.append(f"   {C['b']}{shown(it['id'])}{C['reset']}  {shown(it['title'])}{role}  type:{shown(it['notes'].get('type', 'feature'))}")
     for st in ("running", "blocked", "queued", "verified", "done"):
         items = b[st]
         if not items:
             continue
         lines.append(f"\n{C['b']}{colours[st]}{st.upper()}{C['reset']} {C['dim']}({len(items)}){C['reset']}")
         for it in items:
+            display_notes = dict(it["notes"])
+            display_notes.setdefault("type", "feature")
             notes = "  ".join(f"{C['dim']}{shown(k)}:{C['reset']} {shown(v)}" if v
-                              else f"{C['dim']}{shown(k)}{C['reset']}" for k, v in it["notes"].items())
+                              else f"{C['dim']}{shown(k)}{C['reset']}" for k, v in display_notes.items())
             lines.append(f"   {C['b']}{shown(it['id'])}{C['reset']}  {shown(it['title'])}"
                          + (f"   {notes}" if notes else ""))
             if st in ("running", "queued"):
@@ -1738,6 +1749,11 @@ def _slice_abandon(cfg, args, edit):
                               "slice of its own")
     edit.move(iid, "rejected", {"abandoned": why}, by=role or "person", why=why)
     edit.write()
+    try:
+        if A.recorded_opt_in(cfg["root"], A.slice_type_setting(iid)) is not None:
+            A.record_opt_in(cfg["root"], A.slice_type_setting(iid), None, role or "polyctl")
+    except Exception:
+        pass
     print(f"{C['yellow']}abandoned{C['reset']}  {C['b']}{shown_text(iid)}{C['reset']}  {shown_text(item['title'])}  "
           f"{C['dim']}{state} → rejected, recorded in .polyctl/ledger/slices.jsonl{C['reset']}")
     if state in ("running", "blocked"):
@@ -1857,6 +1873,64 @@ def _slice_unreadable(problem):
     return 1
 
 
+def _slice_add(cfg, args, edit):
+    """Use the existing admission checks and board lock for typed slices (AIDLC-1)."""
+    args.id = args.text
+    args.type = args.type or "feature"
+    role = A.invoking_role()
+    if role == "implementer":
+        return _slice_refused("adding or re-typing a slice is the architect's decision or a person's (docs/roles.md)")
+    try:
+        A.work_type_profile(cfg, {"notes": {"type": args.type}})
+    except ValueError as exc:
+        return _slice_refused(str(exc))
+    iid = (args.id or "").strip()
+    if iid:
+        try:
+            A.recorded_opt_in(cfg["root"], A.slice_type_setting(iid))
+        except Exception as exc:
+            return _slice_unreadable(f"{type(exc).__name__}: {' '.join(str(exc).split())}")
+    code = _board_add(cfg, args, edit)
+    if code == 0:
+        try:
+            A.record_opt_in(cfg["root"], A.slice_type_setting(iid), args.type, role or "polyctl")
+        except Exception as exc:
+            print(f"{C['red']}not recorded{C['reset']}: {exc}; slice type {args.type} is not in force until it is")
+            return 1
+    return code
+
+
+def _slice_edit(cfg, args, edit):
+    """Re-type a row without moving it or changing its acceptance boundary (AIDLC-1)."""
+    role = A.invoking_role()
+    if role == "implementer":
+        return _slice_refused("adding or re-typing a slice is the architect's decision or a person's (docs/roles.md)")
+    if any((getattr(args, "acceptance", None), getattr(args, "needs", None), getattr(args, "role", None),
+            getattr(args, "why", None), getattr(args, "waiting", None), getattr(args, "boundary_file", None))):
+        return _slice_refused("slice edit changes --type only; use polyctl slice edit <id> --type feature")
+    places = _slice_places(edit.board, args.text)
+    if len(places) != 1 or not args.type or args.title:
+        return _slice_refused("name exactly one existing slice and --type; use polyctl slice edit <id> --type feature")
+    state, item = places[0]
+    try:
+        A.work_type_profile(cfg, {"notes": {"type": args.type}})
+    except ValueError as exc:
+        return _slice_refused(str(exc))
+    try:
+        A.recorded_opt_in(cfg["root"], A.slice_type_setting(item["id"]))
+    except Exception as exc:
+        return _slice_unreadable(f"{type(exc).__name__}: {' '.join(str(exc).split())}")
+    edit.move(item["id"], state, {"type": args.type})
+    edit.write()
+    try:
+        A.record_opt_in(cfg["root"], A.slice_type_setting(item["id"]), args.type, role or "polyctl")
+    except Exception as exc:
+        print(f"{C['red']}not recorded{C['reset']}: {exc}; slice type {args.type} is not in force until it is")
+        return 1
+    print(f"{A.shown_text(item['id'])}: type {args.type}; rerun this type's required gates before landing")
+    return 0
+
+
 def cmd_slice(cfg, args):
     """`polyctl slice start|block|abandon|status`: a slice's moves between the board's sections, each one recorded.
 
@@ -1866,10 +1940,13 @@ def cmd_slice(cfg, args):
     """
     for line in _mailbox_banner(cfg):
         print(line)
+    if args.action not in ("add", "edit") and (getattr(args, "type", None) or getattr(args, "title", None)):
+        return _slice_refused("--type and a title belong to slice add/edit; run the intended action again")
     if args.action == "status":
         return _slice_status(cfg, args)
     with A.BoardEdit(cfg["root"], hold=True) as edit:
-        return {"start": _slice_start, "block": _slice_block, "abandon": _slice_abandon}[args.action](cfg, args, edit)
+        return {"add": _slice_add, "edit": _slice_edit, "start": _slice_start,
+                "block": _slice_block, "abandon": _slice_abandon}[args.action](cfg, args, edit)
 
 
 def cmd_slices(cfg, args):

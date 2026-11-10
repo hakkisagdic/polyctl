@@ -887,13 +887,15 @@ def record_authority(root, granted, reasons, tree, verification, token=None,
                      matrix=None, role_bindings=None, implementer_identity=None,
                      reviewer_identity=None, waiver=None, gates_waiver=None,
                      waived_gates=None, author=None, move_only=None,
-                     coordination=None):
+                     coordination=None, work_profile=None):
     """Persist one hash-chained authority decision, raising on any broken prefix."""
     from .storage import append_chained_jsonl
     record = {"at": int(time.time()), "granted": bool(granted),
               "token": token, "reasons": reasons, "tree": tree,
               "verification": verification, "review": review,
               "reviewer": reviewer}
+    if work_profile is not None:
+        record["work_profile"] = work_profile
     if matrix is not None:
         record.update({
             "schema": 3,

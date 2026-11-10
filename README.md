@@ -93,6 +93,8 @@ the pre-commit hook refuses every other commit; push is never granted
   harness: kiro-cli ran untrusted tools all the same with no person to ask, so a Kiro reviewer
   runs as a read-only agent polyctl writes for it.
 
+- **Sizes the process to the work.** Slice types choose gate weight: bugfix, poc, feature (default), or enterprise; lite/full still decides enforcement ([slices](docs/slices.md)).
+
 Every command is in [docs/commands.md](docs/commands.md).
 
 ## Install
