@@ -1142,7 +1142,7 @@ def test_the_harnessrouter_adapter_composes_a_uhp_tool_reviewer_and_answers(monk
         "id": "resp_uhp_1",
         "object": "response",
         "status": "completed",
-        "model": "claude-sonnet-4-6",
+        "model": "claude-code/claude-sonnet-4-6",
         "output": [
             {
                 "type": "message",

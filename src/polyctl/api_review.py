@@ -200,7 +200,7 @@ def _uhp_content(answer):
     return top if isinstance(top, str) else ""
 
 
-def _uhp_problem(provider, model, answer):
+def _uhp_problem(provider, model, answer, harness_tag=None):
     """Refusal reason when a UHP `/responses` payload failed, fell back to another model, or answered under another model."""
     if not isinstance(answer, dict):
         return f"{provider} gave no answer for {model}"
@@ -211,8 +211,12 @@ def _uhp_problem(provider, model, answer):
     if meta.get("model_fallback"):
         return (f"{provider} answered for {model} after a model fallback, which polyctl refuses so a reviewer "
                 "cannot silently change model or family")
+    answered_harness = meta.get("harness_id")
+    if harness_tag and isinstance(answered_harness, str) and answered_harness.strip() and answered_harness.strip() != harness_tag:
+        return f"{provider} answered with harness {answered_harness.strip()!r}, not the requested {harness_tag!r}"
     answered_model = answer.get("model")
-    if isinstance(answered_model, str) and answered_model.strip() and answered_model.strip() != model:
+    accepted_models = {model, f"{harness_tag}/{model}"} if harness_tag else {model}
+    if isinstance(answered_model, str) and answered_model.strip() and answered_model.strip() not in accepted_models:
         return f"{provider} answered with model {answered_model.strip()!r}, not the requested {model!r}"
     return None
 
@@ -913,7 +917,7 @@ def main(argv=None):
             return refuse(f"{provider} answered HTTP {exc.code}{detail}", FAILED)
         except Exception as exc:
             return refuse(f"{provider} could not be asked ({type(exc).__name__}: {_scrub(str(exc), key)})", FAILED)
-        problem = _uhp_problem(provider, model, answer)
+        problem = _uhp_problem(provider, model, answer, harness_tag=harness_tag)
         if problem:
             return refuse(problem, FAILED)
         text = _uhp_content(answer)
