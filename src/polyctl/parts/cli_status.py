@@ -553,17 +553,24 @@ def _web_pages(root, args):
     def fleet():
         return "\n".join(render_fleet(WEB_COLUMNS))
 
+    def billing():
+        from . import billing as B
+        return web.render_billing(B.billing_facts(root))
+
     return {"/": ("panel", panel), "/board": ("board", board),
-            "/pipeline": ("pipeline", pipeline), "/fleet": ("fleet", fleet)}
+            "/pipeline": ("pipeline", pipeline), "/fleet": ("fleet", fleet),
+            "/billing": ("billing", billing)}
 
 
 def _web_api(root, args):
     """The JSON endpoints `polyctl watch --web` serves beside its pages (WEB-API): {path: compute}."""
+    from . import billing as B
     return {
         "/api/status": lambda: status_facts(_load_config_readonly(root), args.messages, shown=False),
         "/api/board": lambda: board_facts(_load_config_readonly(root), shown=False),
         "/api/pipeline": lambda: A.pipeline_facts(_load_config_readonly(root)),
         "/api/fleet": lambda: fleet_facts(),
+        "/api/billing": lambda: B.billing_facts(root),
     }
 
 

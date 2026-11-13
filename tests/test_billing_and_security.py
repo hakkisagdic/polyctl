@@ -9,7 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from polyctl import billing as B, cli, security as SEC, storage
+import http.client
+import threading
+from types import SimpleNamespace
+from polyctl import billing as B, cli, security as SEC, storage, web
 
 
 def test_plans_and_quote_calculations_try_and_usd():
@@ -312,3 +315,42 @@ def test_cli_billing_subcommands_end_to_end(project, capsys, monkeypatch):
     shutil.rmtree(Path(root) / ".polyctl" / "billing")
     assert cli.main(["-C", root, "security-scan", "--paths", "clean.py"]) == 1
     assert "BILLING GATE BLOCKED" in capsys.readouterr().out
+
+
+def test_web_billing_page_and_api_endpoint(project):
+    root = project["root"]
+    B.subscribe_plan(root, "pro", currency="TRY", provider_name="local")
+    B.record_usage(root, "review", units=10)
+    B.set_budget(root, cap_try=5000.0, hard_cap=True)
+
+    args = SimpleNamespace(messages=8, interval=15, port=0, all=False, web=True)
+    server = web.listen(cli._web_pages(root, args), "proj", 15, 0, api=cli._web_api(root, args))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=10)
+        conn.request("GET", "/billing")
+        resp = conn.getresponse()
+        html_body = resp.read().decode("utf-8")
+        assert resp.status == 200
+        assert "data-view=\"billing\"" in html_body
+        assert "data-section=\"security\"" in html_body
+        assert "Pro (Individual Professional)" in html_body
+        assert "SIMULATED" in html_body
+        assert "HEALTHY" in html_body
+        assert "<script" not in html_body.lower()
+
+        conn.request("GET", "/api/billing")
+        api_resp = conn.getresponse()
+        api_data = json.loads(api_resp.read().decode("utf-8"))
+        assert api_resp.status == 200
+        assert api_data["schema_version"] == 1
+        assert api_data["subscription"]["plan_id"] == "pro"
+        assert api_data["usage"]["used_units"] == 10
+        assert api_data["security"]["verdict"] == "PASS"
+        assert len(api_data["invoices"]) == 1
+        conn.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(5)

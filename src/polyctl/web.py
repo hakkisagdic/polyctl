@@ -70,6 +70,7 @@ pre { margin: 0; padding: 12px 16px 32px; overflow-x: auto; font: inherit; }
 .card-why { color: var(--muted); }
 .card-cmd { margin-top: 2px; word-break: break-all; }
 .steps { border-top: 1px solid var(--rule); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.billing-grid { display: grid; grid-template-columns: repeat(4, minmax(200px, 1fr)); gap: 12px; align-items: start; }
 """
 
 
@@ -180,6 +181,129 @@ def render_pipeline(facts):
         blocks.append('<section class="steps">\n' + "\n".join(lines) + "\n</section>")
     blocks.append("<div class=\"dim\">read-only: a person's step is command text only; nothing here runs a command.</div>")
     blocks.append("</div>")
+    return _Html("\n".join(blocks))
+
+
+def render_billing(facts):
+    """The FinOps & governance billing page (`/billing`), rendered on the server (P0-4).
+
+    Shows active open-core subscription tier, quota progress bar, FinOps budget cap status,
+    pre-commit security scan summary, and invoices. Read-only HTML, no scripts or forms.
+    """
+    sub = facts.get("subscription") or {}
+    usage = facts.get("usage") or {}
+    budget = usage.get("budget") or {}
+    security = facts.get("security") or {}
+    invoices = facts.get("invoices") or []
+
+    plan_name = _plain_escape(sub.get("plan_name") or "Community")
+    plan_id = _plain_escape(sub.get("plan_id") or "community")
+    sub_status = _plain_escape(sub.get("status") or "ACTIVE")
+    seats = int(sub.get("seats") or 1)
+    cycle = _plain_escape(sub.get("cycle") or "monthly")
+    provider = _plain_escape(sub.get("provider") or "local")
+
+    period = _plain_escape(usage.get("period") or "")
+    used_units = int(usage.get("used_units") or 0)
+    included_units = int(usage.get("included_units") or 50)
+    quota_pct = float(usage.get("quota_percent") or 0.0)
+    overage_units = int(usage.get("overage_units") or 0)
+    total_try = float(usage.get("total_spend_try") or 0.0)
+    total_usd = float(usage.get("total_spend_usd") or 0.0)
+    total_tokens = int(usage.get("total_tokens") or 0)
+
+    bar_width = 16
+    filled = max(0, min(bar_width, int(round(quota_pct * bar_width / 100.0))))
+    bar_col = "red" if quota_pct > 90 else ("yellow" if quota_pct > 75 else "green")
+    quota_bar = f'<span class="{bar_col}">{"█" * filled}{"░" * (bar_width - filled)}</span> {quota_pct:.1f}%'
+
+    if usage.get("blocked"):
+        if budget.get("hard_cap") and not usage.get("quota_exceeded"):
+            gate_badge = '<span class="red b">BLOCKED (HARD CAP)</span>'
+        elif usage.get("quota_exceeded") and not budget.get("hard_cap"):
+            gate_badge = '<span class="red b">BLOCKED (QUOTA EXCEEDED)</span>'
+        else:
+            gate_badge = '<span class="red b">BLOCKED (HARD CAP)</span>'
+    elif usage.get("exceeded"):
+        gate_badge = '<span class="yellow b">WARNING (CAP EXCEEDED)</span>'
+    else:
+        gate_badge = '<span class="green b">HEALTHY</span>'
+
+    cap_try_str = f"₺{budget['cap_try']:.2f}" if budget.get("cap_try") is not None else "none"
+    cap_usd_str = f"${budget['cap_usd']:.2f}" if budget.get("cap_usd") is not None else "none"
+    mode_str = "hard-cap" if budget.get("hard_cap") else "soft-cap"
+
+    sec_verdict = _plain_escape(security.get("verdict") or "PASS")
+    sec_counts = security.get("counts") or {}
+    sec_badge = (
+        '<span class="green b">PASS</span>'
+        if security.get("ok", True)
+        else f'<span class="red b">{sec_verdict}</span>'
+    )
+
+    sub_card = (
+        '<section class="column" data-section="subscription">\n'
+        f'<h2>subscription <span class="dim">({plan_id} · {sub_status})</span></h2>\n'
+        f'<div class="card"><div class="b">{plan_name}</div>'
+        f'<div class="card-why">{seats} seat(s) · {cycle} · provider: {provider}</div>'
+        f'<div class="card-cmd"><code>polyctl billing subscribe --plan pro --provider iyzico</code></div></div>\n'
+        '</section>'
+    )
+    quota_card = (
+        '<section class="column" data-section="quota">\n'
+        f'<h2>quota &amp; metering <span class="dim">({period})</span></h2>\n'
+        f'<div class="card"><div>{quota_bar} · <span class="b">{used_units:,} / {included_units:,}</span> units</div>'
+        f'<div class="card-why">overage: {overage_units:,} units · {total_tokens:,} tokens</div>'
+        f'<div class="card-cmd"><code>polyctl billing meter review</code></div></div>\n'
+        '</section>'
+    )
+    budget_card = (
+        '<section class="column" data-section="budget">\n'
+        f'<h2>finops spend gate · {gate_badge}</h2>\n'
+        f'<div class="card"><div>spend <span class="b">₺{total_try:.2f}</span> (${total_usd:.2f})</div>'
+        f'<div class="card-why">caps: TRY={_plain_escape(cap_try_str)} · USD={_plain_escape(cap_usd_str)} · {mode_str}</div>'
+        f'<div class="card-cmd"><code>polyctl billing budget --cap-try 5000 --hard-cap</code></div></div>\n'
+        '</section>'
+    )
+    security_card = (
+        '<section class="column" data-section="security">\n'
+        f'<h2>security scan · {sec_badge}</h2>\n'
+        f'<div class="card"><div>BLOCKER {int(sec_counts.get("BLOCKER") or 0)} · '
+        f'HIGH {int(sec_counts.get("HIGH") or 0)}</div>'
+        f'<div class="card-why">target: {_plain_escape(security.get("target") or "staged")}</div>'
+        f'<div class="card-cmd"><code>polyctl security-scan</code></div></div>\n'
+        '</section>'
+    )
+
+    inv_lines = [f'<div class="b">INVOICES <span class="dim">({len(invoices)})</span></div>']
+    if invoices:
+        for inv in invoices[:10]:
+            iid = _plain_escape(inv.get("invoice_id"))
+            issued = _plain_escape(inv.get("issued_at"))
+            iplan = _plain_escape(inv.get("plan_id"))
+            itotal = float(inv.get("total") or 0.0)
+            icurr = "₺" if inv.get("currency") == "TRY" else "$"
+            istatus = _plain_escape(inv.get("status") or "UNKNOWN")
+            iver = "verified" if inv.get("integrity_verified") else ("checksum-ok" if inv.get("checksum_matches") else "tampered")
+            inv_lines.append(
+                f'<div data-invoice="{iid}"><span class="b">{iid}</span> · {issued} · '
+                f'{iplan} · {istatus} · {icurr}{itotal:.2f} · <span class="dim">{iver}</span></div>'
+            )
+    else:
+        inv_lines.append('<div class="dim">no invoices recorded yet</div>')
+
+    blocks = [
+        '<div class="pipeline" data-view="billing">',
+        '<div class="billing-grid">',
+        sub_card,
+        quota_card,
+        budget_card,
+        security_card,
+        '</div>',
+        '<section class="steps">\n' + "\n".join(inv_lines) + "\n</section>",
+        '<div class="dim">read-only FinOps &amp; governance view: no scripts or forms.</div>',
+        '</div>',
+    ]
     return _Html("\n".join(blocks))
 
 
