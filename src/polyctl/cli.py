@@ -63,6 +63,7 @@ A._part("cli_pr", globals())
 A._part("cli_harness", globals())
 A._part("cli_install", globals())
 A._part("cli_completion", globals())
+from .security import cmd_security_scan
 
 
 def _prog_name(prog=None):
@@ -795,6 +796,10 @@ def build_parser(root=None, prog=None):
                                            "in bash, zsh, fish or PowerShell")
     cp.add_argument("shell", choices=list(COMPLETION_SHELLS), help="the shell the script is for")
     cp.set_defaults(fn=cmd_completion)
+    sc = sub.add_parser("security-scan", help="deterministic pre-commit secret, credential and policy scanner")
+    sc.add_argument("--paths", nargs="*", help="scan specific relative paths instead of the staged git index")
+    sc.add_argument("--json", action="store_true", help="print output as JSON")
+    sc.set_defaults(fn=cmd_security_scan)
     return p
 
 
