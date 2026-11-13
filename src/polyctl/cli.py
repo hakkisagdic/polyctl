@@ -63,6 +63,7 @@ A._part("cli_pr", globals())
 A._part("cli_harness", globals())
 A._part("cli_install", globals())
 A._part("cli_completion", globals())
+from .billing import cmd_billing, maybe_meter_cmd
 from .security import cmd_security_scan
 
 
@@ -796,6 +797,32 @@ def build_parser(root=None, prog=None):
                                            "in bash, zsh, fish or PowerShell")
     cp.add_argument("shell", choices=list(COMPLETION_SHELLS), help="the shell the script is for")
     cp.set_defaults(fn=cmd_completion)
+    bl = sub.add_parser("billing", help="open-core subscription tiers, iyzico/local payments, usage metering, FinOps spend caps and invoices")
+    bl.add_argument("action", nargs="?", default="status", choices=["status", "plans", "subscribe", "meter", "budget", "invoices"])
+    bl.add_argument("kind", nargs="?", choices=["review", "verify", "security_scan", "agent_run"], help="meter: operation kind (default review)")
+    bl.add_argument("--plan", choices=["community", "pro", "team", "enterprise"], help="subscribe: tier to activate")
+    bl.add_argument("--seats", type=int, default=1, help="subscribe: seat count")
+    bl.add_argument("--currency", choices=["TRY", "USD"], default="TRY", help="billing currency (default TRY)")
+    bl.add_argument("--cycle", choices=["monthly", "yearly"], default="monthly", help="billing cycle")
+    bl.add_argument("--provider", choices=["iyzico", "local"], default="iyzico", help="payment provider")
+    bl.add_argument("--customer", help="subscribe: customer or organization name")
+    bl.add_argument("--tax-id", dest="tax_id", help="subscribe: tax or national identity number")
+    bl.add_argument("--payment-token", dest="payment_token", help="subscribe: iyzico checkout token to verify")
+    bl.add_argument("--model", help="meter: model identifier")
+    bl.add_argument("--actor", help="meter: actor or role identifier")
+    bl.add_argument("--prompt-tokens", dest="prompt_tokens", type=int, default=0)
+    bl.add_argument("--completion-tokens", dest="completion_tokens", type=int, default=0)
+    bl.add_argument("--cost-usd", dest="cost_usd", type=float, default=None)
+    bl.add_argument("--cost-try", dest="cost_try", type=float, default=None)
+    bl.add_argument("--units", type=int, default=1)
+    bl.add_argument("--cap-try", dest="cap_try", type=float, default=None, help="budget: monthly TRY cap")
+    bl.add_argument("--cap-usd", dest="cap_usd", type=float, default=None, help="budget: monthly USD cap")
+    bl.add_argument("--hard-cap", dest="hard_cap", action="store_true", default=None, help="budget: block when cap exceeded")
+    bl.add_argument("--soft-cap", dest="hard_cap", action="store_false", help="budget: warn without blocking")
+    bl.add_argument("--check", action="store_true", help="budget: exit 1 when a hard spend cap or quota is exceeded")
+    bl.add_argument("--invoice-id", dest="invoice_id", help="invoices: filter by invoice id")
+    bl.add_argument("--json", action="store_true", help="print output as JSON")
+    bl.set_defaults(fn=cmd_billing)
     sc = sub.add_parser("security-scan", help="deterministic pre-commit secret, credential and policy scanner")
     sc.add_argument("--paths", nargs="*", help="scan specific relative paths instead of the staged git index")
     sc.add_argument("--json", action="store_true", help="print output as JSON")
@@ -855,7 +882,8 @@ def main(argv=None, prog=None):
         command = f"{prog} {args.cmd}"
         root = A.find_root(args.root)
         record = args.cmd not in ("export", "spec") and not (args.cmd == "watch" and getattr(args, "web", False))
-        return args.fn(A.load_config(root, record=record), args) or 0
+        cfg = A.load_config(root, record=record)
+        return maybe_meter_cmd(cfg["root"], args, lambda: args.fn(cfg, args) or 0)
     except KeyboardInterrupt:
         return 130
     except LedgerLockTimeout as exc:
