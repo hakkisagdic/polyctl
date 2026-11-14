@@ -65,6 +65,7 @@ A._part("cli_install", globals())
 A._part("cli_completion", globals())
 from .billing import cmd_billing, maybe_meter_cmd
 from .security import cmd_security_scan
+from .compliance import cmd_compliance
 
 
 def _prog_name(prog=None):
@@ -827,6 +828,13 @@ def build_parser(root=None, prog=None):
     sc.add_argument("--paths", nargs="*", help="scan specific relative paths instead of the staged git index")
     sc.add_argument("--json", action="store_true", help="print output as JSON")
     sc.set_defaults(fn=cmd_security_scan)
+    cmp = sub.add_parser("compliance", help="enterprise compliance and audit evidence bundle export and verification (SOC 2, ISO/IEC 42001, KVKK)")
+    cmp.add_argument("action", nargs="?", default="status", choices=["status", "export", "verify"])
+    cmp.add_argument("target", nargs="?", help="verify: compliance bundle id (CMP-YYYYMMDD-...) or path to bundle JSON file")
+    cmp.add_argument("--framework", choices=["soc2", "iso42001", "kvkk", "all"], default="all", help="compliance framework to evaluate or export (default all)")
+    cmp.add_argument("--out", metavar="FILE", help="export: also write the signed evidence bundle JSON to FILE")
+    cmp.add_argument("--json", action="store_true", help="print output as JSON")
+    cmp.set_defaults(fn=cmd_compliance)
     return p
 
 

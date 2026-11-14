@@ -18,7 +18,7 @@
 | **#14** | Maliyet Bütçe Limitleri (Spend Caps), Kota Kesici ve Uyarılar | `yok` | **P0-2** | **P0** | 5 | 5 | 2 | **12.5** | `[x] Tamamlandı` |
 | **#7** | Pre-Commit Gizli Anahtar (Secret), PII ve Güvenlik Politikası Tarayıcısı | `yok` | **P0-3** | **P0** | 4 | 5 | 2 | **10.0** | `[x] Tamamlandı` |
 | **#15** | Yerel/Web Görsel Yönetişim, Filo ve FinOps Panosu (Web UI Dashboard) | `yok` | **P0-4** | **P0** | 5 | 5 | 3 | **8.3** | `[x] Tamamlandı` |
-| **#10** | Kurumsal Uyumluluk Dışa Aktarımı (SOC 2 / ISO 42001 / KVKK İmzalı Kanıt Paketi) | `yok` | **P1-1** | **P1** | 5 | 4 | 4 | **5.0** | `[ ] Bekliyor` |
+| **#10** | Kurumsal Uyumluluk Dışa Aktarımı (SOC 2 / ISO 42001 / KVKK İmzalı Kanıt Paketi) | `yok` | **P1-1** | **P1** | 5 | 4 | 4 | **5.0** | `[x] Tamamlandı` |
 | **#11** | Ekip Rol Tabanlı Yetkilendirme (RBAC) ve Politika-Kod (`policy-as-code`) Motoru | `kısmi` | **P1-2** | **P1** | 4 | 4 | 3 | **5.3** | `[ ] Bekliyor` |
 | **#8** | PR / CI-CD Otomatik İnceleme Entegrasyonu (GitHub Actions / GitLab CI / SARIF) | `kısmi` | **P1-3** | **P1** | 4 | 4 | 3 | **5.3** | `[ ] Bekliyor` |
 | **#17** | Dış Bildirim ve İş Akışı Kancaları (Slack / Discord / Webhook / Jira) | `yok` | **P2-1** | **P2** | 3 | 3 | 3 | **3.0** | `[ ] Bekliyor` |
@@ -63,9 +63,20 @@
 
 ---
 
-## 3. P1 ve P2 İş Kalemleri (Sonraki Fazlar)
+## 3. P1 ve P2 İş Kalemleri (Kurumsal Uyumluluk, RBAC ve Ekosistem)
 
-- **[ ] P1-1 (`#10`, Skor `5.0`, Efor `4`):** Kurumsal Uyumluluk ve Denetim Kanıt Paketi Dışa Aktarımı (SOC 2 / ISO 42001 / KVKK imzalı manifest).
+### [x] P1-1: Kurumsal Uyumluluk ve Denetim Kanıt Paketi Dışa Aktarımı (`compliance`)
+- **Matris Kalemi:** `#10` (`yok` → `var`) · **Skor:** `5.0` · **Efor:** L (4) · **Bağımlılık:** `P0-1`, `P0-2`, `P0-3`.
+- **Kapsam:** `src/polyctl/compliance.py` ve `polyctl compliance` komutu:
+  - SOC 2 Type II (`CC6.1`, `CC7.2`, `CC8.1`), ISO/IEC 42001 (`A.6.2`, `A.8.4`, `A.9.3`) ve KVKK Madde 12 (`KVKK-M12.1`, `KVKK-M12.2`) kontrol eşlemeleri.
+  - Tüm hash-zincirli defterlerin (`authority.jsonl`, `verifications.jsonl`, `reviews.jsonl`, `waivers.jsonl`, `decisions.jsonl`, `plans.jsonl`, `opt-ins.jsonl`, `slices.jsonl`, `.polyctl/billing/usage.jsonl`) zincir bütünlüğü, `security-scan` PII/sır temizliği, FinOps bütçe durumu ve Git trailer (`Polyctl-Grant`, `Polyctl-Verification`, `Polyctl-Review`) kanıtlarını toplar.
+  - Kanıt paketini `.polyctl/compliance/bundles` dizinine ve `.polyctl/compliance/state.json` durum dosyasına SHA-256 (`bundle_digest`) ve `POLYCTL_COMPLIANCE_SIGNING_KEY` tanımlıysa HMAC-SHA256 (`integrity_sha256`, `integrity_verified: True`) imzalı olarak yazar; makine kontrol noktası (`checkpoint_path()`) ve canlı defter özetleriyle çapraz doğrular.
+- **Kabul Kriterleri:**
+  1. `polyctl compliance status --framework all --json` SOC 2, ISO 42001 ve KVKK kontrollerini ve defter bütünlüğünü raporlar.
+  2. `polyctl compliance export --framework all --json` imzalı kanıt paketini üretir; bozuk/onaysız defter varsa kapalı-güvenli (`1`) reddeder.
+  3. `polyctl compliance verify CMP-20261113-00000000` paketin SHA-256/HMAC-SHA256 imzasını, checkpoint kaydını ve canlı defter önek özetlerini doğrular; müdahale varsa `1` koduyla çıkar.
+
+### Diğeri Bekleyen Kalemler
 - **[ ] P1-2 (`#11`, Skor `5.3`, Efor `3`):** Ekip Rol Tabanlı Yetkilendirme (RBAC) ve Politika-Kod (`policy-as-code`) Motoru.
 - **[ ] P1-3 (`#8`, Skor `5.3`, Efor `3`):** CI/CD Otomatik İnceleme ve SARIF 2.1.0 / JUnit Raporlama Entegrasyonu.
 - **[ ] P2-1 (`#17`, Skor `3.0`, Efor `3`):** Dış Bildirim ve İş Akışı Kancaları (Slack / Discord / Genel Webhook).
