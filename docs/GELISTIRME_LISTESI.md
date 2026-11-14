@@ -19,7 +19,7 @@
 | **#7** | Pre-Commit Gizli Anahtar (Secret), PII ve Güvenlik Politikası Tarayıcısı | `yok` | **P0-3** | **P0** | 4 | 5 | 2 | **10.0** | `[x] Tamamlandı` |
 | **#15** | Yerel/Web Görsel Yönetişim, Filo ve FinOps Panosu (Web UI Dashboard) | `yok` | **P0-4** | **P0** | 5 | 5 | 3 | **8.3** | `[x] Tamamlandı` |
 | **#10** | Kurumsal Uyumluluk Dışa Aktarımı (SOC 2 / ISO 42001 / KVKK İmzalı Kanıt Paketi) | `yok` | **P1-1** | **P1** | 5 | 4 | 4 | **5.0** | `[x] Tamamlandı` |
-| **#11** | Ekip Rol Tabanlı Yetkilendirme (RBAC) ve Politika-Kod (`policy-as-code`) Motoru | `kısmi` | **P1-2** | **P1** | 4 | 4 | 3 | **5.3** | `[ ] Bekliyor` |
+| **#11** | Ekip Rol Tabanlı Yetkilendirme (RBAC) ve Politika-Kod (`policy-as-code`) Motoru | `kısmi` | **P1-2** | **P1** | 4 | 4 | 3 | **5.3** | `[x] Tamamlandı` |
 | **#8** | PR / CI-CD Otomatik İnceleme Entegrasyonu (GitHub Actions / GitLab CI / SARIF) | `kısmi` | **P1-3** | **P1** | 4 | 4 | 3 | **5.3** | `[ ] Bekliyor` |
 | **#17** | Dış Bildirim ve İş Akışı Kancaları (Slack / Discord / Webhook / Jira) | `yok` | **P2-1** | **P2** | 3 | 3 | 3 | **3.0** | `[ ] Bekliyor` |
 | **#12** | Çoklu Depo / Organizasyonel Filo Senkronizasyonu ve Merkezi Denetim | `yok` | **P2-2** | **P2** | 4 | 3 | 4 | **3.0** | `[ ] Bekliyor` |
@@ -76,8 +76,17 @@
   2. `polyctl compliance export --framework all --json` imzalı kanıt paketini üretir; bozuk/onaysız defter varsa kapalı-güvenli (`1`) reddeder.
   3. `polyctl compliance verify CMP-20261113-00000000` paketin SHA-256/HMAC-SHA256 imzasını, checkpoint kaydını ve canlı defter önek özetlerini doğrular; müdahale varsa `1` koduyla çıkar.
 
+### [x] P1-2: Ekip Rol Tabanlı Yetkilendirme (RBAC) ve Politika-Kod (`policy-as-code`) Motoru (`policy`)
+- **Matris Kalemi:** `#11` (`kısmi` → `var`) · **Skor:** `5.3` · **Efor:** M (3) · **Bağımlılık:** `P0-2`, `P0-3`.
+- **Kapsam:** `src/polyctl/policy.py` ve `polyctl policy` komutu:
+  - 6 kurumsal rol (`owner`, `admin`, `architect`, `reviewer`, `implementer`, `auditor`) ve izin matrisi (`policy:write`, `billing:write`, `compliance:export`, `commit:grant`, `code:write`, `review:submit`, `security:scan`, `audit:read`).
+  - `.polyctl/policy/policy.json` içinde SHA-256 (`policy_digest`) ve `POLYCTL_POLICY_SIGNING_KEY` tanımlıysa HMAC-SHA256 (`integrity_sha256`, `integrity_verified: True`) imzalı, makine kontrol noktası (`checkpoint_path()`) ile çapraz doğrulamalı politika-kod (`policy-as-code`) motoru (`max_product_lines`, `forbidden_paths_for_implementer`, `require_security_scan`, `require_cross_family_review`, `require_budget_ok`).
+- **Kabul Kriterleri:**
+  1. `polyctl policy init --json` ve `polyctl policy status --json` aktif RBAC bağlarını ve politika kurallarını doğrular.
+  2. `polyctl policy bind --actor dev-lead --role architect --json` aktör-rol bağını imzalı olarak kaydeder.
+  3. `polyctl policy check --actor implementer --permission code:write --json` yasaklı yolları, satır limitini, güvenlik taramasını, bütçe kapısını ve çapraz model ailesi kuralını denetler; ihlalde `1` koduyla çıkar.
+
 ### Diğeri Bekleyen Kalemler
-- **[ ] P1-2 (`#11`, Skor `5.3`, Efor `3`):** Ekip Rol Tabanlı Yetkilendirme (RBAC) ve Politika-Kod (`policy-as-code`) Motoru.
 - **[ ] P1-3 (`#8`, Skor `5.3`, Efor `3`):** CI/CD Otomatik İnceleme ve SARIF 2.1.0 / JUnit Raporlama Entegrasyonu.
 - **[ ] P2-1 (`#17`, Skor `3.0`, Efor `3`):** Dış Bildirim ve İş Akışı Kancaları (Slack / Discord / Genel Webhook).
 - **[ ] P2-2 (`#12`, Skor `3.0`, Efor `4`):** Çoklu Depo / Organizasyonel Filo FinOps ve Kalite Toplayıcısı.

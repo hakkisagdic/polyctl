@@ -66,6 +66,7 @@ A._part("cli_completion", globals())
 from .billing import cmd_billing, maybe_meter_cmd
 from .security import cmd_security_scan
 from .compliance import cmd_compliance
+from .policy import cmd_policy
 
 
 def _prog_name(prog=None):
@@ -835,6 +836,21 @@ def build_parser(root=None, prog=None):
     cmp.add_argument("--out", metavar="FILE", help="export: also write the signed evidence bundle JSON to FILE")
     cmp.add_argument("--json", action="store_true", help="print output as JSON")
     cmp.set_defaults(fn=cmd_compliance)
+    pol = sub.add_parser("policy", help="team RBAC and policy-as-code enforcement engine")
+    pol.add_argument("action", nargs="?", default="status", choices=["status", "init", "bind", "set-rules", "check"])
+    pol.add_argument("--actor", help="bind/check: actor or role identifier")
+    pol.add_argument("--role", choices=["owner", "admin", "architect", "reviewer", "implementer", "auditor"], help="bind: RBAC role to assign")
+    pol.add_argument("--permission", help="check: specific RBAC permission to verify (e.g. code:write, commit:grant, compliance:export)")
+    pol.add_argument("--max-product-lines", dest="max_product_lines", type=int, default=None, help="set-rules: maximum staged product lines")
+    pol.add_argument("--forbidden-paths", dest="forbidden_paths", nargs="*", default=None, help="set-rules: glob patterns forbidden for implementer")
+    pol.add_argument("--require-security-scan", dest="require_security_scan", action="store_true", default=None, help="set-rules: require clean security scan")
+    pol.add_argument("--no-require-security-scan", dest="require_security_scan", action="store_false", help="set-rules: disable security scan requirement")
+    pol.add_argument("--require-cross-family-review", dest="require_cross_family_review", action="store_true", default=None, help="set-rules: require cross-family reviewer")
+    pol.add_argument("--no-require-cross-family-review", dest="require_cross_family_review", action="store_false", help="set-rules: allow same-family reviewer in policy")
+    pol.add_argument("--require-budget-ok", dest="require_budget_ok", action="store_true", default=None, help="set-rules: require FinOps budget gate pass")
+    pol.add_argument("--no-require-budget-ok", dest="require_budget_ok", action="store_false", help="set-rules: disable FinOps budget gate check in policy")
+    pol.add_argument("--json", action="store_true", help="print output as JSON")
+    pol.set_defaults(fn=cmd_policy)
     return p
 
 
