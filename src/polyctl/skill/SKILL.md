@@ -47,7 +47,8 @@ Anything not forbidden there and inside the slice's scope is allowed.
 
 ## 3. The loop, per slice
 
-1. `polyctl_inbox` (or read `agent-mail/`): apply or reject each message, then
+1. Call `polyctl_status` and `polyctl_inbox` first when the `polyctl` MCP server is connected
+   (or run `polyctl status` and read `agent-mail/`): apply or reject each message, then
    `polyctl_ack`. Acknowledge only after acting.
 2. `polyctl writers` once — exit 0 means you are the only writer. Exit 1: stop, report,
    do not kill anything.
@@ -163,7 +164,10 @@ it stands. The same change proposed twice is one proposal.
 
 ## 5. Measure before concluding
 
-Never conclude from a name, a cwd, an mtime or a diff size. `polyctl status` (who is
+Never conclude from a name, a cwd, an mtime or a diff size. Prefer the `polyctl` MCP
+tools when connected (`polyctl_status`, `polyctl_board`, `polyctl_next`,
+`polyctl_decisions`, `polyctl_notices`, `polyctl_watchdog`) because MCP structured responses
+bypass shell output proxies; otherwise run `polyctl status` (who is
 working, quota, problems), `polyctl board` (READY / running / blocked with `needs:`),
 `polyctl next` (which command stands in the way now, and whose hand holds it: a
 person's items first, then the staged candidate's landing chain;
@@ -241,9 +245,13 @@ setup reviews with another model of the implementer's family only when a person 
 person`); `polyctl doctor` names the tier in force.
 
 The MCP server is registered for detected agents (`.mcp.json` for Claude Code,
-`.kiro/settings/mcp.json` for Kiro), each registration naming a role when the harnesses
+`.kiro/settings/mcp.json` for Kiro; run `polyctl init --no-mcp` to skip MCP
+registration when using the CLI/files-only workflow), each registration naming a role (`--role`) when the harnesses
 reading it hold only one here: that server lists only that role's tools, and a reviewer's
-only reads. Ask the human before running init; afterwards
+only reads (`polyctl_status`, `polyctl_board`, `polyctl_candidate`). In Claude Code, project `.mcp.json` entries start in
+`Pending approval` until the human approves the `.mcp.json` prompt in `claude` (or adds the role-scoped command to local scope
+with `claude mcp add -s local`); in Antigravity (`agy`), a person can register the server in user scope with `agy mcp add`.
+Ask the human before running init; afterwards
 tell them to restart the app in this directory and run `polyctl doctor`. Add `--watchdog`
 (or `polyctl watchdog install`) for unattended runs; it installs a companion job that runs
 `polyctl doctor --check` every fifteen minutes as the second, independent check.
@@ -355,6 +363,10 @@ start. Run anything in a repository whose owner has not approved it.
 | `polyctl projects` / `polyctl adapters` | every workspace with a local agent session; supported agents |
 | `polyctl mcp serve [--project all]` / `polyctl mcp config` | the MCP server (tools, read-only resources and prompts) and its client config; with `--role <role>`, that role's tools alone; with `--project all`, every registered project |
 | `polyctl a2a serve` / `polyctl a2a-mcp serve` | A2A: serve the board; bridge remote agents into MCP |
+| `polyctl billing [status\|plans\|subscribe\|meter\|invoices\|budget]` | plan tiers, usage metering, budget check and invoice ledger |
+| `polyctl security-scan [--json]` | scan staged or specified paths for secrets, API keys and PII |
+| `polyctl compliance [status\|export\|verify]` | export and verify compliance and audit evidence bundles |
+| `polyctl policy [status\|init\|bind\|set-rules\|check]` | role bindings and policy-as-code checks |
 
 Every time a command takes (`--since`, `--until`, `--days`, `--window`, `polyctl since`,
 `polyctl mail compact`) is written `30m`, `2h`, `1d`, `1w`, `today`, `yesterday` or a date

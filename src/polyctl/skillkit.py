@@ -169,7 +169,7 @@ def _write_marked(root, rel, body, header=""):
 
 RULE_POINTER = ("## polyctl\n\nThis repository runs under polyctl. Load the `polyctl` playbook "
                 "(`.polyctl/PLAYBOOK.md`, or the `polyctl` skill) before coordinating, implementing or reviewing "
-                "here, and start every turn with `polyctl status` and the mailbox.")
+                "here, and start every turn with `polyctl_status` (or `polyctl status`) and `polyctl_inbox` (the mailbox).")
 
 
 def rule_file_names(root=None):
@@ -461,9 +461,11 @@ def next_steps(agents, registered):
     names = [adapter.get("name") or ident for ident, adapter in setup_adapters(None, agents)]
     lines = []
     if names:
+        approval = (" Approve the `.mcp.json` project server in Claude Code when prompted "
+                    "so its role-scoped entry loads.") if "claude-code" in registered else ""
         lines.append(f"Start or restart {' / '.join(names)} in this directory so the `polyctl` MCP "
                      f"tools load (registered: "
-                     f"{', '.join(f'{k}: {v.splitlines()[0]}' for k, v in registered.items())}).")
+                     f"{', '.join(f'{k}: {v.splitlines()[0]}' for k, v in registered.items())}).{approval}")
     else:
         lines.append("No MCP-capable agent detected; the mailbox protocol works from the files alone.")
     lines.append("Then `polyctl doctor` — binaries, channels, watchdog — and `polyctl email setup` if it says no channel.")
