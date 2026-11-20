@@ -20,6 +20,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Behaviour changes
 
+- When `catchup.every_hours` is above 0 and a review or gates waiver is open, the watchdog starts one detached `polyctl catchup --limit` (`catchup.limit`) that spends the reviewer's quota. The default `0` starts none, and a person runs `polyctl catchup` as before. Exit 1 tells a person once (`catchup-failed`, six hours); exit 3 waits out the interval ([watchdog](docs/watchdog.md), [configuration](docs/configuration.md)).
 - `polyctl mode lite --by <name>` now records the `HEAD` it started at so `polyctl mode show` counts the commits in the lite window and `polyctl mode full --by <name>` can preview (`--plan`), review (`--review-lite all|<sha>[,<sha>...]|none`), queue board and mail fix items for findings, retry pending reviews in `polyctl catchup`, and record unselected window commits as accepted unreviewed on the ledger (LITE-CATCHUP-1).
 
 ### Fixes

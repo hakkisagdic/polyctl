@@ -1443,16 +1443,11 @@ _CATCHUP_RECORD = (
 
 
 def _catchup_log_path(root):
-    return os.path.join(STATE_DIR, f"catchup-log-{A.project_key(root)}")
+    return os.path.join(STATE_DIR, A.project_file_name("catchup-log", A.project_key(root)))
 
 
 def _catchup_status_path(root):
-    return os.path.join(STATE_DIR, f"catchup-status-{A.project_key(root)}")
-
-
-def _catchup_command(root, limit):
-    """The catch-up a schedule starts: the project's own, bounded, with nothing a person would state."""
-    return [sys.executable, "-m", "polyctl", "-C", root, "catchup", "--limit", str(limit)]
+    return os.path.join(STATE_DIR, A.project_file_name("catchup-status", A.project_key(root)))
 
 
 def _pid_exists(pid):
@@ -1593,13 +1588,15 @@ def _start_catchup(root, cfg, st):
         os.remove(status)
     except OSError:
         pass
-    cmd = _catchup_command(root, limit)
     try:
         with open(log, "a", encoding=UTF8) as fh:
             fh.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} catchup ===\n")
             fh.flush()
+            # The recorder writes this catch-up's exit where the next cycle can read it, then runs
+            # `polyctl -C <root> catchup --limit N`. Nothing a person states is passed: no --author-family, no --by.
             proc = subprocess.Popen(
-                [sys.executable, "-c", _CATCHUP_RECORD, status, *cmd],
+                [sys.executable, "-c", _CATCHUP_RECORD, status, sys.executable, "-m", "polyctl", "-C", root,
+                 "catchup", "--limit", str(limit)],
                 cwd=A.self_child_cwd(), stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT,
                 start_new_session=True, env=A.self_child_env())
     except OSError as exc:
