@@ -180,6 +180,13 @@ SETTINGS = {
     "waivers.max_hours": Setting(
         168, int, 1, None, "project",
         "the longest a review waiver may be granted for"),
+    "catchup.every_hours": Setting(
+        0, int, 0, None, "project",
+        "hours between catch-ups the watchdog starts; 0: never, and a person runs polyctl catchup. "
+        "A scheduled catch-up spends the reviewer's quota"),
+    "catchup.limit": Setting(
+        1, int, 1, None, "project",
+        "reviews and gate re-runs one scheduled catch-up may start"),
     "alarms.red_after_minutes": Setting(
         60, int, 1, None, "project",
         "minutes an orange alarm stands before it turns red and sends one e-mail"),

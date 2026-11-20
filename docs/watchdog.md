@@ -53,8 +53,8 @@ nothing else:
     [alarms.md](alarms.md#after-a-silence).
 11. **It starts nothing on configuration nobody has seen.** A change an agent made to
     what a harness reads from the tree - hooks, plugins, MCP servers, instructions - is
-    named to a person every cycle, and while one stands unseen no wake, refill, nudge or
-    hunt starts here ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).
+    named to a person every cycle, and while one stands unseen no wake, refill, nudge,
+    hunt or catch-up starts here ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).
     So is a `.pth` file, a `sitecustomize` or a `usercustomize` Python runs as it starts
     from an environment inside the tree, which ran in the watchdog itself before it could
     name it when the watchdog's job runs from there ([safety.md](safety.md#what-python-runs-as-it-starts-from-inside-the-tree)).
@@ -79,7 +79,8 @@ Order matters: each guard sees only what the ones above left standing.
 | 4c | reports pending | implementer reports the architect has not processed | wake the architect (once per 15 min, into absence, within quota) |
 | 5 | backoff | work fingerprint unchanged across nudges | escalate instead of nudging again |
 | 6 | nudge | — | start one headless turn in its own session |
-| any turn | harness configuration | each change to what a harness reads from the tree that no person has seen, read again right before each wake, refill, nudge and hunt, as the hold is | start none, and say why; a dry cycle says the same |
+| any turn | harness configuration | each change to what a harness reads from the tree that no person has seen, read again right before each wake, refill, nudge, hunt and catch-up, as the hold is | start none, and say why; a dry cycle says the same |
+| catch-up | open review or gates waivers, `catchup.every_hours`, and a catch-up child this schedule started | `0`: start none. Otherwise, when a waiver is open, no child of this schedule is still running, and the interval has passed: start one detached `polyctl catchup --limit 1` (the limit is `catchup.limit`), which spends the reviewer's quota. A dry cycle says it would and starts nothing. Exit 3 waits out the interval. Exit 1 tells a person once (`catchup-failed`, six hours) |
 | any turn | its command | the command a wake, refill or nudge would start, against the adapter the package ships - its program, its grant, the values filled into it - and against the command last accepted for its role, asked before its program is looked for; the reviewer's routes and `hunter.argv` against the ones accepted | refused: start none and tell a person once (`turn-refused:<role>`); changed: start none until a person sees it, as harness configuration |
 
 Anomalies (`anomalies()`) are computed before the chain and delivered as facts:
@@ -91,9 +92,9 @@ every cycle while it remains unprocessed (TRIAGE-2-MEDIUM).
 *In polyctl since slice HARNESS-CONFIG: a cycle names to a person each change to what a harness reads from
 the tree that nobody has seen, under one alarm, `harness-config`, that rings once for what the changes
 hold and climbs the ladder while they stand, whether or not the tree is held. Reports and alarms go on
-as before; only what would start a harness here waits: the architect's wake and refill, the nudge and
-the bug hunt each read the changes again right before they start, and stand down while one stands
-unseen or cannot be read, with the reason in the cycle's trace. A person reads them with
+as before; only what would start a harness here waits: the architect's wake and refill, the nudge,
+the bug hunt and a scheduled catch-up each read the changes again right before they start, and stand
+down while one stands unseen or cannot be read, with the reason in the cycle's trace. A person reads them with
 `polyctl harness seen --by <name>` ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).
 The architect's own sessions are safest in a checkout of their own, where no agent writes.*
 

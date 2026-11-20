@@ -1432,6 +1432,219 @@ def _schedule_hunt(root, cfg, st):
     return True
 
 
+# Records the exit of `polyctl catchup` and exits with it, so the next cycle can read the status after this
+# process is gone. The catch-up command is every argument after the status path: no author family, no --by.
+_CATCHUP_RECORD = (
+    "import os,subprocess,sys\n"
+    "s=sys.argv[1];c=sys.argv[2:];n=subprocess.call(c)\n"
+    "f=os.open(s,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o644)\n"
+    "os.write(f,b'%d\\n'%n);os.fsync(f);os.close(f);raise SystemExit(n)\n"
+)
+
+
+def _catchup_log_path(root):
+    return os.path.join(STATE_DIR, f"catchup-log-{A.project_key(root)}")
+
+
+def _catchup_status_path(root):
+    return os.path.join(STATE_DIR, f"catchup-status-{A.project_key(root)}")
+
+
+def _catchup_command(root, limit):
+    """The catch-up a schedule starts: the project's own, bounded, with nothing a person would state."""
+    return [sys.executable, "-m", "polyctl", "-C", root, "catchup", "--limit", str(limit)]
+
+
+def _pid_exists(pid):
+    """Whether `pid` exists. Signal 0 asks and does not stop the process.
+
+    On Windows signal 0 is CTRL_C_EVENT, so the portable probe asks instead (#71).
+    """
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        return bool(A._pid_alive(pid))
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _process_zombie(pid):
+    if os.name == "nt":
+        return False
+    try:
+        from . import procs
+        return bool(procs.zombie(pid))
+    except Exception:
+        return False
+
+
+def _process_command(pid):
+    """The command `ps -p PID -o command=` prints, or "" when it cannot be read.
+
+    The same `ps` the process table falls back to (procs.py). A reused pid whose command is not the
+    catch-up this schedule started must not count as that catch-up.
+    """
+    from . import procs
+    if os.name == "nt":
+        argv = procs.argv(pid) or []
+        return " ".join(str(part) for part in argv)
+    text = procs._run(["ps", "-p", str(int(pid)), "-o", "command="])
+    return " ".join(str(text or "").split())
+
+
+def _command_is_scheduled_catchup(command, root):
+    return bool(command) and f"-C {root} catchup --limit" in command
+
+
+def _catchup_process_live(pid, root):
+    """Whether `pid` is still the catch-up this schedule started, and not a reused number."""
+    if not _pid_exists(pid) or _process_zombie(pid):
+        return False
+    return _command_is_scheduled_catchup(_process_command(pid), root)
+
+
+def _read_exit_file(path):
+    try:
+        text = open(path, encoding=UTF8).read().strip()
+    except OSError:
+        return None
+    if text.isdigit():
+        return int(text)
+    return None
+
+
+def _wait_exit(pid):
+    """The exit status of a child this process can still reap, or None."""
+    if os.name == "nt":
+        return None
+    try:
+        waited, status = os.waitpid(int(pid), os.WNOHANG)
+    except (ChildProcessError, OSError, ValueError):
+        return None
+    if waited == 0 or not os.WIFEXITED(status):
+        return None
+    return os.WEXITSTATUS(status)
+
+
+def _catchup_log_reason(root):
+    """The last line of the catch-up log: what a failed run said, for the alarm."""
+    try:
+        with open(_catchup_log_path(root), encoding=UTF8, errors="replace") as fh:
+            lines = [line.strip() for line in fh if line.strip()]
+    except OSError:
+        return ""
+    return lines[-1] if lines else ""
+
+
+def _catchup_observe_exit(root, st, pid):
+    """When the scheduled pid is gone, exit 1 raises one alarm. Exit 3 does not start another at once.
+
+    `last_catchup` was written when the child started, so the interval holds either exit. The alarm's
+    window holds a second raise for six hours when this pid is seen again.
+    """
+    if st.get("catchup_settled") == pid:
+        return
+    other_live = _pid_exists(pid) and not _process_zombie(pid)
+    code = _read_exit_file(_catchup_status_path(root))
+    if code is None and not other_live:
+        code = _wait_exit(pid)
+    elif not other_live:
+        _wait_exit(pid)
+    if code == 1:
+        reason = _catchup_log_reason(root)
+        notify(f"{A.project_key(root)}: catch-up failed",
+               reason or "a scheduled catch-up exited 1",
+               root, key="catchup-failed", window=6 * 3600, audience="human")
+    if _DRY_RUN.get():
+        return
+    st["catchup_settled"] = pid
+    st.pop("catchup_pid", None)
+    save_state(root, st)
+    try:
+        os.remove(_catchup_status_path(root))
+    except OSError:
+        pass
+
+
+def _catchup_child_running(root, st):
+    """Whether a catch-up this schedule started is still that process. A finished one is noted."""
+    pid = st.get("catchup_pid")
+    if not pid:
+        return False
+    if _catchup_process_live(pid, root):
+        return True
+    _catchup_observe_exit(root, st, pid)
+    return False
+
+
+def _start_catchup(root, cfg, st):
+    limit = S.get(cfg, "catchup.limit")
+    log = _catchup_log_path(root)
+    status = _catchup_status_path(root)
+    os.makedirs(STATE_DIR, exist_ok=True)
+    try:
+        os.remove(status)
+    except OSError:
+        pass
+    cmd = _catchup_command(root, limit)
+    try:
+        with open(log, "a", encoding=UTF8) as fh:
+            fh.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} catchup ===\n")
+            fh.flush()
+            proc = subprocess.Popen(
+                [sys.executable, "-c", _CATCHUP_RECORD, status, *cmd],
+                cwd=A.self_child_cwd(), stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT,
+                start_new_session=True, env=A.self_child_env())
+    except OSError as exc:
+        print(f"could not start a catch-up: {exc}")
+        return False
+    st["last_catchup"] = time.time()
+    st["catchup_pid"] = proc.pid
+    st.pop("catchup_settled", None)
+    save_state(root, st)
+    print("started a bounded catch-up")
+    return True
+
+
+def _schedule_catchup(root, cfg, st):
+    """Start one bounded, detached catch-up when it is switched on and due: a schedule, never a loop.
+
+    `catchup.every_hours` 0 starts nothing and does not read waivers. The child is
+    `polyctl -C <root> catchup --limit <catchup.limit>` and nothing a person states (`--author-family`,
+    `--by`): a waived range stays reviewed by a family other than its author's. The run spends the
+    reviewer's quota. Nor while the tree is held, or while harness configuration nobody has seen stands
+    in it, as no turn polyctl starts here runs then. A dry cycle says it would start one and starts nothing.
+    """
+    if S.get(cfg, "catchup.every_hours") <= 0:
+        return False
+    try:
+        waivers = A.open_waivers(root)
+    except Exception as exc:
+        print(f"open waivers cannot be read ({type(exc).__name__}); not starting a catch-up")
+        return False
+    if not waivers or A.hold_state(root):
+        return False
+    unseen = harness_config_hold(root)
+    if unseen:
+        print(f"{unseen}; not starting a catch-up")
+        return False
+    if _catchup_child_running(root, st):
+        return False
+    if time.time() - float(st.get("last_catchup") or 0) < S.get(cfg, "catchup.every_hours") * 3600:
+        return False
+    if _DRY_RUN.get():
+        print("would start a catch-up")
+        return False
+    return _start_catchup(root, cfg, st)
+
+
 def harness_config_hold(root):
     """Why no turn may start in this tree now, or None: what a harness reads from it changed and no person has seen it,
     or it cannot be read (HARNESS-CONFIG).
@@ -3214,6 +3427,7 @@ def _cycle_impl(args, root):
     if not args.dry_run:
         _sample_credits(root, st, A.implementer_adapter_id(cfg), project)
         _schedule_hunt(root, cfg, st)
+    _schedule_catchup(root, cfg, st)
     # Only meaningful when no implementer turn is running: a sub-agent's writes
     # do not appear as the parent's tool calls and would read as a stranger's.
     # Whose they are cannot be told where the process table cannot be read, and
