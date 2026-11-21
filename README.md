@@ -30,11 +30,13 @@ polyctl 0.7.0 is built and supported on macOS; Linux runs the test suite in CI b
 ## Five minutes to the first reviewed commit
 
 To see it first, `polyctl demo` plays one change through polyctl on a scratch project ([demo](docs/demo.md)).
+The first step is `polyctl start`, the first-run wizard. The by-hand path remains `polyctl init --profile`.
 
 ```bash
 pip install polyctl          # or: uv tool install polyctl
 cd your-repository
-polyctl init --profile agy-codex          # agy (Gemini 4 Argon) implements, Codex (gpt-6-luna) reviews; or codex-agy, claude-codex
+polyctl start                             # asks before each step; --yes runs the steps that need no person
+polyctl init --profile agy-codex          # by hand: agy (Gemini 4 Argon) implements, Codex (gpt-6-luna) reviews; or codex-agy, claude-codex
 git add .polyctl-project .gitignore && git commit -m "adopt polyctl"
 polyctl hooks install                     # from here on, only a granted candidate commits
 ```

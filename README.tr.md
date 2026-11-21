@@ -33,11 +33,13 @@ polyctl 0.7.0 macOS üzerinde geliştirilir ve desteklenir; Linux CI'da test pak
 ## İlk gözden geçirilmiş commit'e beş dakika
 
 Önce görmek istersen `polyctl demo`, bir değişikliği geçici bir projede polyctl'den geçirir ([demo](docs/demo.md)).
+İlk adım `polyctl start`, ilk kurulum sihirbazıdır. Elle yol, `polyctl init --profile` olarak kalır.
 
 ```bash
 pip install polyctl          # ya da: uv tool install polyctl
 cd deponun-yolu
-polyctl init --profile agy-codex          # agy (Gemini 4 Argon) yazar, Codex (gpt-6-luna) gözden geçirir; ya da codex-agy, claude-codex
+polyctl start                             # her adımdan önce sorar; --yes yalnız kişi gerektirmeyen adımları koşturur
+polyctl init --profile agy-codex          # elle: agy (Gemini 4 Argon) yazar, Codex (gpt-6-luna) gözden geçirir; ya da codex-agy, claude-codex
 git add .polyctl-project .gitignore && git commit -m "adopt polyctl"
 polyctl hooks install                     # bundan sonra yalnızca yetki verilmiş aday commit edilir
 ```
