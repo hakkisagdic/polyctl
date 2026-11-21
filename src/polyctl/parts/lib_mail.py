@@ -1224,30 +1224,40 @@ def ingest_mail(root, cfg):
     A body stored with no row - the row's append failed after the body landed, and the view was
     removed before the next reconcile - is taken from the store itself; only the view was read,
     and the message was gone from the queue with its body orphaned (MESSAGE-STORE-3).
+
+    The listing and the copy run under the lock `write_mail` holds while it creates the file and
+    writes the body, so ingest sees a file only after that write has finished. An empty view is
+    left for the next pass. Callers do not reach here while that lock is already held: `write_mail`
+    appends its ledger row inside the lock and calls this only after releasing it. The lock is not
+    re-entrant.
     """
-    from .storage import replace_file_durably
+    from .storage import _exclusive_lock, replace_file_durably
+    os.makedirs(os.path.join(root, ".polyctl", "mail"), exist_ok=True)
     box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
-    known = {row.get("id") for row in mail_store_rows(root) if row.get("event") == "message"}
-    views = set(os.listdir(box)) if os.path.isdir(box) else set()
-    store = os.path.join(root, ".polyctl", "mail", "store")
-    stored = set(os.listdir(store)) if os.path.isdir(store) else set()
-    taken = []
-    for name in sorted(views | stored):
-        if name == "README.md" or not name.endswith(".md") or name in known:
-            continue
-        source = os.path.join(box, name) if name in views else _store_path(root, name)
-        with open(source, "rb") as fh:
-            data = fh.read()
-        if name not in views and data.startswith(b"polyctl-mail-stub v1\n"):
-            continue
-        if name in views:
-            replace_file_durably(_store_path(root, name), data)
-        meta = mail_meta(source)
-        _mail_store_append(root, {"event": "message", "id": name,
-                                  "digest": "sha256:" + hashlib.sha256(data).hexdigest(),
-                                  "from": meta.get("from"), "to": meta.get("to"), "kind": meta.get("kind")})
-        taken.append(name)
-    return taken
+    with _exclusive_lock(os.path.join(root, ".polyctl", "mail", "write.lock")):
+        known = {row.get("id") for row in mail_store_rows(root) if row.get("event") == "message"}
+        views = set(os.listdir(box)) if os.path.isdir(box) else set()
+        store = os.path.join(root, ".polyctl", "mail", "store")
+        stored = set(os.listdir(store)) if os.path.isdir(store) else set()
+        taken = []
+        for name in sorted(views | stored):
+            if name == "README.md" or not name.endswith(".md") or name in known:
+                continue
+            source = os.path.join(box, name) if name in views else _store_path(root, name)
+            with open(source, "rb") as fh:
+                data = fh.read()
+            if name in views and len(data) == 0:
+                continue                               # the body is not in the file yet; the next ingest takes it
+            if name not in views and data.startswith(b"polyctl-mail-stub v1\n"):
+                continue
+            if name in views:
+                replace_file_durably(_store_path(root, name), data)
+            meta = mail_meta(source)
+            _mail_store_append(root, {"event": "message", "id": name,
+                                      "digest": "sha256:" + hashlib.sha256(data).hexdigest(),
+                                      "from": meta.get("from"), "to": meta.get("to"), "kind": meta.get("kind")})
+            taken.append(name)
+        return taken
 
 
 def unhandled_messages(root):

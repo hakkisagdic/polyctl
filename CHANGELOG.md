@@ -28,6 +28,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 ### Fixes
 
 - Ignore a `root` key in a project's `.polyctl/config.json`. The project is the directory where that file was found, and `polyctl doctor` reports that the key was ignored, without repeating a path outside the project.
+- Ingest of an append-only mailbox waits for the mail write to finish, and leaves an empty message file for the next pass, so the stored row is the digest of the full body.
 - Make repeated `mail ack` and `polyctl_ack` calls idempotent (`exit 0`, `"already handled"`) and stop `polyctl next` from telling the person to acknowledge the implementer's urgent mail (MSG-FIX-1).
 - Normalise mail sender and recipient names to canonical role names even when the project's role table is empty (MSG-FIX-1).
 - Set `isError: true` on MCP `tools/call` responses whenever the tool returns an `{"error": ...}` payload (MSG-FIX-1).
