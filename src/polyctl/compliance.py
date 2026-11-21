@@ -273,7 +273,7 @@ def verify_compliance_bundle(root, target):
     except (ValueError, UnicodeDecodeError) as exc:
         return _invalid_res(ref, f"malformed bundle JSON: {exc}")
     if not isinstance(bundle, dict):
-        return _invalid_res(ref, "bundle payload must be a JSON object")
+        return _invalid_res(ref, "bundle must be a JSON object")
     bid, rec_digest, rec_sig = str(bundle.get("bundle_id") or ref), str(bundle.get("bundle_digest") or ""), str(bundle.get("integrity_sha256") or "")
     try:
         exp_digest, exp_sig, keyed = _canonical_digests(bundle)

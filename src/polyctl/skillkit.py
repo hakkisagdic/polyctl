@@ -461,8 +461,9 @@ def next_steps(agents, registered):
     names = [adapter.get("name") or ident for ident, adapter in setup_adapters(None, agents)]
     lines = []
     if names:
-        approval = (" Approve the `.mcp.json` project server in Claude Code when prompted "
-                    "so its role-scoped entry loads.") if "claude-code" in registered else ""
+        notes = [(adapter.get("mcp") or {}).get("approval") for ident, adapter in setup_adapters(None, agents)
+                 if ident in registered]
+        approval = "".join(" " + note for note in notes if note)
         lines.append(f"Start or restart {' / '.join(names)} in this directory so the `polyctl` MCP "
                      f"tools load (registered: "
                      f"{', '.join(f'{k}: {v.splitlines()[0]}' for k, v in registered.items())}).{approval}")

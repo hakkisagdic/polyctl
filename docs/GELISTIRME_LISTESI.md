@@ -69,7 +69,7 @@
 - **Matris Kalemi:** `#10` (`yok` → `var`) · **Skor:** `5.0` · **Efor:** L (4) · **Bağımlılık:** `P0-1`, `P0-2`, `P0-3`.
 - **Kapsam:** `src/polyctl/compliance.py` ve `polyctl compliance` komutu:
   - SOC 2 Type II (`CC6.1`, `CC7.2`, `CC8.1`), ISO/IEC 42001 (`A.6.2`, `A.8.4`, `A.9.3`) ve KVKK Madde 12 (`KVKK-M12.1`, `KVKK-M12.2`) kontrol eşlemeleri.
-  - Tüm hash-zincirli defterlerin (`authority.jsonl`, `verifications.jsonl`, `reviews.jsonl`, `waivers.jsonl`, `decisions.jsonl`, `plans.jsonl`, `opt-ins.jsonl`, `slices.jsonl`, `.polyctl/billing/usage.jsonl`) zincir bütünlüğü, `security-scan` PII/sır temizliği, FinOps bütçe durumu ve Git trailer (`Polyctl-Grant`, `Polyctl-Verification`, `Polyctl-Review`) kanıtlarını toplar.
+  - Tüm hash-zincirli defterlerin (`authority.jsonl`, `verifications.jsonl`, `reviews.jsonl`, `ledger/waivers.jsonl`, `ledger/decisions.jsonl`, `plans.jsonl`, `opt-ins.jsonl`, `slices.jsonl`, `.polyctl/billing/usage.jsonl`) zincir bütünlüğü, `security-scan` PII/sır temizliği, FinOps bütçe durumu ve Git trailer (`Polyctl-Grant`, `Polyctl-Verification`, `Polyctl-Review`) kanıtlarını toplar.
   - Kanıt paketini `.polyctl/compliance/bundles` dizinine ve `.polyctl/compliance/state.json` durum dosyasına SHA-256 (`bundle_digest`) ve `POLYCTL_COMPLIANCE_SIGNING_KEY` tanımlıysa HMAC-SHA256 (`integrity_sha256`, `integrity_verified: True`) imzalı olarak yazar; makine kontrol noktası (`checkpoint_path()`) ve canlı defter özetleriyle çapraz doğrular.
 - **Kabul Kriterleri:**
   1. `polyctl compliance status --framework all --json` SOC 2, ISO 42001 ve KVKK kontrollerini ve defter bütünlüğünü raporlar.

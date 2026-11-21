@@ -209,7 +209,11 @@
     "rule_files": ["CLAUDE.md"],
     "polyctl_files": [".claude/skills/polyctl/"]
   },
-  "mcp": { "file": ".mcp.json", "remove_when_empty": true },
+  "mcp": {
+    "file": ".mcp.json",
+    "remove_when_empty": true,
+    "approval": "Approve the `.mcp.json` project server in Claude Code when prompted so its role-scoped entry loads."
+  },
   "quota": {
     "provider": "claude",
     "stops": [

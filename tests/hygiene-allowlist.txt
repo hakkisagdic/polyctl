@@ -16,3 +16,8 @@ tests/test_windows_followups.py home-path me Windows path fixtures name a made-u
 tests/test_windows_lane.py home-path me a Windows path fixture names a made-up account
 tests/test_reviewer_tool.py assigned-secret sha256:1702ac307eac58d6 the made-up provider keys the test sets to show a review tool is handed the keys it needs while every setting from the environment is dropped
 tests/test_windows_table_closed.py assigned-secret sha256:d747f17e7d905b8c a made-up command line shows that an answer which is not the table is told by its length, never its text, since a command line can hold a secret
+src/polyctl/billing.py assigned-secret sha256:c4a74cba30cb0605 the checkout_token field is set from a variable of the same name, the provider's own answer, never a literal value
+src/polyctl/billing.py assigned-secret sha256:25a03c2481c1c78e the payment_token argument is passed on from a variable of the same name, never a literal value
+tests/test_billing_and_security.py assigned-secret sha256:0d22a75d7f8797dc the made-up payment token a billing test hands the local provider, which no payment service knows
+tests/test_billing_and_security.py assigned-secret sha256:f94791652120549e the made-up payment token a billing test hands the local provider, which no payment service knows
+tests/test_billing_and_security.py assigned-secret sha256:50e40840558d49aa the made-up payment token a billing test hands the local provider, which no payment service knows

@@ -374,6 +374,13 @@ such as `2026-09-17`; a number alone keeps the unit its option always had. A com
 cannot run says why in one line, and `POLYCTL_DEBUG=1` shows the traceback. `polyctl --version`
 names the installed version.
 
+Driving polyctl from a workflow engine: `polyctl archon` is the one entry for bash nodes of an
+engine that runs through an `archon` command line. Each subcommand prints one JSON line:
+`polyctl archon doctor`, `polyctl archon runs`, `polyctl archon gate` (verify, review pin check,
+commit-ok and commit in one given worktree, never a waiver and never a push),
+`polyctl archon record`, `polyctl archon notify` and `polyctl archon leftovers`. Exit 0 is ok,
+2 is a usage error or a missing `archon`, 3 is a refusal or leftovers; docs/archon.md has the details.
+
 ## 13. Read further
 
 `docs/` in the polyctl repository: roles, protocol, gates, safety, recovery,

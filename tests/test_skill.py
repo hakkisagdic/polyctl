@@ -8,7 +8,8 @@ from polyctl import cli, skillkit
 
 def _subcommands():
     src = open(cli.__file__, encoding="utf-8").read()
-    return sorted(set(re.findall(r'add_parser\("([a-z0-9-]+)"', src)))
+    # The commands of the top-level parser: a group's own subcommands (`polyctl archon gate`) are named with their group.
+    return sorted(set(re.findall(r'(?<![A-Za-z_])sub\.add_parser\("([a-z0-9-]+)"', src)))
 
 
 def test_every_command_is_in_the_playbook():
