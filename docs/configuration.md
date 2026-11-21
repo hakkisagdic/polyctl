@@ -30,6 +30,11 @@ range - is passed over for the next layer, and `polyctl doctor` names it with th
 uses instead. So does a name under one of these groups that polyctl does not read, and a
 machine setting written into a project.
 
+`root` is not a setting. The project directory is the directory that holds
+`.polyctl/config.json`, or the directory `-C` names. A `root` key in that file is ignored,
+and `polyctl doctor` says so, without repeating a path outside the project. A secondary
+project is not this key: its directory is `root` on an entry of `secondary`.
+
 | Setting | Default | Scope | What it decides |
 |---|---|---|---|
 | `round_budget` | `5` | project | review rounds a slice may spend before the watchdog stops nudging and tells a person |

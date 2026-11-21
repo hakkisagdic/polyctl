@@ -2249,6 +2249,9 @@ def cmd_doctor(cfg, args):
     redirected = _commit_repository_binding(root)
     if redirected:
         print(f"{C['red']}repository redirect{C['reset']}: {redirected}")
+    for note in cfg.get("_config_notes") or []:
+        if isinstance(note, str) and note:
+            print(f"{'root key':<16}{C['yellow']}{note}{C['reset']}")
     ok = lambda b: f"{C['green']}ok{C['reset']}" if b else f"{C['red']}missing{C['reset']}"
 
     # Run outside a project, every check is "missing" and none of it is a fault.

@@ -1002,6 +1002,11 @@ def doctor_problems(cfg):
     # A setting that is written but not used says one thing and does another (#74).
     for name, text in S.problems(cfg):
         out.append((f"setting:{name}", text))
+    # A `root` key in the project file is not a setting. load_config pins the directory
+    # the file was found in and leaves one line here, with no path outside the project.
+    for note in cfg.get("_config_notes") or []:
+        if isinstance(note, str) and note:
+            out.append(("ignored-root", note))
     # A program found only through a relative or empty PATH entry is one polyctl does not start (WINDOWS-NO-CWD-EXEC).
     out.extend(_path_problems())
     if len(A.deferred_open(root)) >= 3:

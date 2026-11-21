@@ -560,6 +560,61 @@ def project_config_document(root):
     return {"config": parsed, "raw": raw, "problem": None}
 
 
+def _named_config_root(root, named):
+    """The absolute path a config's ``root`` value names, resolved from this project.
+
+    A relative value is resolved from ``root``, never from the process's working
+    directory. ``None`` when ``named`` is not a path.
+    """
+    if not isinstance(named, str):
+        return None
+    text = named.strip()
+    if not text:
+        return None
+    candidate = text if os.path.isabs(text) else os.path.join(root, text)
+    try:
+        return os.path.realpath(candidate)
+    except (OSError, ValueError):
+        return None
+
+
+def _same_project_root(root, named):
+    """Whether ``named`` is this project's directory, not another one the file claims."""
+    found = _named_config_root(root, named)
+    if found is None:
+        return False
+    try:
+        return os.path.normcase(found) == os.path.normcase(os.path.realpath(root))
+    except (OSError, ValueError):
+        return False
+
+
+def _ignored_root_note(root, named):
+    """What ``polyctl doctor`` says when config.json names a ``root``.
+
+    A path outside this project is left out of the line. A path inside it is shown
+    relative to the project.
+    """
+    found = _named_config_root(root, named)
+    shown = None
+    if found is not None:
+        try:
+            real_root = os.path.realpath(root)
+        except (OSError, ValueError):
+            real_root = None
+        if real_root is not None:
+            prefix = os.path.normcase(real_root)
+            prefix = prefix if prefix.endswith(os.sep) else prefix + os.sep
+            if os.path.normcase(found).startswith(prefix):
+                relative = os.path.relpath(found, real_root)
+                if relative not in (os.curdir, os.pardir) and not relative.startswith(os.pardir + os.sep) \
+                        and not os.path.isabs(relative):
+                    shown = relative.replace("\r", " ").replace("\n", " ")
+    if shown:
+        return f"config.json names root {shown}; ignored"
+    return "config.json names root; ignored"
+
+
 def load_config(root, record=True):
     """Load bounded project config; malformed legacy state degrades explicitly.
 
@@ -567,6 +622,12 @@ def load_config(root, record=True):
     path exists but cannot satisfy the project-state contract, callers receive
     defaults plus ``_config_problem`` instead of an exception or unbounded parse.
     Enrollment enforcement consumes the same ``project_config_document`` result.
+
+    ``root`` is the directory this file was found in, or the directory ``-C`` named.
+    A ``root`` key in the file is not a setting: it is replaced, and when it named a
+    different directory ``_config_notes`` carries one line for ``polyctl doctor``.
+    That line does not repeat a path outside this project. ``secondary[].root`` is
+    a different key and is left as the file wrote it.
     """
     p = os.path.join(root, ".polyctl", "config.json")
     document = project_config_document(root)
@@ -578,7 +639,13 @@ def load_config(root, record=True):
         # opt-in and silently reactivate legacy authority. ``raw`` is bounded.
         if _has_top_level_json_key(document["raw"], "capability_matrix"):
             cfg["_capability_matrix_error"] = True
-    cfg.setdefault("root", root)
+    # The root is where the config was found. A clone must not point the CLI or MCP
+    # at another project by writing `root` into this file.
+    had_root = "root" in cfg
+    named_root = cfg.get("root") if had_root else None
+    cfg["root"] = root
+    if had_root and not _same_project_root(root, named_root):
+        cfg["_config_notes"] = [_ignored_root_note(root, named_root)]
     cfg.setdefault("mailbox", "agent-mail")
     cfg.setdefault("reviews", "semantic-review")
     resolve_roles(root, cfg)
