@@ -115,7 +115,7 @@ interrupt, and its exit with it.*
 `polyctl lane remove` refuses a lane whose worktree holds changes nobody committed, other than the
 links and the file polyctl put there, or a review in flight, and names them. Otherwise it removes
 polyctl's links first, so nothing can reach through one into the main checkout, and retires the rest
-as `polyctl worktrees prune` does: the lane's `.polyctl/` state archived, its branch tip kept at
+as `polyctl worktrees prune` does: the lane's `.polyctl/` state and the mailbox archived, its branch tip kept at
 `refs/polyctl/archive/lane/<lane>-<stamp>`, its worktree and its branch removed. A lane whose
 directory someone deleted is retired all the same. Both status rechecks during removal
 use the lane's prepared-file rules, even if Git's ignore entries have disappeared;
@@ -237,7 +237,7 @@ A worktree may go when its branch is merged into the default branch, when the bo
 rejected the slice that owns it (`worktree: <path>` or `branch: <name>` on the item), or
 when its directory is already gone. It is never removed while it holds product changes
 nobody committed, a review in flight, or the command that is asking. Retiring one copies
-its `.polyctl/` state and review artefacts to `~/.polyctl/archive/<project>/`, keeps its branch tip
+its `.polyctl/` state, review artefacts and the mailbox to `~/.polyctl/archive/<project>/`, keeps its branch tip
 reachable as `refs/polyctl/archive/<branch>-<stamp>`, removes the worktree and the branch, and
 runs `git worktree prune` so no administrative file is left behind. `polyctl doctor` names the
 worktrees that may go, with their size on disk. A lane's worktree is listed there too, and

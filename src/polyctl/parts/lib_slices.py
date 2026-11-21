@@ -358,12 +358,39 @@ def _git_worktree_cleanup(root, *args):
     return _git_output(root, "worktree", *args)
 
 
+def _mailbox_archive_part(name):
+    """The mailbox directory prune may copy out of a worktree, or `(None, why)`.
+
+    The name is used only when it is one relative path with no `..` and not absolute.
+    `_coordination_dirs` applies that same bound, inline, and there is no separate helper
+    beside `_is_coordination_path`: a setting must not point outside the tree it names.
+    """
+    if not isinstance(name, str):
+        return None, "the mailbox name is not a relative path"
+    raw = name.replace("\\", "/")
+    while raw.startswith("./"):
+        raw = raw[2:]
+    if os.path.isabs(name) or os.path.isabs(raw) or raw.startswith("/") \
+            or os.path.splitdrive(name)[0] or os.path.splitdrive(raw)[0]:
+        return None, "the mailbox name is absolute"
+    raw = raw.rstrip("/")
+    if any(part == ".." for part in raw.split("/")):
+        return None, "the mailbox name leaves the worktree"
+    normal = os.path.normpath(raw).replace("\\", "/") if raw else ""
+    if normal in ("..",) or normal.startswith("../"):
+        return None, "the mailbox name leaves the worktree"
+    if not normal or normal == "." or any(part in ("", ".") for part in normal.split("/")):
+        return None, "the mailbox name is not a path inside the worktree"
+    return normal, None
+
+
 def prune_worktree(root, fact, apply=False, now=None, lane=None):
     """Retire one worktree that may go: archive its coordination state and branch tip, then remove both (#42).
 
-    The `.polyctl/` state and review artefacts go to ~/.polyctl/archive/<project>/, and the
-    branch tip stays reachable as refs/polyctl/archive/<branch>-<stamp>, so what the
-    worktree held can still be read after it is gone.
+    The `.polyctl/` state, review artefacts and the mailbox go to ~/.polyctl/archive/<project>/,
+    and the branch tip stays reachable as refs/polyctl/archive/<branch>-<stamp>, so what the
+    worktree held can still be read after it is gone. A mailbox name that is absolute or
+    leaves the worktree is not copied, and the copy finishes before the worktree is removed.
     """
     import shutil
 
@@ -384,12 +411,23 @@ def prune_worktree(root, fact, apply=False, now=None, lane=None):
     name = os.path.basename(os.path.normpath(fact["path"]))
     archive = os.path.join(HOME, ".polyctl", "archive", project_key(root), f"worktree-{name}-{stamp}")
     steps = []
-    for part in (".polyctl", "semantic-review"):
+    # Mail the dirty check exempts still lives only in the worktree; archive it with the rest.
+    # record=False: a dry run must not write a session while it reads the mailbox name.
+    mailbox_name = load_config(root, record=False).get("mailbox", "agent-mail")
+    mailbox_part, mailbox_why = _mailbox_archive_part(mailbox_name)
+    parts = [".polyctl", "semantic-review"]
+    if mailbox_part is not None and mailbox_part not in parts:
+        parts.append(mailbox_part)
+    for part in parts:
         source = os.path.join(fact["path"], part)
         if os.path.isdir(source):
             steps.append(f"archive {part}/ to {archive}")
             if apply:
                 shutil.copytree(source, os.path.join(archive, part), symlinks=True)
+    if mailbox_part is None:
+        shown = mailbox_name if isinstance(mailbox_name, str) and mailbox_name \
+            and mailbox_name == " ".join(mailbox_name.split()) else "the configured mailbox"
+        steps.append(f"archive nothing for mailbox {shown}: {mailbox_why}")
     if fact["branch"]:
         steps.append(f"keep {fact['branch']} at refs/polyctl/archive/{fact['branch']}-{stamp}")
         if apply:

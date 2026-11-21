@@ -49,6 +49,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 - `polyctl doctor` and `polyctl doctor --check` now name project records under `~/.polyctl` that a linked worktree created by mistake, together with the main checkout they belong to, without deleting them (ADMIN-FINDINGS-1).
 - Commands and `polyctl mcp serve` (with no `-C`) run inside a linked git worktree of a governed repository now resolve to the main checkout's project (`.polyctl/`, ledgers, mailbox and project key) instead of creating a new project named after the worktree folder, and `docs/getting-started.md` shows the user-level MCP registration for Claude Code and Kiro beside the per-project one (ADMIN-FINDINGS-1).
 - `polyctl room search <text>` now searches every registered project's pending `agent-mail/` files as well as consumed messages in the mail ledger and append-only store, and prints which project and which state (`pending` or `consumed`) each hit comes from (ADMIN-FINDINGS-1).
+- `polyctl worktrees prune --yes` copies the worktree's mailbox (default `agent-mail/`) into `~/.polyctl/archive/<project>/` with `.polyctl/` and the review artefacts before it removes the worktree. A mailbox name that is absolute or contains `..` is not copied, and the dry run names that instead of archiving it (#42).
 
 ### Security
 
