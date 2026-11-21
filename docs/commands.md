@@ -64,6 +64,7 @@ Every `polyctl` command and what it does (`pctl` is the short command: the same 
 | `polyctl prune` | trim accumulated records and logs |
 | `polyctl doctor` · `polyctl adapters` | check the wiring; what is supported and how well |
 | `polyctl completion zsh` | print a script that completes polyctl's commands, options and choices; `bash`, `fish` and `powershell` too, installed as [getting started](getting-started.md#6-shell-completion) shows, and printed again after `polyctl update` |
+| `polyctl archon doctor\|runs\|gate\|record\|notify\|leftovers` | CLI wrapper for Archon bash nodes: emit one JSON line per call (`0` ok, `2` usage or missing `archon`, `3` refused or leftovers), commit gated worktrees, record chained run events in `.polyctl/ledger/archon.jsonl`, forward questions to configured channels without answering, and list finished-run leftovers ([archon.md](archon.md)) |
 | `polyctl --version` | the installed version |
 
 Hook status separates static intent from executable enforcement. polyctl enforcement is

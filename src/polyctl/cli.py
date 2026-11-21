@@ -67,6 +67,15 @@ from .billing import cmd_billing, maybe_meter_cmd
 from .security import cmd_security_scan
 from .compliance import cmd_compliance
 from .policy import cmd_policy
+from .archon import (
+    cmd_archon_doctor,
+    cmd_archon_gate,
+    cmd_archon_help,
+    cmd_archon_leftovers,
+    cmd_archon_notify,
+    cmd_archon_record,
+    cmd_archon_runs,
+)
 
 
 def _prog_name(prog=None):
@@ -851,6 +860,34 @@ def build_parser(root=None, prog=None):
     pol.add_argument("--no-require-budget-ok", dest="require_budget_ok", action="store_false", help="set-rules: disable FinOps budget gate check in policy")
     pol.add_argument("--json", action="store_true", help="print output as JSON")
     pol.set_defaults(fn=cmd_policy)
+    ar = sub.add_parser("archon", help="bridge to the archon CLI: doctor, runs, gate, record, notify, leftovers")
+    ar.set_defaults(fn=cmd_archon_help)
+    ar_sub = ar.add_subparsers(dest="archon_cmd", metavar="{doctor,runs,gate,record,notify,leftovers}")
+    ar_dr = ar_sub.add_parser("doctor", help="check archon CLI, adoption and hooks")
+    ar_dr.set_defaults(fn=cmd_archon_doctor)
+    ar_rn = ar_sub.add_parser("runs", help="list Archon workflow runs as JSON")
+    ar_rn.set_defaults(fn=cmd_archon_runs)
+    ar_gt = ar_sub.add_parser("gate", help="verify, grant and commit a staged worktree")
+    ar_gt.add_argument("--worktree", required=True, metavar="DIR", help="git worktree directory to gate and commit")
+    ar_gt.add_argument("-m", "--message", required=True, metavar="MSG", help="commit message")
+    ar_gt.add_argument("--review", metavar="ID", help="submitted review id pinned to the staged tree")
+    ar_gt.add_argument("-p", "--profile", metavar="PROFILE", help="verification profile for verify and commit-ok")
+    ar_gt.set_defaults(fn=cmd_archon_gate)
+    ar_rc = ar_sub.add_parser("record", help="append a chained Archon run event")
+    ar_rc.add_argument("--run", required=True, metavar="ID", help="Archon run identifier")
+    ar_rc.add_argument("--event", required=True, metavar="E", help="event name (for example landed or backup)")
+    ar_rc.add_argument("--sha", required=True, metavar="S", help="commit SHA (7-64 hexadecimal characters)")
+    ar_rc.add_argument("--undo", required=True, metavar="TEXT", help="undo command or rollback pointer")
+    ar_rc.add_argument("--item", metavar="ITEM", help="work item identifier")
+    ar_rc.add_argument("--result", metavar="R", help="outcome or summary string")
+    ar_rc.set_defaults(fn=cmd_archon_record)
+    ar_nt = ar_sub.add_parser("notify", help="send an open question through polyctl channels")
+    ar_nt.add_argument("--run", required=True, metavar="ID", help="Archon run identifier")
+    ar_nt.add_argument("--text", required=True, metavar="T", help="open question or notification text")
+    ar_nt.set_defaults(fn=cmd_archon_notify)
+    ar_lo = ar_sub.add_parser("leftovers", help="list worktrees and branches of finished runs")
+    ar_lo.add_argument("--repo", required=True, metavar="DIR", help="git repository directory to inspect")
+    ar_lo.set_defaults(fn=cmd_archon_leftovers)
     return p
 
 
@@ -905,7 +942,7 @@ def main(argv=None, prog=None):
             return 0
         command = f"{prog} {args.cmd}"
         root = A.find_root(args.root)
-        record = args.cmd not in ("export", "spec") and not (args.cmd == "watch" and getattr(args, "web", False))
+        record = args.cmd not in ("export", "spec", "archon") and not (args.cmd == "watch" and getattr(args, "web", False))
         cfg = A.load_config(root, record=record)
         return maybe_meter_cmd(cfg["root"], args, lambda: args.fn(cfg, args) or 0)
     except KeyboardInterrupt:

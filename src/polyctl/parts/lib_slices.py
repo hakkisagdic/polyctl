@@ -1038,6 +1038,7 @@ def _restored_ledgers(root, restored, *, attest=False):
     checkpoint for each one that validates, and return `[(rel, rows, digest)]` of the gate ledgers attested (or, when
     `attest=False`, those that need attestation on this machine) (LEDGER-ATTESTED)."""
     from .storage import GATE_LEDGERS, LedgerCorruption, _load_seal, attest_restored_ledger, seal_path
+    from .archon import ARCHON_CHAIN
     gate_rels = {rel for _, rel, _, _, _ in GATE_LEDGERS}
     chains = tuple((rel, chain, legacy) for _, rel, chain, legacy, _ in GATE_LEDGERS) + (
         (".polyctl/ledger/merges.jsonl", MERGE_CHAIN, False),
@@ -1045,6 +1046,7 @@ def _restored_ledgers(root, restored, *, attest=False):
         (".polyctl/ledger/mail-store.jsonl", MAIL_STORE_CHAIN, False),
         (".polyctl/ledger/repairs.jsonl", REPAIR_CHAIN, False),
         (".polyctl/ledger/restores.jsonl", RESTORE_CHAIN, False),
+        (".polyctl/ledger/archon.jsonl", ARCHON_CHAIN, False),
     )
     verified = set(restored)
     unattested, errors = [], []

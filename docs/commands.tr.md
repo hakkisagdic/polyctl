@@ -63,6 +63,7 @@ Her `polyctl` komutu ve ne yaptığı (`pctl` kısa komuttur: aynı ayrıştır�
 | `polyctl prune` | biriken kayıt ve logları buda |
 | `polyctl doctor` · `polyctl adapters` | bağlantıları denetle; ne destekleniyor ve ne kadar |
 | `polyctl completion zsh` | polyctl'in komutlarını, seçeneklerini ve seçimlerini tamamlayan betiği yazdır; `bash`, `fish` ve `powershell` için de, [başlarken](getting-started.md#6-shell-completion) belgesindeki gibi kurulur ve `polyctl update` sonrası yeniden yazdırılır |
+| `polyctl archon doctor\|runs\|gate\|record\|notify\|leftovers` | Archon bash düğümleri için CLI sarmalayıcısı: çağrı başına tek JSON satırı basar (`0` tamam, `2` kullanım hatası ya da eksik `archon`, `3` ret veya artık), kapılanmış worktree'leri commit eder, zincirli koşu olaylarını `.polyctl/ledger/archon.jsonl` defterine yazar, açık soruları yanıtlamadan kanallara iletir ve bitmiş koşuların artıklarını listeler ([archon.md](archon.md)) |
 | `polyctl --version` | kurulu sürüm |
 
 Hook durumu statik niyeti çalıştırılabilir dayatmadan ayırır. polyctl dayatması yalnız

@@ -95,6 +95,12 @@ def consistency_findings(root, cfg):
     except Exception as exc:
         review_rows = []
         found("reviews", f"the review ledger cannot be read: {exc}")
+    from .archon import ARCHON_CHAIN, archon_ledger_path
+    if os.path.exists(archon_ledger_path(root)):
+        try:
+            read_chained_jsonl(archon_ledger_path(root), ARCHON_CHAIN)
+        except Exception as exc:
+            found("archon", f"the archon ledger cannot be read: {exc}")
     for row in review_rows:
         name = row.get("artefact") if isinstance(row, dict) else None
         if not name:

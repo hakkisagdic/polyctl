@@ -21,6 +21,7 @@ The ledger is the fix: an append-only record that outlives the messages.
 ├── waivers.jsonl        # hash-chained: a person's waiver of a gate for a slice, and its closing
 ├── opt-ins.jsonl        # hash-chained: a person's opt-in into a weaker review tier, with login and terminal
 ├── merges.jsonl         # hash-chained: each merge-check run and the merge it vouches for
+├── archon.jsonl         # hash-chained: Archon workflow run events
 └── slices.jsonl         # hash-chained: each move of a slice between the board's sections
 ```
 
@@ -267,6 +268,15 @@ it unreviewed as unused. The newest decision is still read from the live rows. M
 authority rows sealed to the 500 kept live, the whole history reads in about 50 ms, and in 114 ms on a
 machine that did not seal it, where the archives' chain is walked link by link; the live rows read in
 7 ms.*
+
+## Archon runs
+
+`.polyctl/ledger/archon.jsonl` records Archon workflow run events written by
+`polyctl archon record` under the `polyctl-archon-row-v1` chain (`at`, `run`, `event`,
+`sha`, `undo`, and optional `item` and `result`). Each append validates the full existing
+chain and scans fields for secrets before writing, and `polyctl doctor --check`,
+`polyctl doctor --consistency`, `polyctl backup`, and `polyctl restore` validate the chain
+without placing `archon.jsonl` in the gate-ledger checkpoint list.
 
 ## Rules
 

@@ -17,6 +17,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 - `polyctl slice add/edit --type` selects configurable bugfix, poc, feature or enterprise gate weights, shows the type on the board and binds landing evidence to that profile ([slices](docs/slices.md)) (AIDLC-1)
 - `polyctl spec check <slice>` checks required sections, named tests for acceptance criteria and external claim sources before feature/enterprise review, with configurable requirements and advisory findings for bugfix/poc ([specs](docs/specs.md)) (AIDLC-2)
 - `polyctl mail send` now accepts `--from` and `--to` (`implementer`, `architect`, `reviewer`, `admin` or `person`), keeping the default `architect`-to-`implementer` address when omitted, and `polyctl mail list` shows `from → to` beside each pending file (ADMIN-FINDINGS-1).
+- `polyctl archon` adds a standard-library CLI bridge (`doctor`, `runs`, `gate`, `record`, `notify`, `leftovers`) with single-line JSON output and hash-chained run events in `.polyctl/ledger/archon.jsonl` ([archon](docs/archon.md)).
 
 ### Behaviour changes
 

@@ -893,6 +893,14 @@ def doctor_problems(cfg):
             out.append((f"{name}-unreadable", f"{rel} cannot be read, so {effect}: {exc}"))
         if foreign:
             out.append((f"{name}-unattested", f"{rel} holds {_unattested_repair(foreign, attested)}"))
+    from .archon import ARCHON_CHAIN, archon_ledger_path
+    from .storage import read_chained_jsonl
+    archon_path = archon_ledger_path(root)
+    if os.path.exists(archon_path):
+        try:
+            read_chained_jsonl(archon_path, ARCHON_CHAIN)
+        except Exception as exc:
+            out.append(("archon-unreadable", f".polyctl/ledger/archon.jsonl cannot be read: {exc}"))
     where_lite = unrecorded_lite(cfg)
     if where_lite:
         out.append((
