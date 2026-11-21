@@ -1,0 +1,3 @@
+# Baseline of accepted gitleaks findings (2026-11-21). Test fixtures only: synthetic values built for the tests.
+# Any new finding still stops the push. Format: commit:file:rule:line (gitleaks fingerprint).
+ff913eccbde082a6e64f4993918b5721b610f7c3:tests/test_compliance.py:generic-api-key:155
