@@ -1,53 +1,22 @@
 name: tests
-# The suite runs on GitHub's hosted runners, which cost nothing for a public repository:
-#   - every push to main and every pull request: Ubuntu, on the Python 3.9 support floor (ubuntu-24.04) and on 3.12
-#     (ubuntu-latest);
-#   - every Monday: macOS on 3.12 (both Windows legs are off the schedule until WINDOWS-LANE-0.7 and run on demand;
-#     CI-WEEKLY-MACOS);
-#   - on demand, one environment or all, with UTF-8 mode or without it:
-#       gh workflow run tests -f os=windows-latest -f python=3.12
-#       gh workflow run tests -f os=windows-latest -f python=3.12 -f utf8=off
-# Python 3.9 is the support floor (what macOS ships), and on 2026-10-21 GitHub moved ubuntu-latest to Ubuntu 26.04,
-# which has no Python 3.9 build at actions/setup-python: the 3.9 Ubuntu legs run on ubuntu-24.04, the newest Ubuntu
-# image with a 3.9 build, and the pin moves when that image is retired (CI-UBUNTU-39).
-# Every lane's log ends with each test it skipped and the reason (-rs): a test that cannot pass on a
-# platform is skipped there with its reason, never silently absent (#71).
+# One test workflow: every push to main and every pull request, on Ubuntu, on the Python 3.9 support floor
+# (ubuntu-24.04: GitHub moved ubuntu-latest to Ubuntu 26.04 on 2026-10-21, which has no Python 3.9 build at
+# actions/setup-python; the pin moves when that image is retired, CI-UBUNTU-39) and on 3.12 (ubuntu-latest).
+# No schedule and no on-demand lanes: macOS and Windows runs are demand-driven, started by hand from a
+# branch that adds them, not kept here. Every lane's log ends with each test it skipped and the reason (-rs).
+
 on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    - cron: "17 4 * * 1"
-  workflow_dispatch:
-    inputs:
-      os:
-        description: "runner: windows-latest | macos-latest | ubuntu-latest | all"
-        default: windows-latest
-        type: choice
-        options: [windows-latest, macos-latest, ubuntu-latest, all]
-      python:
-        description: "interpreter: 3.9 (support floor) | 3.11 | 3.12"
-        default: "3.12"
-        type: choice
-        options: ["3.9", "3.11", "3.12"]
-      utf8:
-        description: "Python's UTF-8 mode: on, as every lane runs; off, as a default install runs"
-        default: "on"
-        type: choice
-        options: ["on", "off"]
 permissions:
   contents: read
 concurrency:
-  # A newer push to the same branch makes an older run's answer moot; a run someone dispatched
-  # or the weekly one answers a different question and must not cancel it, or be cancelled by it.
-  # So do two dispatches for another runner or interpreter: the release checklist starts one on
-  # Python 3.9 and one on 3.12, and the second cancelled the first (CI-DISPATCH-GROUP).
-  group: tests-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.os }}-${{ inputs.python }}-${{ inputs.utf8 }}
+  group: tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   ubuntu:
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
     strategy:
       fail-fast: false
@@ -68,6 +37,8 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - run: python -m pip install -e ".[dev]"
       - run: python -m pytest -q -rs
 
@@ -97,51 +68,3 @@ jobs:
           range="$BEFORE..$AFTER"
           git cat-file -e "$BEFORE^{commit}" 2>/dev/null || range="$AFTER"
           PYTHONPATH=src python -m polyctl commit-check --range "$range" --since-first-trailer
-
-  weekly:
-    # Both Windows legs (with UTF-8 mode and without) are off the schedule until WINDOWS-LANE-0.7: on 2026-10-26
-    # (run 40305861017, fe89494) macOS passed and both Windows legs failed on the 29 known Windows failures. Run
-    # them by hand with:
-    #   gh workflow run tests -f os=windows-latest -f python=3.12
-    #   gh workflow run tests -f os=windows-latest -f python=3.12 -f utf8=off
-    # (CI-WEEKLY-MACOS).
-    if: github.event_name == 'schedule'
-    name: macos-latest / Python 3.12
-    runs-on: macos-latest
-    # A Windows runner spawns processes slowest: the suite took 37 minutes there on 3.9 and ran past 40 on
-    # 2026-10-12, when the job was cancelled before it said a result (CI-WINDOWS-TIME); on 2026-10-16 it took
-    # 54 minutes on 3.12 and ran past 60 on 3.9, cancelled the same way (CI-WINDOWS-TIME-2).
-    timeout-minutes: 90
-    env:
-      PYTHONDONTWRITEBYTECODE: "1"
-      PYTHONUTF8: "1"
-      PYTHONIOENCODING: utf-8
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.12"
-      - run: python -m pip install -e ".[dev]"
-      - run: python -m pytest -q -rs
-
-  on-demand:
-    if: github.event_name == 'workflow_dispatch'
-    name: ${{ matrix.os }} / Python ${{ inputs.python }}${{ inputs.utf8 == 'off' && ' / no UTF-8 mode' || '' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ${{ fromJSON(inputs.os == 'all' && (inputs.python == '3.9' && '["ubuntu-24.04","macos-latest","windows-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') || format('["{0}"]', inputs.os == 'ubuntu-latest' && inputs.python == '3.9' && 'ubuntu-24.04' || inputs.os)) }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 90                     # as the weekly job's: Windows is the slowest runner (CI-WINDOWS-TIME-2)
-    env:
-      PYTHONDONTWRITEBYTECODE: "1"
-      # Python reads an empty PYTHONUTF8 or PYTHONIOENCODING as unset.
-      PYTHONUTF8: ${{ inputs.utf8 != 'off' && '1' || '' }}
-      PYTHONIOENCODING: ${{ inputs.utf8 != 'off' && 'utf-8' || '' }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: ${{ inputs.python }}
-      - run: python -m pip install -e ".[dev]"
-      - run: python -m pytest -q -rs

@@ -12,6 +12,8 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+- The hosted `tests` workflow is one job set: Ubuntu on Python 3.9 and 3.12 for every push to main and every pull request, with a pip cache; the weekly macOS run and the on-demand lanes are gone, and macOS or Windows runs start by hand from a branch that adds them (the owner's Actions decision of 22 Nov 2026).
+
 ### New commands
 
 - `polyctl slice add/edit --type` selects configurable bugfix, poc, feature or enterprise gate weights, shows the type on the board and binds landing evidence to that profile ([slices](docs/slices.md)) (AIDLC-1)

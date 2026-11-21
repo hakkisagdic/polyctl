@@ -48,7 +48,7 @@ def test_every_action_every_workflow_uses_is_named_by_a_commit_with_its_release_
     uses = [(name, line.strip()) for name in names for line in _text(os.path.join(WORKFLOWS, name)).splitlines()
             if re.match(r"\s*(- )?uses:", line)]
 
-    assert names and len(uses) >= 20
+    assert names and len(uses) >= 15
     unpinned = [(name, line) for name, line in uses
                 if not re.fullmatch(r"(- )?uses: [\w.-]+/[\w./-]+@[0-9a-f]{40} # v\d+(\.\d+)*", line)]
     assert unpinned == []

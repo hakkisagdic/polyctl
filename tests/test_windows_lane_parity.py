@@ -9,9 +9,8 @@ tests/standin.py now writes a stand-in as a program on both: an executable scrip
 `<name>.exe`, as pip writes a console script there - distlib's console launcher, a line naming this interpreter,
 and the script as `__main__.py` in a zip after them. The launcher runs only on Windows; what it hands the
 interpreter - the file itself, which Python runs as a zip application - runs on every platform, and is run here.
-The Windows lane runs on demand (with UTF-8 mode or, as `-f utf8=off`, without it) until WINDOWS-LANE-0.7, while
-the weekly run runs macOS on Python 3.12 alone after the 2026-10-26 scheduled run (40305861017, fe89494) passed on
-macOS and failed on both Windows legs (CI-WEEKLY-MACOS), and every lane's log lists what it skipped and why. The
+The workflow has no schedule and no Windows or macOS lane: such a run is started by hand from a branch that adds
+it (the owner's Actions decision of 22 Nov 2026), and every lane's log lists what it skipped and why. The
 Python 3.9 Ubuntu legs run on ubuntu-24.04 after ubuntu-latest moved to Ubuntu 26.04, which has no 3.9 build at
 actions/setup-python (CI-UBUNTU-39).
 """
@@ -176,36 +175,12 @@ def _job_field(job, field):
     return re.search(rf"^\s+{re.escape(field)}:\s*(.+?)\s*(?:#.*)?$", job, re.M).group(1).strip('"')
 
 
-def test_every_lane_lists_what_it_skipped_and_one_windows_leg_runs_without_utf8_mode():
-    """The Windows lane runs on demand until WINDOWS-LANE-0.7, while the weekly job runs macOS alone (CI-WEEKLY-MACOS)."""
+def test_every_lane_lists_what_it_skipped():
+    """The one test workflow runs every lane with -rs, so a skip names its reason (no weekly or on-demand lanes)."""
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
-    header = workflow.split("\non:\n", 1)[0]
-    assert "every Monday: macOS on 3.12" in header and "WINDOWS-LANE-0.7" in header
-
+    assert "schedule:" not in workflow and "workflow_dispatch" not in workflow
     runs = re.findall(r"^\s+- run: (python -m pytest.*)$", workflow, re.M)
-    assert len(runs) == 3 and all(run == "python -m pytest -q -rs" for run in runs), runs
-
-    weekly = _job_text(workflow, "weekly")
-    weekly_uncommented = "\n".join(line.split("#", 1)[0] for line in weekly.splitlines())
-    assert "windows" not in weekly_uncommented.lower()
-    assert (_job_field(weekly, "name"), _job_field(weekly, "runs-on"), _job_field(weekly, "python-version")) == (
-        "macos-latest / Python 3.12", "macos-latest", "3.12")
-    assert "WINDOWS-LANE-0.7" in weekly
-
-    on_demand = _job_text(workflow, "on-demand")
-    inputs = {"os": "windows-latest", "python": "3.12", "utf8": "off"}
-    runners = _gh_render(_job_field(on_demand, "os"), inputs=inputs)
-    assert runners == ["windows-latest"]
-    matrix = {"os": runners[0]}
-    assert (_gh_render(_job_field(on_demand, "name"), inputs=inputs, matrix=matrix),
-            _gh_render(_job_field(on_demand, "runs-on"), inputs=inputs, matrix=matrix),
-            _gh_render(_job_field(on_demand, "python-version"), inputs=inputs, matrix=matrix)) == (
-        "windows-latest / Python 3.12 / no UTF-8 mode", "windows-latest", "3.12")
-    # Python reads an empty PYTHONUTF8 as unset: the leg runs as a default install does.
-    assert "PYTHONUTF8: ${{ inputs.utf8 != 'off' && '1' || '' }}" in on_demand
-    assert "PYTHONIOENCODING: ${{ inputs.utf8 != 'off' && 'utf-8' || '' }}" in on_demand
-    assert (_gh_render(_job_field(on_demand, "PYTHONUTF8"), inputs=inputs, matrix=matrix),
-            _gh_render(_job_field(on_demand, "PYTHONIOENCODING"), inputs=inputs, matrix=matrix)) == ("", "")
+    assert len(runs) == 1 and runs[0] == "python -m pytest -q -rs", runs
 
 
 def test_python_39_ubuntu_lanes_run_on_an_image_with_a_39_build_and_never_on_ubuntu_latest():
@@ -225,30 +200,3 @@ def test_python_39_ubuntu_lanes_run_on_an_image_with_a_39_build_and_never_on_ubu
         ("ubuntu-24.04 / Python 3.9", "ubuntu-24.04", "3.9"),
         ("ubuntu-latest / Python 3.12", "ubuntu-latest", "3.12"),
     ]
-
-    on_demand = _job_text(workflow, "on-demand")
-    os_expr = _job_field(on_demand, "os")
-    name_tpl = _job_field(on_demand, "name")
-    runs_on_tpl = _job_field(on_demand, "runs-on")
-    py_tpl = _job_field(on_demand, "python-version")
-    dispatched = []
-    for os_choice in ("windows-latest", "macos-latest", "ubuntu-latest", "all"):
-        for py_choice in ("3.9", "3.11", "3.12"):
-            for utf8_choice in ("on", "off"):
-                inputs = {"os": os_choice, "python": py_choice, "utf8": utf8_choice}
-                runners = _gh_render(os_expr, inputs=inputs)
-                expected_ubuntu = "ubuntu-24.04" if py_choice == "3.9" else "ubuntu-latest"
-                expected_runners = ([expected_ubuntu, "macos-latest", "windows-latest"] if os_choice == "all"
-                                    else [expected_ubuntu if os_choice == "ubuntu-latest" else os_choice])
-                assert runners == expected_runners, (inputs, runners)
-                suffix = " / no UTF-8 mode" if utf8_choice == "off" else ""
-                for runner in runners:
-                    matrix = {"os": runner}
-                    leg = (_gh_render(name_tpl, inputs=inputs, matrix=matrix),
-                           _gh_render(runs_on_tpl, inputs=inputs, matrix=matrix),
-                           _gh_render(py_tpl, inputs=inputs, matrix=matrix))
-                    assert leg == (f"{runner} / Python {py_choice}{suffix}", runner, py_choice)
-                    dispatched.append(leg)
-
-    legs_39 = [leg for leg in ubuntu_legs + dispatched if leg[2] == "3.9"]
-    assert legs_39 and all(runs_on != "ubuntu-latest" and "ubuntu-latest" not in name for name, runs_on, _ in legs_39)

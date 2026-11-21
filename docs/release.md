@@ -66,16 +66,14 @@ The repository's pre-push hook runs the whole suite on this machine before anyth
 git push origin main
 ```
 
-## 4. Tests green on Linux, macOS and Windows (person starts the runs; anyone reads them)
+## 4. Tests green on Linux (anyone reads the runs)
 
 The push runs Ubuntu on Python 3.9 (`ubuntu-24.04`, the newest Ubuntu image with a 3.9 build) and
-3.12 (`ubuntu-latest`) by itself. Run all three operating systems on the support floor and on a
-current interpreter, on the release commit that main now points at, and read every run green
-(`-f os=all -f python=3.9` runs its Ubuntu leg on `ubuntu-24.04` too).
+3.12 (`ubuntu-latest`) by itself, and that is the hosted run: the workflow has no on-demand lanes.
+Read both runs green on the release commit that main now points at. A macOS or Windows run, when
+wanted, is started by hand from a branch that adds the lane.
 
 ```bash
-gh workflow run tests --ref main -f os=all -f python=3.9
-gh workflow run tests --ref main -f os=all -f python=3.12
 gh run list --workflow tests --limit 8
 ```
 
