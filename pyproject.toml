@@ -55,6 +55,8 @@ packages = ["src/polyctl"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/polyctl", "docs", "README.md", "README.tr.md", "LICENSE", "pyproject.toml"]
+# Kept out of the published sdist (owner-internal planning notes).
+exclude = ["docs/GELIR_MODELI.md", "docs/RAKIP_ANALIZI.md"]
 
 [project.optional-dependencies]
 # pytest-xdist runs the suite in parallel in the pre-push hook (PREPUSH-PARALLEL); without it the hook runs one.

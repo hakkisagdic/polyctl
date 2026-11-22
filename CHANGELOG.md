@@ -12,6 +12,8 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-22
+
 - The hosted `tests` workflow is one job set: Ubuntu on Python 3.9 and 3.12 for every push to main and every pull request, with a pip cache; the weekly macOS run and the on-demand lanes are gone, and macOS or Windows runs start by hand from a branch that adds them (the owner's Actions decision of 22 Nov 2026).
 
 ### New commands
@@ -20,6 +22,13 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 - `polyctl spec check <slice>` checks required sections, named tests for acceptance criteria and external claim sources before feature/enterprise review, with configurable requirements and advisory findings for bugfix/poc ([specs](docs/specs.md)) (AIDLC-2)
 - `polyctl mail send` now accepts `--from` and `--to` (`implementer`, `architect`, `reviewer`, `admin` or `person`), keeping the default `architect`-to-`implementer` address when omitted, and `polyctl mail list` shows `from → to` beside each pending file (ADMIN-FINDINGS-1).
 - `polyctl archon` adds a standard-library CLI bridge (`doctor`, `runs`, `gate`, `record`, `notify`, `leftovers`) with single-line JSON output and hash-chained run events in `.polyctl/ledger/archon.jsonl` ([archon](docs/archon.md)).
+- Open-core billing: a payment provider abstraction (iyzico or local), usage metering, a spend-cap gate and invoice storage (P0-1, P0-2).
+- A read-only web dashboard for FinOps and governance at `/billing` and `/api/billing` in `polyctl watch --web` (P0-4).
+- A pre-commit secret and personal-data scanner (P0-3).
+- Team role-based access and policy-as-code enforcement through `polyctl` policy checks (P1-2).
+- Enterprise compliance and audit evidence bundles, exported and verified from the ledger (P1-1).
+- A `harnessrouter` reviewer adapter (tier 3, UHP), and `api_review` accepts the canonical `<harness_id>/<model>` form on `/responses`.
+- The skill playbook gains MCP adoption guidance, with parity tests between the CLI and the MCP tools.
 
 ### Behaviour changes
 
@@ -720,7 +729,8 @@ backlog row it closed.
 
 - The first release: attach to a coding agent already running, watch it, restart it when it stalls, run its gates independently, and decide from that evidence what may be committed (7fb15cf).
 
-[Unreleased]: https://github.com/hakkisagdic/polyctl/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/hakkisagdic/polyctl/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/hakkisagdic/polyctl/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/hakkisagdic/polyctl/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/hakkisagdic/polyctl/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/hakkisagdic/polyctl/compare/v0.5.1...v0.5.2
