@@ -75,9 +75,10 @@ off here, polyctl appends nothing after it, and `polyctl doctor` names it.*
   PowerShell; it spends nothing, and is off until someone on Windows turns it on (#9).
 
 Watching pull requests is a setting, not a switch, because it spends no model's quota: with
-`pr.watch` on, `polyctl pr watch --once` reads the pull requests of this checkout's branches through gh,
-never writes to GitHub, and mails the implementer a failed check, a merge conflict or requested
-changes, once each ([pr.md](pr.md)).
+`pr.watch` on, a watchdog cycle reads the pull requests of this checkout's branches through gh,
+at most every `pr.watch_minutes`, never writes to GitHub, and mails the implementer a failed check,
+a merge conflict or requested changes, once each. `polyctl pr watch --once` runs that same pass
+by hand ([pr.md](pr.md)).
 
 ## Bypass, on the record
 

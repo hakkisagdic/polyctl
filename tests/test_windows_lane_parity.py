@@ -29,9 +29,9 @@ from tests import standin
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = "import sys\nprint('ran', sys.argv[1:])\n"
 # The tests still skipped on Windows for a script its shebang runs, and why each is: the fake gh of `polyctl pr watch`
-# is no reviewer's or authority's harness and is not yet a program, and the suite's own test of the python it
-# puts on PATH for such scripts, which it puts there on POSIX alone.
-STILL_BY_SHEBANG = {"test_pr_watch.py", "test_suite_isolation.py"}
+# and of the watchdog cycle that runs it is no reviewer's or authority's harness and is not yet a program, and the
+# suite's own test of the python it puts on PATH for such scripts, which it puts there on POSIX alone.
+STILL_BY_SHEBANG = {"test_pr_watch.py", "test_pr_watch_cycle.py", "test_suite_isolation.py"}
 
 
 # ---- a stand-in is a program ---------------------------------------------------------------------------

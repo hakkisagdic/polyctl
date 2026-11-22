@@ -2,17 +2,36 @@
 
 polyctl governs what lands in a checkout. What becomes of a branch once a person pushes it is GitHub's
 to say: a check that failed there, a conflict with the base branch, a reviewer who asked for
-changes. Each of them waited until somebody opened the page. `polyctl pr watch --once` reads the open
-pull requests of this checkout's branches and mails the implementer each such fact, once.
+changes. `polyctl pr watch --once` reads the open pull requests of this checkout's branches and mails
+the implementer each such fact, once. With `pr.watch` on, a watchdog cycle runs that pass.
 
 *In polyctl since slice PR-WATCH: `polyctl pr watch --once`, the `pr.watch` setting and `.polyctl/pr-watch.json`.
-It is one pass that a person starts, and it is not wired into the watchdog: running it on the
-watchdog's cycle, so that nobody has to start it, is the next slice.*
+With `pr.watch` on, a watchdog cycle runs the same pass, so nobody has to start it (PR-WATCH-CYCLE).*
 
 ```bash
-polyctl config set pr.watch on     # this project; off by default
-polyctl pr watch --once            # one pass: read, mail what is new, exit
+polyctl config set pr.watch on          # this project; off by default
+polyctl config set pr.watch_minutes 30  # optional; 15 by default, and a value under 5 is refused
+polyctl pr watch --once                 # one pass by hand: read, mail what is new, exit
 ```
+
+## On a watchdog cycle
+
+`pr.watch` is off by default, and a cycle with it off asks gh nothing and writes no
+`.polyctl/pr-watch.last`. With it on, each live watchdog cycle runs the pass `polyctl pr watch --once`
+runs. It reads at most once every `pr.watch_minutes` (15 by default; `polyctl config set` refuses a
+value under 5). The time of the last attempt is `.polyctl/pr-watch.last` (one integer, and the file's
+mtime), and the attempt is written after every read, including one that failed, so a gh that cannot
+answer is not asked on every cycle. What was mailed stays in `.polyctl/pr-watch.json`, in the same
+shape, one fact once per head.
+
+A read that fails (gh missing, gh not authenticated, or gh failing) mails nothing and leaves
+`.polyctl/pr-watch.json` untouched. It raises one alarm to a person, keyed `pr-watch-unreadable`, and
+the alarm says what `polyctl pr watch --once` would have printed: `gh auth login`, or the places
+polyctl looked for gh (PATH, `binaries.extra_dirs`, the usual install directories). The alarm stays
+quiet for six hours. A later pass that reads says nothing more.
+
+A dry cycle (`--dry-run`) asks gh nothing and writes no `.polyctl/pr-watch.last`. `polyctl pr watch --once`
+remains one pass by hand, with the same exits.
 
 ## It reads, and never writes
 

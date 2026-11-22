@@ -125,7 +125,7 @@ Only these, each once someone has set it up; take the setup away and it stops.
 | A backup or the mail store on a remote | `polyctl backup --to remote:<name>`, `mail.sync_repo` | GitHub, asked through your `gh` whether the repository is private, then that remote through git | the governance files, or the mail records, scanned for credentials first; nothing unless the host says the repository is private. With `mail.sync_repo` set, each `polyctl doctor` run also asks the remote how far its copy is, and GitHub whether it is still private ([recovery.md](recovery.md), [messaging.md](messaging.md)) |
 | The account lookup | an implementer whose adapter declares one; Kiro's does | that harness's provider | a request for the account's usage, with the token its CLI already holds, from `polyctl credits`, `polyctl cost`, `polyctl digest`, `polyctl handoff` and the watchdog every thirty minutes; `polyctl credits --all` takes one per shipped adapter that declares one, and `polyctl credits --offline` skips it ([telemetry.md](telemetry.md)) |
 | Borrowed harness content | `polyctl content add` | the source you name, through git | a fetch of the one commit it is pinned to; `polyctl content verify` reads only the files on disk |
-| Pull requests | `polyctl config set pr.watch on`, then `polyctl pr watch --once` | GitHub, asked through your `gh` | two reads a pass: `gh pr list` for this checkout's open pull requests, and `gh pr view` for each of this project's; nothing is written to GitHub ([pr.md](pr.md)) |
+| Pull requests | `polyctl config set pr.watch on` | GitHub, asked through your `gh` | with `pr.watch` on, a watchdog cycle reads on its own, with nobody starting it, at most every `pr.watch_minutes`: `gh pr list` for this checkout's open pull requests and `gh pr view` for each of this project's; `polyctl pr watch --once` is the same read by hand; nothing is written to GitHub ([pr.md](pr.md)) |
 | Updating polyctl | `polyctl update`, which prints the command it will run and asks first | the clone's git remote, or the source of the tool that installed polyctl: Homebrew, pipx, uv or pip | that tool's own requests for the newer polyctl; polyctl adds nothing of its own ([getting-started.md](getting-started.md)) |
 | A2A | `polyctl a2a serve`, `polyctl a2a-mcp serve` | 127.0.0.1 only, answering a request named for that address alone; the agents in `.polyctl/a2a-agents.json` or `~/.polyctl/a2a-agents.json` | the board, to anything on this machine; the messages you send, to the agents you registered, with the headers registered for them - a credential among them read from the variable it names ([mcp.md](mcp.md)) |
 
@@ -146,7 +146,7 @@ weakens another; `tests/test_triage_highs.py` holds both. With `--tls none` noth
 password included.*
 
 `gh` is asked only these reads - whether a repository is private, and with `pr.watch` on the open
-pull requests - the two refs above are all polyctl ever pushes, and polyctl never grants `push` to an agent
+pull requests, which a watchdog cycle reads on its own - the two refs above are all polyctl ever pushes, and polyctl never grants `push` to an agent
 ([safety.md](safety.md)). `polyctl watch --web` serves its pages on 127.0.0.1 alone and answers only a
 request addressed to it there, so nothing of it leaves the machine, though anyone logged in to the
 machine can read it ([surfaces.md](surfaces.md)). When keyflip is installed polyctl asks it for

@@ -23,6 +23,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Behaviour changes
 
+- With `pr.watch` on, a watchdog cycle reads this checkout's open pull requests through gh, the same read as `polyctl pr watch --once`, at most every `pr.watch_minutes` (15 by default, and at least 5), and mails the implementer a failed check, a merge conflict or requested changes, once each. A read that fails raises one alarm to a person and waits out that interval before it tries again. Off, and on a dry run, nothing is read (PR-WATCH-CYCLE).
 - `polyctl mode lite --by <name>` now records the `HEAD` it started at so `polyctl mode show` counts the commits in the lite window and `polyctl mode full --by <name>` can preview (`--plan`), review (`--review-lite all|<sha>[,<sha>...]|none`), queue board and mail fix items for findings, retry pending reviews in `polyctl catchup`, and record unselected window commits as accepted unreviewed on the ledger (LITE-CATCHUP-1).
 
 ### Fixes

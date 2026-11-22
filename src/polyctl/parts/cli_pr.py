@@ -9,13 +9,14 @@ def cmd_pr(cfg, args):
     """One read of this checkout's pull requests through gh; each new fact mailed to the implementer once (PR-WATCH).
 
     Opt-in, because it reaches GitHub on the project's behalf; read-only there, because gh is asked
-    `pr list` and `pr view` and nothing else; and one pass, because the watchdog does not run it yet.
+    `pr list` and `pr view` and nothing else; and one pass, because it does not loop. With `pr.watch`
+    on, the watchdog's cycle runs the same pass.
     Exit 2 when it is off or asked to loop, 1 when gh cannot answer - nothing is mailed or recorded
     then - and 0 after a pass, whatever it found, or when it stood down for a pass already running.
     """
     if not args.once:
         print("polyctl pr watch runs one pass and exits: `polyctl pr watch --once`. It does not loop on its own; "
-              "running it on the watchdog's cycle comes in a later slice")
+              "with `pr.watch` on, the watchdog's cycle runs the same pass")
         return 2
     if S.get(cfg, "pr.watch") != "on":
         print(f"{C['yellow']}pr watch is off{C['reset']} for this project, so nothing was read. "

@@ -146,6 +146,9 @@ SETTINGS = {
         "off", str, None, None, "project",
         "on: polyctl pr watch --once reads this checkout's pull requests through gh and mails the implementer what "
         "needs it; off: it reads nothing"),
+    "pr.watch_minutes": Setting(
+        15, int, 5, None, "project",
+        "minutes between reads of this checkout's pull requests on a watchdog cycle, when pr.watch is on; at least 5"),
     "mail.store": Setting(
         "deletion", str, None, None, "project",
         "deletion: handled mail is deleted; append-only: messages are kept and handling is a record"),

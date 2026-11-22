@@ -3097,6 +3097,83 @@ def ring_unseen_requests(root, cfg, st, restart, told=()):
         save_state(root, st)
 
 
+def _pr_watch_last_path(root):
+    """The sidecar that says when a cycle last attempted to read pull requests. Not the mail record."""
+    return os.path.join(root, ".polyctl", "pr-watch.last")
+
+
+def _pr_watch_attempt_at(path):
+    """When the last attempt was, or None when the sidecar is absent.
+
+    The file holds that instant as one integer and as its mtime. Aging either one — rewriting the
+    integer, or moving the mtime — is enough: the earlier of the two is the attempt.
+    """
+    try:
+        when = os.path.getmtime(path)
+    except OSError:
+        return None
+    try:
+        with open(path, encoding=UTF8) as fh:
+            recorded = int(fh.read().strip())
+    except (OSError, ValueError):
+        return when
+    return min(when, float(recorded))
+
+
+def _record_pr_watch_attempt(path):
+    """The attempt stands from now, as one integer and as the file's mtime."""
+    now = time.time()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding=UTF8) as fh:
+        fh.write(f"{int(now)}\n")
+    os.utime(path, (now, now))
+
+
+def _alarm_pr_watch(root, exc):
+    """One alarm to a person that this cycle could not read pull requests. A channel that fails stays here."""
+    text = " ".join(str(exc).split()) or type(exc).__name__
+    try:
+        notify(f"{A.project_key(root)}: pull requests could not be read", text, root,
+               key="pr-watch-unreadable", window=6 * 3600, audience="human")
+    except Exception as told:
+        print(f"the pull-request alarm could not be raised ({type(told).__name__})")
+
+
+def run_pr_watch(root, cfg, dry_run):
+    """One read of this checkout's pull requests on a watchdog cycle, when pr.watch is on.
+
+    gh is the one `pr_watch` already runs, bounded by the timeout those calls already have. A dry
+    cycle, and a project with pr.watch off, asks nothing and writes no `.polyctl/pr-watch.last`.
+    A cycle skips the read while the last attempt is under `pr.watch_minutes` old. The attempt is
+    recorded after it, a failure included, so a gh that cannot answer is not asked every cycle.
+    Any failure raises one alarm to a person and never ends the cycle. A pass that reads says nothing more.
+    """
+    if dry_run:
+        return
+    path = _pr_watch_last_path(root)
+    attempted = False
+    try:
+        if S.get(cfg, "pr.watch") != "on":
+            return
+        last = _pr_watch_attempt_at(path)
+        if last is not None and time.time() - last < S.get(cfg, "pr.watch_minutes") * 60:
+            return
+        attempted = True
+        gh = A.runnable_binary("gh")
+        if not gh:
+            raise OSError("gh is not on this machine (PATH, binaries.extra_dirs, the usual install "
+                          "directories): polyctl reads pull requests only through GitHub's CLI. Install it and "
+                          "run `gh auth login`; nothing was mailed")
+        A.pr_watch(root, cfg, gh)
+    except Exception as exc:
+        _alarm_pr_watch(root, exc)
+    if attempted:
+        try:
+            _record_pr_watch_attempt(path)
+        except OSError:
+            pass
+
+
 def _cycle_impl(args, root):
     # The silence this cycle ends is read before its own heartbeat overwrites it.
     silence = A.heartbeat_age(root)
@@ -3130,6 +3207,8 @@ def _cycle_impl(args, root):
     if not args.dry_run:
         landed = report_ungranted_commits(root, A.project_key(root))
         _FACTS["ungranted_commits"] = landed[:120] if landed else None
+        # Opt-in, and before a missing transcript can end the cycle: GitHub is not the session.
+        run_pr_watch(root, cfg, args.dry_run)
     impl = cfg.get("implementer") or {}
     if not impl:
         if not A.hold_state(root) and slice_budget(root, cfg, dry_run=args.dry_run):

@@ -325,7 +325,8 @@ def build_parser(root=None, prog=None):
     pw = sub.add_parser("pr", help="read this checkout's pull requests through gh and mail the implementer what "
                                    "needs it; never writes to GitHub")
     pw.add_argument("action", choices=["watch"])
-    pw.add_argument("--once", action="store_true", help="one pass, then exit; the watchdog does not run it yet")
+    pw.add_argument("--once", action="store_true",
+                    help="one pass, then exit; with pr.watch on, the watchdog's cycle runs the same pass")
     pw.set_defaults(fn=cmd_pr)
     hs = sub.add_parser("harness", help="probe: ask each harness that speaks ACP what it supports, sending no prompt; "
                                         "seen: a person reads the harness configuration an agent changed here, and "
