@@ -253,6 +253,8 @@ anomaly: deleted, or with `mail.store` append-only recorded handled, which the s
 actor deciding what was handled so that it cannot erase the question ([protocol.md](protocol.md#delivery-by-deletion)).
 The architect's mail and the watchdog's is acknowledged by the one it is for, with `polyctl mail ack`.*
 
+`polyctl_inbox` and `polyctl_ack` read and remove mail only in a mailbox folder inside the project: an absolute `mailbox`, or one whose real path lies outside the project, is refused, the mailbox directory may be a symlink only when its real path stays inside the project, and a mail entry that is a symlink or not a regular file is left unread and is not removed. `polyctl_report` and `polyctl_status` use that same boundary and regular-file rule.
+
 `polyctl_report {kind: "blocked"}` writes the marker the watchdog escalates on within
 one cycle. That matters more than it sounds: three finished slices once sat for
 half a day because a detector had to infer a blockage the agent already knew
