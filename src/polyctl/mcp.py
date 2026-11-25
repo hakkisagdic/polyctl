@@ -943,7 +943,8 @@ def call(name, args, cfg, allow_verify, role=None, project_scope=None):
     if name == "polyctl_candidate":
         return _attach_project(candidate_payload(cfg), project_name, project_scope)
     if name == "polyctl_notices":
-        return _attach_project({"notices": A.notices(root, args.get("limit", 10),
+        limit = args.get("limit")
+        return _attach_project({"notices": A.notices(root, 10 if limit is None else limit,
                                                      args.get("include_suppressed", False))},
                                project_name, project_scope)
     if name == "polyctl_fleet":

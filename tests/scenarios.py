@@ -99,7 +99,16 @@ class World:
 
         class _Proc:
             pid = 99999
-        mp.setattr(W.subprocess, "Popen", lambda argv, **kw: w.spawned.append(argv) or _Proc())
+            returncode = 0
+
+            def __init__(self, text=False):
+                self._text = text
+
+            def communicate(self, *a, **k):
+                return ("", "") if self._text else (b"", b"")
+        mp.setattr(W.subprocess, "Popen",
+                   lambda argv, **kw: w.spawned.append(argv) or _Proc(
+                       bool(kw.get("text") or kw.get("encoding") or kw.get("universal_newlines"))))
         mp.setattr(A, "turn_ended", lambda cfg: w.turn_ended)
         mp.setattr(A, "discover_architect", lambda cwd: {"session": "sess-1", "age": 9999})
         mp.setattr(A, "provider_window", lambda name="claude": None)
