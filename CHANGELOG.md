@@ -12,6 +12,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+### Security
+
+- `polyctl_inbox` and `polyctl_ack` keep the mailbox inside the project: a `mailbox` that is absolute, names the project root itself, or resolves outside is refused, a symlink directory is kept only when its real path stays inside, and a mail entry that is a symlink or not a regular file (such as a FIFO or directory) is not read, ingested, or removed; `polyctl_report` and the mailbox list on `polyctl_status` use that same boundary and regular-file rule ([mcp](docs/mcp.md)).
+
 ## [0.8.0] - 2026-11-22
 
 - The hosted `tests` workflow is one job set: Ubuntu on Python 3.9 and 3.12 for every push to main and every pull request, with a pip cache; the weekly macOS run and the on-demand lanes are gone, and macOS or Windows runs start by hand from a branch that adds them (the owner's Actions decision of 22 Nov 2026).

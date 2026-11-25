@@ -1231,6 +1231,7 @@ def ingest_mail(root, cfg):
     appends its ledger row inside the lock and calls this only after releasing it. The lock is not
     re-entrant.
     """
+    import stat
     from .storage import _exclusive_lock, replace_file_durably
     os.makedirs(os.path.join(root, ".polyctl", "mail"), exist_ok=True)
     box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
@@ -1243,14 +1244,25 @@ def ingest_mail(root, cfg):
         for name in sorted(views | stored):
             if name == "README.md" or not name.endswith(".md") or name in known:
                 continue
-            source = os.path.join(box, name) if name in views else _store_path(root, name)
+            in_views = name in views
+            if in_views:
+                try:
+                    st = os.lstat(os.path.join(box, name))
+                except OSError:
+                    in_views = False
+                else:
+                    if not stat.S_ISREG(st.st_mode):
+                        in_views = False
+            if not in_views and name not in stored:
+                continue
+            source = os.path.join(box, name) if in_views else _store_path(root, name)
             with open(source, "rb") as fh:
                 data = fh.read()
-            if name in views and len(data) == 0:
+            if in_views and len(data) == 0:
                 continue                               # the body is not in the file yet; the next ingest takes it
-            if name not in views and data.startswith(b"polyctl-mail-stub v1\n"):
+            if not in_views and data.startswith(b"polyctl-mail-stub v1\n"):
                 continue
-            if name in views:
+            if in_views:
                 replace_file_durably(_store_path(root, name), data)
             meta = mail_meta(source)
             _mail_store_append(root, {"event": "message", "id": name,
@@ -1269,12 +1281,14 @@ def unhandled_messages(root):
 
 def handle_message(root, cfg, mid, by, outcome):
     """Record that a message was handled, by whom and how; its view file then goes, its record never (#80)."""
+    import stat
     if mid not in unhandled_messages(root):
         return False
     _mail_store_append(root, {"event": "handled", "id": mid, "by": by, "outcome": outcome})
     view = os.path.join(root, cfg.get("mailbox", "agent-mail"), mid)
     try:
-        os.remove(view)
+        if stat.S_ISREG(os.lstat(view).st_mode):
+            os.remove(view)
     except FileNotFoundError:
         pass
     return True

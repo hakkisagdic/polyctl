@@ -2390,6 +2390,28 @@ def _unrecorded_slice_review(root, reviews_dir, slice_id, recorded):
     return None
 
 
+def contained_mailbox(root, mail_dir):
+    """The real path of the mailbox directory when it stays inside the project, else None.
+
+    Config joins `mailbox` onto the project with no check, so `../other/agent-mail` and an absolute
+    path could be read and removed outside it. Returns the resolved real path only when `mail_dir`
+    is a non-empty relative path whose real path lies strictly inside the real path of `root`.
+    A symlink directory is kept only when its real path stays inside the project.
+    """
+    if not isinstance(mail_dir, str) or not mail_dir or os.path.isabs(mail_dir):
+        return None
+    try:
+        real_root = os.path.realpath(root)
+        real_target = os.path.realpath(os.path.join(root, mail_dir))
+        norm_root = os.path.normcase(real_root)
+        norm_target = os.path.normcase(real_target)
+        if os.path.commonpath((norm_root, norm_target)) != norm_root or norm_target == norm_root:
+            return None
+    except (OSError, ValueError):
+        return None
+    return real_target
+
+
 def mailbox(root, mail_dir):
     d = os.path.join(root, mail_dir)
     files = [f for f in sorted(os.listdir(d)) if f != "README.md" and f.endswith(".md")] if os.path.isdir(d) else []

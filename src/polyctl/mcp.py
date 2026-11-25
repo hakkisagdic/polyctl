@@ -34,6 +34,7 @@ import math
 import os
 import re
 import shlex
+import stat
 import sys
 import time
 import urllib.parse
@@ -51,6 +52,7 @@ UNSUPPORTED_PROTOCOL_VERSION = -32022
 RESOURCE_SCHEME = "polyctl"
 RESOURCE_MIME_TYPE = "application/json"
 PROJECT_SCOPES = ("all",)
+_MAILBOX_OUTSIDE = "the mailbox must be a folder inside the project"
 CAPABILITIES = {"tools": {}, "resources": {}, "prompts": {}}
 SLICE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?\Z")
 QUESTION_ID_RE = re.compile(r"D-\d+\Z")
@@ -439,6 +441,53 @@ def tools_for_role(role, project_scope=None):
     return listed
 
 
+def _is_regular_mail_file(path):
+    """Whether `path` itself is a regular file (never following symlinks, skipping FIFOs and dirs)."""
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def _status_mailbox(root, mail_dir):
+    """Contained mailbox entries for `polyctl_status`: regular files plus append-only store rows."""
+    directory = A.contained_mailbox(root, mail_dir)
+    if directory is None:
+        return []
+    entries = A.mailbox(root, directory)
+    if not entries:
+        return []
+    unhandled_store = set(A.unhandled_messages(root)) if A.mail_store_mode(root) == "append-only" else set()
+    visible = []
+    for name in entries:
+        try:
+            st = os.lstat(os.path.join(directory, name))
+        except FileNotFoundError:
+            if name in unhandled_store:
+                visible.append(name)
+            continue
+        except OSError:
+            continue
+        if stat.S_ISREG(st.st_mode):
+            visible.append(name)
+    return visible
+
+
+def _check_ack_entry(path, mid):
+    """Validate that an existing mailbox entry `path` is a regular file, or return `'missing'` / error."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return "missing"
+    except OSError:
+        return f"{mid} is not a regular file, so polyctl_ack does not take it"
+    if stat.S_ISLNK(st.st_mode):
+        return f"{mid} is a link, so polyctl_ack does not take it"
+    if not stat.S_ISREG(st.st_mode):
+        return f"{mid} is not a regular file, so polyctl_ack does not take it"
+    return None
+
+
 def status_payload(cfg):
     from . import cli, watchdog as W
     root = cfg["root"]
@@ -475,7 +524,7 @@ def status_payload(cfg):
          "head": g["log"][0] if g["log"] else None,
          "dirty_files": len(g["dirty"]), "unpushed": g["ahead"],
          "behind": g.get("behind"), "base": g.get("base"), "merged": g.get("merged"),
-         "mailbox": A.mailbox(root, cfg["mailbox"]),
+         "mailbox": _status_mailbox(root, cfg.get("mailbox", "agent-mail")),
          "reviews": [{"file": f, "verdict": v} for f, v in revs],
          "throughput": A.throughput(root, cfg),
          "held": A.hold_state(root),
@@ -959,12 +1008,20 @@ def call(name, args, cfg, allow_verify, role=None, project_scope=None):
         # thing drifting apart.
         reader = role or A.invoking_role() or "implementer"
         box = cfg.get("mailbox", "agent-mail")
+        directory = A.contained_mailbox(root, box)
+        if directory is None:
+            return {"error": _MAILBOX_OUTSIDE}
         out = []
-        for m in A.mailbox(root, box):
+        for m in A.mailbox(root, directory):
+            path = os.path.join(directory, m)
+            # A symlink is followed by open, and a non-regular file can be a directory or FIFO: neither is mail.
+            if not _is_regular_mail_file(path):
+                continue
             if not A.addressed_to(m, cfg, reader, root=root):
                 continue                     # our own outbound, or the watchdog's; not addressed to us
             try:
-                body = open(os.path.join(root, box, m), errors="replace", encoding=UTF8).read(20000)
+                with open(path, errors="replace", encoding=UTF8) as fh:
+                    body = fh.read(20000)
             except OSError:
                 continue
             out.append({"id": m, "body": body})
@@ -976,16 +1033,23 @@ def call(name, args, cfg, allow_verify, role=None, project_scope=None):
     if name == "polyctl_ack":
         reader = role or A.invoking_role() or "implementer"
         box = cfg.get("mailbox", "agent-mail")
-        mid = os.path.basename(args.get("id", ""))
-        path = os.path.join(root, box, mid)
-        if not mid or mid == "README.md":
+        directory = A.contained_mailbox(root, box)
+        if directory is None:
+            return {"error": _MAILBOX_OUTSIDE}
+        raw_id = args.get("id", "")
+        mid = os.path.basename(raw_id) if isinstance(raw_id, str) else ""
+        if not mid or mid in (".", "..", "README.md"):
             return {"error": f"no such message: {args.get('id')}"}
-        if not os.path.exists(path):
+        path = os.path.join(directory, mid)
+        entry_problem = _check_ack_entry(path, mid)
+        if entry_problem == "missing":
             if A._already_acknowledged(root, cfg, mid, reader):
                 return _attach_project({"acknowledged": mid, "already_handled": True,
                                         "outcome": args.get("outcome", "applied")},
                                        project_name, project_scope)
             return {"error": f"no such message: {args.get('id')}"}
+        if entry_problem is not None:
+            return {"error": entry_problem}
         if A.mail_recipient_role(mid, cfg, root=root) == "anyone" and A._handled_by_reader(root, mid, reader):
             return _attach_project({"acknowledged": mid, "already_handled": True,
                                     "outcome": args.get("outcome", "applied")},
@@ -1003,11 +1067,26 @@ def call(name, args, cfg, allow_verify, role=None, project_scope=None):
             A.mail_ledger_append(root, {"event": "consumed", "id": mid, "by": reader,
                                         "outcome": args.get("outcome", "applied")})
         else:
+            # Re-verify containment and lstat+S_ISREG immediately before removing or ingesting to
+            # narrow the TOCTOU window (full closure would require dir_fd / O_NOFOLLOW).
+            live_dir = A.contained_mailbox(root, box)
+            if live_dir is None:
+                return {"error": _MAILBOX_OUTSIDE}
+            live_path = os.path.join(live_dir, mid)
+            live_problem = _check_ack_entry(live_path, mid)
+            if live_problem == "missing":
+                if A._already_acknowledged(root, cfg, mid, reader):
+                    return _attach_project({"acknowledged": mid, "already_handled": True,
+                                            "outcome": args.get("outcome", "applied")},
+                                           project_name, project_scope)
+                return {"error": f"no such message: {args.get('id')}"}
+            if live_problem is not None:
+                return {"error": live_problem}
             if A.mail_store_mode(root) == "append-only":
                 A.ingest_mail(root, cfg)
                 A.handle_message(root, cfg, mid, reader, args.get("outcome", "applied"))   # a record (#80)
             else:
-                os.remove(path)
+                os.remove(live_path)
             A.mail_ledger_append(root, {"event": "consumed", "id": mid, "by": reader,
                                         "outcome": args.get("outcome", "applied")})
         A.record_notice(root, "ack", f"{mid}: {args.get('outcome', 'applied')}",
@@ -1019,7 +1098,10 @@ def call(name, args, cfg, allow_verify, role=None, project_scope=None):
         if args.get("slice") is not None and not valid_caller_id("slice", args.get("slice")):
             return {"error": f"invalid slice id {args.get('slice')!r}"}
         box = cfg.get("mailbox", "agent-mail")
-        os.makedirs(os.path.join(root, box), exist_ok=True)
+        directory = A.contained_mailbox(root, box)
+        if directory is None:
+            return {"error": _MAILBOX_OUTSIDE}
+        os.makedirs(directory, exist_ok=True)
         kind = args.get("kind", "status")
         # `blocked` writes the marker the watchdog escalates on within one cycle.
         # The agent saying so directly beats a detector inferring it twenty
@@ -1036,12 +1118,15 @@ def call(name, args, cfg, allow_verify, role=None, project_scope=None):
         # the standing report may be addressed by a name the architect's mail had before (#72)
         markers = [f"-{impl}-to-{name}-{kind.upper()}-" for name in A.architect_mail_names(cfg)]
         dup = None
-        for m in A.mailbox(root, box):
+        for m in A.mailbox(root, directory):
+            path = os.path.join(directory, m)
+            if not _is_regular_mail_file(path):
+                continue
             if any(marker in m for marker in markers) and \
-                    A._report_summary(os.path.join(root, box, m)) == args["summary"].strip():
+                    A._report_summary(path) == args["summary"].strip():
                 dup = m
         if dup:
-            n = A.bump_repeat(os.path.join(root, box, dup), cfg)
+            n = A.bump_repeat(os.path.join(directory, dup), cfg)
             return _attach_project(
                 {"written": dup, "repeated": n, "escalates": kind == "blocked",
                  "delivered_to_phone": 0,
