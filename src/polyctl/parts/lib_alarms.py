@@ -400,6 +400,9 @@ PROJECT_FILES = {
     "escalate-log": "escalate-{key}.log",
     "refill-log": "refill-{key}.log",
     "hunt-log": "hunt-{key}.log",
+    # The watchdog's scheduled catch-up: its log, and the exit status the next cycle reads.
+    "catchup-log": "catchup-log-{key}",
+    "catchup-status": "catchup-status-{key}",
     "doctor-log": "doctor-{key}.log",
     "doctor-runs": "doctor-{key}.json",
     "telegram-log": "telegram-{key}.log",

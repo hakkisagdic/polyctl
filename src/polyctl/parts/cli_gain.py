@@ -169,7 +169,8 @@ def _gain_quota(cfg):
     if account.get("error") or account.get("expired"):
         return {"adapter": ident, "readable": True,
                 "error": account.get("error") or "the account's token expired"}
-    used, limit = float(account.get("used") or 0), float(account.get("limit") or 0)
+    raw_limit = account.get("limit")
+    used, limit = float(account.get("used") or 0), float(raw_limit or 0)
     return {"adapter": ident, "readable": True, "used": used, "limit": limit,
             "percent": round(100 * used / limit, 1) if limit else None,
             "plan": account.get("plan"), "reset_at": account.get("reset_at")}

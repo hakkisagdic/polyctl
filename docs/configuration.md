@@ -85,6 +85,8 @@ project is not this key: its directory is `root` on an entry of `secondary`.
 | `decisions.human_after_minutes` | `15` | project | minutes an open decision waits before it rings a person |
 | `waivers.default_hours` | `24` | project | hours a review waiver stays open when --hours is not given |
 | `waivers.max_hours` | `168` | project | the longest a review waiver may be granted for |
+| `catchup.every_hours` | `0` | project | hours between catch-ups the watchdog starts; 0: never, and a person runs polyctl catchup. A scheduled catch-up spends the reviewer's quota |
+| `catchup.limit` | `1` | project | reviews and gate re-runs one scheduled catch-up may start |
 | `alarms.red_after_minutes` | `60` | project | minutes an orange alarm stands before it turns red and sends one e-mail |
 | `fanout.max_agents` | `12` | project | the most agents one fan-out may start |
 | `fanout.per_agent_tokens` | `50000` | project | the token budget each fanned-out agent is given |

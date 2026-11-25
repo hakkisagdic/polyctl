@@ -12,6 +12,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+### Behaviour changes
+
+- When `catchup.every_hours` is above 0 and a review or gates waiver is open, the watchdog starts one detached `polyctl catchup --limit` (`catchup.limit`) that spends the reviewer's quota. The default `0` starts none, and a person runs `polyctl catchup` as before. Exit 1 tells a person once (`catchup-failed`, six hours); exit 3 waits out the interval ([watchdog](docs/watchdog.md), [configuration](docs/configuration.md)).
+
 ## [0.8.0] - 2026-11-22
 
 - The hosted `tests` workflow is one job set: Ubuntu on Python 3.9 and 3.12 for every push to main and every pull request, with a pip cache; the weekly macOS run and the on-demand lanes are gone, and macOS or Windows runs start by hand from a branch that adds them (the owner's Actions decision of 22 Nov 2026).

@@ -662,7 +662,7 @@ over the earlier, and an acceptance that landed during another was dropped by it
   `harness-config`; its scheduled run pages a person under the watchdog's own alarm.
 - The watchdog names them to a person each cycle, in one alarm that rings once for what the changes hold
   and climbs the ladder while they stand ([alarms.md](alarms.md)). Before each turn it would start it
-  reads them again, as it reads the hold: no architect wake, refill, nudge or bug hunt starts while one
+  reads them again, as it reads the hold: no architect wake, refill, nudge, bug hunt or scheduled catch-up starts while one
   stands unseen, and the cycle's trace says why ([watchdog.md](watchdog.md)).
 - `polyctl lane start` refuses while one stands, and a lane's `lane.post_create` command is not run when one
   appears while git makes the lane ([parallel.md](parallel.md)).
@@ -936,7 +936,7 @@ the installation outside the tree. Each `pyvenv.cfg` in the tree is read as conf
 every ignored folder for an installation, and a person who runs a program an agent left in the tree runs that
 agent's code: what polyctl holds is what it, and the turns it starts, would run.
 
-A child polyctl itself starts as `python -m polyctl` - the watchdog's hunt, a submitted review's runner, the MCP server's
+A child polyctl itself starts as `python -m polyctl` - the watchdog's hunt, its scheduled catch-up, a submitted review's runner, the MCP server's
 verify, init's watchdog install - starts in polyctl's own folder in the person's home and asks Python for its safe path:
 `-m` puts the working directory first on the import path, and started in the project such a child imported a
 `json.py` or a `polyctl/` package left at its root in place of the standard library's or polyctl's own (CHILD-CWD).

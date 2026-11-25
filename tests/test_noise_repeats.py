@@ -94,12 +94,19 @@ def _wakes(world, monkeypatch, clock, failure):
 
     class _Proc:
         pid = 99999
+        returncode = 0
+
+        def __init__(self, text=False):
+            self._text = text
+
+        def communicate(self, *a, **k):
+            return ("", "") if self._text else (b"", b"")
 
     def popen(argv, **kw):
         world.spawned.append(argv)
         if isinstance(argv, list) and argv and str(argv[0]).endswith("/claude"):
             started.append({"at": int(clock[0]), "text": failure(len(started) + 1)})
-        return _Proc()
+        return _Proc(bool(kw.get("text") or kw.get("encoding") or kw.get("universal_newlines")))
 
     def read(log_path):
         last = started[-1] if started else None
